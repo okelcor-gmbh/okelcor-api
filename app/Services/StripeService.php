@@ -54,6 +54,21 @@ class StripeService
             ];
         }
 
+        // Apply discount coupon when a promo code reduced the order total.
+        // Stripe does not accept negative line items, so we create a one-time
+        // coupon with amount_off and attach it via discounts[].
+        $discountAmount = (float) ($orderData['discount_amount'] ?? 0);
+        if ($discountAmount > 0) {
+            $currency = strtolower((string) ($orderData['currency'] ?? config('services.stripe.currency', 'eur')));
+            $coupon   = $this->stripe->coupons->create([
+                'amount_off' => (int) round($discountAmount * 100),
+                'currency'   => $currency,
+                'duration'   => 'once',
+                'name'       => $orderData['discount_label'] ?? 'Discount',
+            ]);
+            $payload['discounts'] = [['coupon' => $coupon->id]];
+        }
+
         Log::info('Stripe checkout success_url', [
             'success_url' => $successUrl,
             'order_ref'   => $orderRef,
@@ -134,6 +149,19 @@ class StripeService
             'metadata'            => ['order_ref' => $orderRef],
             'payment_intent_data' => ['metadata' => ['order_ref' => $orderRef]],
         ];
+
+        // Apply discount coupon when a promo code was used on this order.
+        // The line items carry full unit prices; the coupon reduces the Stripe
+        // collected total to match the stored order.total exactly.
+        if ((float) $order->discount_amount > 0) {
+            $coupon = $this->stripe->coupons->create([
+                'amount_off' => (int) round((float) $order->discount_amount * 100),
+                'currency'   => $currency,
+                'duration'   => 'once',
+                'name'       => $order->discount_label ?? 'Discount',
+            ]);
+            $payload['discounts'] = [['coupon' => $coupon->id]];
+        }
 
         Log::info('Stripe quote-order checkout session creating', [
             'order_ref'   => $orderRef,

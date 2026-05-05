@@ -106,6 +106,12 @@
                         <td style="padding:10px 16px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#171a20;text-align:right;">€{{ number_format((float) $order->delivery_cost, 2) }}</td>
                     </tr>
                     @endif
+                    @if ((float) ($order->discount_amount ?? 0) > 0)
+                    <tr>
+                        <td colspan="3" style="padding:10px 16px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#5c5e62;text-align:right;">{{ $order->discount_label ?? 'Discount' }}</td>
+                        <td style="padding:10px 16px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#2e7d32;text-align:right;">-€{{ number_format((float) $order->discount_amount, 2) }}</td>
+                    </tr>
+                    @endif
                     <tr>
                         <td colspan="3" style="padding:10px 16px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#5c5e62;text-align:right;">@if ((float) $order->tax_amount > 0)VAT ({{ number_format((float) $order->tax_rate, 0) }}%)@elseif ($order->is_reverse_charge)VAT &mdash; reverse charge (0%)@else VAT &mdash; exempt (0%)@endif</td>
                         <td style="padding:10px 16px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#171a20;text-align:right;">€{{ number_format((float) ($order->tax_amount ?? 0), 2) }}</td>

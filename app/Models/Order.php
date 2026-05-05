@@ -23,6 +23,9 @@ class Order extends Model
         'payment_status',
         'mode',
         'admin_notes',
+        'promo_code',
+        'discount_amount',
+        'discount_label',
         'ip_address',
         'vat_number',
         'vat_valid',
@@ -47,6 +50,7 @@ class Order extends Model
     protected $casts = [
         'subtotal'          => 'decimal:2',
         'delivery_cost'     => 'decimal:2',
+        'discount_amount'   => 'decimal:2',
         'total'             => 'decimal:2',
         'tax_rate'          => 'decimal:2',
         'tax_amount'        => 'decimal:2',

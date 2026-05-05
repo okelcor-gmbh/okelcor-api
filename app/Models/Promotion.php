@@ -8,6 +8,7 @@ class Promotion extends Model
 {
     protected $fillable = [
         'title',
+        'code',
         'subheadline',
         'short_text',
         'emoji',

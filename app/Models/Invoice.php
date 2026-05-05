@@ -21,6 +21,9 @@ class Invoice extends Model
         'tax_rate',
         'tax_amount',
         'is_reverse_charge',
+        'promo_code',
+        'discount_amount',
+        'discount_label',
     ];
 
     protected $casts = [
@@ -31,6 +34,7 @@ class Invoice extends Model
         'tax_rate'          => 'decimal:2',
         'tax_amount'        => 'decimal:2',
         'is_reverse_charge' => 'boolean',
+        'discount_amount'   => 'decimal:2',
     ];
 
     public function customer(): BelongsTo

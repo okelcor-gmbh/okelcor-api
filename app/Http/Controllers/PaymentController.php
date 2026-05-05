@@ -9,6 +9,7 @@ use App\Models\Invoice;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Product;
+use App\Services\PromoCodeService;
 use App\Services\StripeService;
 use App\Services\TaxService;
 use App\Services\VatValidationService;
@@ -29,6 +30,7 @@ class PaymentController extends Controller
         private StripeService $stripeService,
         private VatValidationService $vatService,
         private TaxService $taxService,
+        private PromoCodeService $promoService,
     ) {}
 
     /**
@@ -61,6 +63,7 @@ class PaymentController extends Controller
             'paymentMethod'          => ['sometimes', 'nullable', 'string', 'in:stripe'],
             'payment_method'         => ['sometimes', 'nullable', 'string', 'in:stripe'],
             'vat_number'             => ['sometimes', 'nullable', 'string', 'max:20'],
+            'promo_code'             => ['sometimes', 'nullable', 'string', 'max:50'],
             'items'                  => ['required', 'array', 'min:1'],
             'items.*.product'        => ['required', 'array'],
             'items.*.product.id'     => ['required', 'integer'],
@@ -110,19 +113,54 @@ class PaymentController extends Controller
             ];
         }
 
-        // Calculate tax before the transaction — subtotal is known, no DB needed
+        // Resolve customer type (used for tax and promo eligibility)
         $customerType = $this->resolveCustomerType($request);
+
+        // --- Promo code ---
+        $promoCode      = isset($validated['promo_code']) ? strtoupper(trim((string) $validated['promo_code'])) : null;
+        $discountAmount = 0.0;
+        $discountLabel  = null;
+
+        if ($promoCode) {
+            $promotion = $this->promoService->resolve($promoCode);
+
+            if (! $promotion) {
+                return response()->json(['message' => 'Invalid or expired promo code.'], 422);
+            }
+
+            // B2B customers cannot use B2C-only promotions
+            $target = $promotion->customer_type_target;
+            if ($customerType === 'b2b' && $target === 'b2c') {
+                return response()->json([
+                    'message' => 'This promotion is only available for personal/B2C customers.',
+                ], 422);
+            }
+
+            $discountAmount = $this->promoService->calculateDiscount($promotion, $lineItems);
+
+            if ($discountAmount <= 0) {
+                return response()->json([
+                    'message' => 'Your cart contains no items eligible for promo code ' . $promoCode . '.',
+                ], 422);
+            }
+
+            $discountLabel = $this->promoService->label($promotion);
+        }
+
+        // Calculate tax after discount — delivery_cost is always 0 on Stripe cart checkout
         $vatValidBool = $vatValid !== null ? (bool) $vatValid : null;
         $tax          = $this->taxService->calculate($delivery['country'], $vatValidBool, $customerType);
-        $taxAmount    = round($subtotal * $tax['tax_rate'] / 100, 2);
-        $total        = $subtotal + $taxAmount; // delivery_cost is always 0 on Stripe checkout
+        $taxableBase  = $subtotal - $discountAmount;
+        $taxAmount    = round($taxableBase * $tax['tax_rate'] / 100, 2);
+        $total        = $taxableBase + $taxAmount;
 
         $ref = $this->generateRef();
 
         try {
             $order = DB::transaction(function () use (
                 $delivery, $lineItems, $subtotal, $total, $ref, $request,
-                $vatNumber, $vatValid, $tax, $taxAmount
+                $vatNumber, $vatValid, $tax, $taxAmount,
+                $promoCode, $discountAmount, $discountLabel
             ) {
                 $order = Order::create([
                     'ref'               => $ref,
@@ -136,6 +174,9 @@ class PaymentController extends Controller
                     'payment_method'    => 'stripe',
                     'subtotal'          => $subtotal,
                     'delivery_cost'     => 0.00,
+                    'discount_amount'   => $discountAmount,
+                    'discount_label'    => $discountLabel,
+                    'promo_code'        => $promoCode,
                     'total'             => $total,
                     'status'            => 'pending',
                     'payment_status'    => 'pending',
@@ -169,11 +210,13 @@ class PaymentController extends Controller
             }
 
             $result = $this->stripeService->createCheckoutSession([
-                'ref'            => $ref,
-                'order_ref'      => $ref,
-                'customer_email' => $delivery['email'],
-                'currency'       => $currency,
-                'items'          => $stripeItems,
+                'ref'             => $ref,
+                'order_ref'       => $ref,
+                'customer_email'  => $delivery['email'],
+                'currency'        => $currency,
+                'items'           => $stripeItems,
+                'discount_amount' => $discountAmount,
+                'discount_label'  => $discountLabel,
             ]);
 
             $order->update(['payment_session_id' => $result['checkout_session_id']]);
@@ -213,11 +256,13 @@ class PaymentController extends Controller
             'items'            => ['required', 'array', 'min:1'],
             'items.*.price'    => ['required', 'numeric', 'min:0'],
             'items.*.quantity' => ['required', 'integer', 'min:1'],
+            'items.*.brand'    => ['sometimes', 'nullable', 'string', 'max:200'],
             'delivery_cost'    => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'country'          => ['sometimes', 'nullable', 'string', 'max:100'],
             'vat_number'       => ['sometimes', 'nullable', 'string', 'max:30'],
             'vat_valid'        => ['sometimes', 'nullable', 'boolean'],
             'customer_type'    => ['sometimes', 'nullable', 'string', 'in:b2b,b2c'],
+            'promo_code'       => ['sometimes', 'nullable', 'string', 'max:50'],
         ]);
 
         $subtotalNet  = collect($validated['items'])->sum(fn ($i) => (float) $i['price'] * (int) $i['quantity']);
@@ -239,8 +284,44 @@ class PaymentController extends Controller
         // Authenticated customer's customer_type takes precedence over the request field
         $customerType = $this->resolveCustomerType($request) ?? ($validated['customer_type'] ?? null);
 
+        // --- Promo code ---
+        $promoCode      = isset($validated['promo_code']) ? strtoupper(trim((string) $validated['promo_code'])) : null;
+        $discountAmount = 0.0;
+        $discountLabel  = null;
+
+        if ($promoCode) {
+            $promotion = $this->promoService->resolve($promoCode);
+
+            if (! $promotion) {
+                return response()->json(['message' => 'Invalid or expired promo code.'], 422);
+            }
+
+            if ($customerType === 'b2b' && $promotion->customer_type_target === 'b2c') {
+                return response()->json([
+                    'message' => 'This promotion is only available for personal/B2C customers.',
+                ], 422);
+            }
+
+            // Map preview items to the shape PromoCodeService expects
+            $previewItems = array_map(fn ($i) => [
+                'brand'      => $i['brand'] ?? null,
+                'unit_price' => (float) $i['price'],
+                'quantity'   => (int) $i['quantity'],
+            ], $validated['items']);
+
+            $discountAmount = $this->promoService->calculateDiscount($promotion, $previewItems);
+
+            if ($discountAmount <= 0) {
+                return response()->json([
+                    'message' => 'Your cart contains no items eligible for promo code ' . $promoCode . '.',
+                ], 422);
+            }
+
+            $discountLabel = $this->promoService->label($promotion);
+        }
+
         $tax         = $this->taxService->calculate($validated['country'] ?? null, $vatValid, $customerType);
-        $taxableBase = $subtotalNet + $deliveryCost;
+        $taxableBase = $subtotalNet - $discountAmount + $deliveryCost;
         $taxAmount   = round($taxableBase * $tax['tax_rate'] / 100, 2);
         $total       = round($taxableBase + $taxAmount, 2);
 
@@ -248,6 +329,9 @@ class PaymentController extends Controller
             'data' => [
                 'subtotal_net'      => round($subtotalNet, 2),
                 'delivery_cost'     => round($deliveryCost, 2),
+                'discount_amount'   => $discountAmount,
+                'discount_label'    => $discountLabel,
+                'promo_code'        => $promoCode,
                 'tax_rate'          => $tax['tax_rate'],
                 'tax_amount'        => $taxAmount,
                 'tax_treatment'     => $tax['tax_treatment'],
@@ -455,6 +539,9 @@ class PaymentController extends Controller
                         'tax_rate'          => $order->tax_rate,
                         'tax_amount'        => $order->tax_amount,
                         'is_reverse_charge' => $order->is_reverse_charge,
+                        'promo_code'        => $order->promo_code,
+                        'discount_amount'   => (float) $order->discount_amount > 0 ? $order->discount_amount : null,
+                        'discount_label'    => $order->discount_label,
                     ]);
                 });
 

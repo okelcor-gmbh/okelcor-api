@@ -9,6 +9,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\OrderLog;
 use App\Models\QuoteRequest;
+use App\Services\PromoCodeService;
 use App\Services\StripeService;
 use App\Services\TaxService;
 use Illuminate\Http\JsonResponse;
@@ -134,7 +135,47 @@ class AdminQuoteRequestController extends Controller
         $customerType = $this->inferCustomerType($quote);
         $tax          = app(TaxService::class)->calculate($country, $vatValid, $customerType);
 
-        $order = DB::transaction(function () use ($quote, $delivery, $items, $deliveryCost, $paymentMethod, $validated, $request, $tax) {
+        // Optional promo code — apply same rules as Stripe cart checkout
+        $promoCode      = isset($validated['promo_code']) ? strtoupper(trim((string) $validated['promo_code'])) : null;
+        $discountAmount = 0.0;
+        $discountLabel  = null;
+
+        if ($promoCode) {
+            $promotion = app(PromoCodeService::class)->resolve($promoCode);
+
+            if (! $promotion) {
+                return response()->json(['message' => 'Invalid or expired promo code.'], 422);
+            }
+
+            if ($customerType === 'b2b' && $promotion->customer_type_target === 'b2c') {
+                return response()->json([
+                    'message' => 'This promotion is only available for personal/B2C customers.',
+                ], 422);
+            }
+
+            // Map quote items to the shape PromoCodeService expects
+            $promoItems = array_map(fn ($i) => [
+                'brand'      => $i['brand'],
+                'unit_price' => (float) $i['unit_price'],
+                'quantity'   => (int) $i['quantity'],
+            ], $items);
+
+            $discountAmount = app(PromoCodeService::class)->calculateDiscount($promotion, $promoItems);
+
+            if ($discountAmount <= 0) {
+                return response()->json([
+                    'message' => 'No items in this order are eligible for promo code ' . $promoCode . '.',
+                ], 422);
+            }
+
+            $discountLabel = app(PromoCodeService::class)->label($promotion);
+        }
+
+        $order = DB::transaction(function () use (
+            $quote, $delivery, $items, $deliveryCost, $paymentMethod,
+            $validated, $request, $tax,
+            $promoCode, $discountAmount, $discountLabel
+        ) {
             $subtotal = 0.0;
 
             $ref = $this->generateRef();
@@ -151,6 +192,9 @@ class AdminQuoteRequestController extends Controller
                 'payment_method' => $paymentMethod,
                 'subtotal'       => 0,  // updated below after items
                 'delivery_cost'  => $deliveryCost,
+                'discount_amount' => $discountAmount,
+                'discount_label' => $discountLabel,
+                'promo_code'     => $promoCode,
                 'total'          => 0,  // updated below
                 'status'         => 'confirmed',
                 'payment_status' => 'pending',
@@ -178,7 +222,7 @@ class AdminQuoteRequestController extends Controller
                 ]);
             }
 
-            $taxableBase = $subtotal + $deliveryCost;
+            $taxableBase = $subtotal - $discountAmount + $deliveryCost;
             $taxAmount   = round($taxableBase * $tax['tax_rate'] / 100, 2);
             $total       = $taxableBase + $taxAmount;
 

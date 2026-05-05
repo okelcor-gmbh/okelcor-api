@@ -32,6 +32,7 @@ class ConvertQuoteToOrderRequest extends FormRequest
             'delivery_cost'         => ['nullable', 'numeric', 'min:0'],
             'payment_method'        => ['nullable', 'string', 'max:100'],
             'admin_notes'           => ['nullable', 'string'],
+            'promo_code'            => ['nullable', 'string', 'max:50'],
         ];
     }
 }

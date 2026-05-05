@@ -236,6 +236,12 @@
             <td class="amount">&euro;{{ number_format((float) $order->delivery_cost, 2) }}</td>
         </tr>
         @endif
+        @if ((float) ($order->discount_amount ?? 0) > 0)
+        <tr>
+            <td class="label">{{ $order->discount_label ?? 'Discount' }}</td>
+            <td class="amount" style="color:#2e7d32;">&minus;&euro;{{ number_format((float) $order->discount_amount, 2) }}</td>
+        </tr>
+        @endif
         @if ($order->tax_treatment !== null)
         <tr>
             @if ((float) $order->tax_amount > 0)
