@@ -30,7 +30,8 @@
     <tr>
         <td style="padding:32px 36px 0 36px;">
             <p style="margin:0 0 6px 0;font-family:Arial,Helvetica,sans-serif;font-size:18px;font-weight:700;color:#171a20;">New quote request received</p>
-            <p style="margin:0 0 24px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#5c5e62;line-height:1.6;">A new quote request has been submitted. Details are below.</p>
+            <p style="margin:0 0 12px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#5c5e62;line-height:1.6;">A new quote request has been submitted. Details are below.</p>
+            <p style="margin:0 0 24px 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#2e7d32;line-height:1.6;background-color:#f1f8e9;border-left:3px solid #66bb6a;padding:10px 14px;">&#8594; Reply directly to this email to contact the customer.</p>
 
             <!-- Contact info -->
             <p style="margin:0 0 10px 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;color:#171a20;">Contact</p>
