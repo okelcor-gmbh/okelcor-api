@@ -31,19 +31,28 @@ class AdminPromotionController extends Controller
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'title'        => ['required', 'string', 'max:200'],
-            'subheadline'  => ['nullable', 'string', 'max:300'],
-            'short_text'   => ['nullable', 'string', 'max:255'],
-            'emoji'        => ['nullable', 'string', 'max:16'],
-            'placement'    => ['nullable', 'in:announcement_bar,shop_inline,both,shop_hero'],
-            'button_text'  => ['nullable', 'string', 'max:100'],
-            'button_link'  => ['nullable', 'string', 'max:300'],
-            'is_active'    => ['nullable', 'boolean'],
-            'start_date'   => ['nullable', 'date'],
-            'end_date'     => ['nullable', 'date', 'after_or_equal:start_date'],
+            'title'                 => ['required', 'string', 'max:200'],
+            'subheadline'           => ['nullable', 'string', 'max:300'],
+            'short_text'            => ['nullable', 'string', 'max:255'],
+            'emoji'                 => ['nullable', 'string', 'max:16'],
+            'placement'             => ['nullable', 'in:announcement_bar,shop_inline,both,shop_hero'],
+            'brand_name'            => ['nullable', 'string', 'max:100'],
+            'customer_type_target'  => ['nullable', 'in:b2b,b2c'],
+            'discount_pct'          => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'promo_code'            => ['nullable', 'string', 'max:50'],
+            'button_text'           => ['nullable', 'string', 'max:100'],
+            'button_link'           => ['nullable', 'string', 'max:300'],
+            'is_active'             => ['nullable', 'boolean'],
+            'start_date'            => ['nullable', 'date'],
+            'end_date'              => ['nullable', 'date', 'after_or_equal:start_date'],
         ]);
 
         $data['placement'] ??= 'shop_inline';
+
+        if (array_key_exists('promo_code', $data)) {
+            $data['code'] = $data['promo_code'] ? strtoupper(trim($data['promo_code'])) : null;
+            unset($data['promo_code']);
+        }
 
         $promotion = Promotion::create($data);
 
@@ -58,17 +67,26 @@ class AdminPromotionController extends Controller
         $promotion = Promotion::findOrFail($id);
 
         $data = $request->validate([
-            'title'        => ['sometimes', 'string', 'max:200'],
-            'subheadline'  => ['nullable', 'string', 'max:300'],
-            'short_text'   => ['nullable', 'string', 'max:255'],
-            'emoji'        => ['nullable', 'string', 'max:16'],
-            'placement'    => ['nullable', 'in:announcement_bar,shop_inline,both,shop_hero'],
-            'button_text'  => ['nullable', 'string', 'max:100'],
-            'button_link'  => ['nullable', 'string', 'max:300'],
-            'is_active'    => ['nullable', 'boolean'],
-            'start_date'   => ['nullable', 'date'],
-            'end_date'     => ['nullable', 'date', 'after_or_equal:start_date'],
+            'title'                 => ['sometimes', 'string', 'max:200'],
+            'subheadline'           => ['nullable', 'string', 'max:300'],
+            'short_text'            => ['nullable', 'string', 'max:255'],
+            'emoji'                 => ['nullable', 'string', 'max:16'],
+            'placement'             => ['nullable', 'in:announcement_bar,shop_inline,both,shop_hero'],
+            'brand_name'            => ['nullable', 'string', 'max:100'],
+            'customer_type_target'  => ['nullable', 'in:b2b,b2c'],
+            'discount_pct'          => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'promo_code'            => ['nullable', 'string', 'max:50'],
+            'button_text'           => ['nullable', 'string', 'max:100'],
+            'button_link'           => ['nullable', 'string', 'max:300'],
+            'is_active'             => ['nullable', 'boolean'],
+            'start_date'            => ['nullable', 'date'],
+            'end_date'              => ['nullable', 'date', 'after_or_equal:start_date'],
         ]);
+
+        if (array_key_exists('promo_code', $data)) {
+            $data['code'] = $data['promo_code'] ? strtoupper(trim($data['promo_code'])) : null;
+            unset($data['promo_code']);
+        }
 
         $promotion->update($data);
 
@@ -131,19 +149,24 @@ class AdminPromotionController extends Controller
     private function format(Promotion $p): array
     {
         return [
-            'id'           => $p->id,
-            'title'        => $p->title,
-            'subheadline'  => $p->subheadline,
-            'short_text'   => $p->short_text,
-            'emoji'        => $p->emoji,
-            'button_text'  => $p->button_text,
-            'button_link'  => $p->button_link,
-            'image_url'    => $p->image_url ? url(Storage::url($p->image_url)) : null,
-            'placement'    => $p->placement ?? 'shop_inline',
-            'is_active'    => $p->is_active,
-            'start_date'   => $p->start_date?->toDateString(),
-            'end_date'     => $p->end_date?->toDateString(),
-            'created_at'   => $p->created_at?->toIso8601String(),
+            'id'                    => $p->id,
+            'title'                 => $p->title,
+            'subheadline'           => $p->subheadline,
+            'short_text'            => $p->short_text,
+            'emoji'                 => $p->emoji,
+            'placement'             => $p->placement ?? 'shop_inline',
+            'brand_name'            => $p->brand_name,
+            'customer_type_target'  => $p->customer_type_target,
+            'discount_pct'          => $p->discount_pct !== null ? (float) $p->discount_pct : null,
+            'code'                  => $p->code,
+            'promo_code'            => $p->code,
+            'button_text'           => $p->button_text,
+            'button_link'           => $p->button_link,
+            'image_url'             => $p->image_url ? url(Storage::url($p->image_url)) : null,
+            'is_active'             => $p->is_active,
+            'start_date'            => $p->start_date?->toDateString(),
+            'end_date'              => $p->end_date?->toDateString(),
+            'created_at'            => $p->created_at?->toIso8601String(),
         ];
     }
 }

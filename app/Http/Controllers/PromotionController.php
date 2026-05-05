@@ -39,6 +39,8 @@ class PromotionController extends Controller
             'brand_name'            => $p->brand_name,
             'customer_type_target'  => $p->customer_type_target,
             'discount_pct'          => $p->discount_pct !== null ? (float) $p->discount_pct : null,
+            'code'                  => $p->code,
+            'promo_code'            => $p->code,
             'button_text'           => $p->button_text,
             'button_link'           => $p->button_link,
             'image_url'             => $p->image_url ? url(Storage::url($p->image_url)) : null,
