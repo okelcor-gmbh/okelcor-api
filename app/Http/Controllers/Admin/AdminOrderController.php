@@ -63,7 +63,7 @@ class AdminOrderController extends Controller
 
     public function show(int $id): JsonResponse
     {
-        $order = Order::with(['items', 'logs'])->findOrFail($id);
+        $order = Order::with(['items', 'logs', 'shipmentEvents'])->findOrFail($id);
 
         return response()->json([
             'data'    => $this->formatOrderDetail($order),
@@ -76,6 +76,7 @@ class AdminOrderController extends Controller
         $request->validate([
             'status'             => ['required', Rule::in(['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled'])],
             'carrier'            => ['sometimes', 'nullable', 'string', 'max:100'],
+            'carrier_type'       => ['sometimes', 'nullable', Rule::in(['sea', 'air', 'dhl', 'road', 'bus'])],
             'tracking_number'    => ['sometimes', 'nullable', 'string', 'max:100'],
             'container_number'   => ['sometimes', 'nullable', 'string', 'max:30'],
             'estimated_delivery' => ['sometimes', 'nullable', 'date'],
@@ -140,6 +141,7 @@ class AdminOrderController extends Controller
         $request->validate([
             'status'             => ['required', Rule::in(['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled'])],
             'carrier'            => ['sometimes', 'nullable', 'string', 'max:100'],
+            'carrier_type'       => ['sometimes', 'nullable', Rule::in(['sea', 'air', 'dhl', 'road', 'bus'])],
             'tracking_number'    => ['sometimes', 'nullable', 'string', 'max:100'],
             'container_number'   => ['sometimes', 'nullable', 'string', 'max:30'],
             'estimated_delivery' => ['sometimes', 'nullable', 'date'],
@@ -365,6 +367,16 @@ class AdminOrderController extends Controller
                 'unit_price'   => (float) $i->unit_price,
                 'subtotal'     => (float) $i->line_total,
             ])->values(),
+            'shipment_events'    => $o->relationLoaded('shipmentEvents')
+                ? $o->shipmentEvents->map(fn ($e) => [
+                    'id'           => $e->id,
+                    'event_date'   => $e->event_date?->toDateString(),
+                    'location'     => $e->location,
+                    'status_label' => $e->status_label,
+                    'description'  => $e->description,
+                    'created_at'   => $e->created_at?->toIso8601String(),
+                ])->values()
+                : [],
             'logs'               => $o->relationLoaded('logs')
                 ? $o->logs->map(fn ($l) => [
                     'id'               => $l->id,

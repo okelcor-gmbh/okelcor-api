@@ -67,6 +67,13 @@ class Order extends Model
         return $this->hasMany(OrderLog::class)->orderBy('created_at');
     }
 
+    public function shipmentEvents()
+    {
+        return $this->hasMany(OrderShipmentEvent::class)
+            ->orderBy('event_date')
+            ->orderBy('created_at');
+    }
+
     public function quoteRequest()
     {
         return $this->hasOne(QuoteRequest::class);

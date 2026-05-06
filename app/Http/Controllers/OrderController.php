@@ -31,7 +31,7 @@ class OrderController extends Controller
             'email' => ['required', 'email', 'max:255'],
         ]);
 
-        $orders = Order::with('items')
+        $orders = Order::with(['items', 'shipmentEvents'])
             ->where('customer_email', $request->email)
             ->orderByDesc('created_at')
             ->get();
@@ -51,7 +51,7 @@ class OrderController extends Controller
      */
     public function show(string $ref): JsonResponse
     {
-        $order = Order::with('items')
+        $order = Order::with(['items', 'shipmentEvents'])
             ->where('ref', $ref)
             ->firstOrFail();
 
@@ -77,6 +77,16 @@ class OrderController extends Controller
             'estimated_delivery' => $o->estimated_delivery,
             'eta'                => $o->eta,
             'created_at'         => $o->created_at?->toIso8601String(),
+            'shipment_events'    => $o->relationLoaded('shipmentEvents')
+                ? $o->shipmentEvents->map(fn ($e) => [
+                    'id'           => $e->id,
+                    'event_date'   => $e->event_date?->toDateString(),
+                    'location'     => $e->location,
+                    'status_label' => $e->status_label,
+                    'description'  => $e->description,
+                    'created_at'   => $e->created_at?->toIso8601String(),
+                ])->values()
+                : [],
             'items'             => $o->items->map(fn ($i) => [
                 'product_id'   => $i->product_id,
                 'product_name' => $i->name,

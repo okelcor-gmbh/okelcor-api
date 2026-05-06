@@ -25,6 +25,7 @@ use App\Http\Controllers\Admin\AdminContactController;
 use App\Http\Controllers\Admin\AdminHeroSlideController;
 use App\Http\Controllers\Admin\AdminNewsletterController;
 use App\Http\Controllers\Admin\AdminOrderController;
+use App\Http\Controllers\Admin\AdminOrderShipmentEventController;
 use App\Http\Controllers\Admin\OrderImportController;
 use App\Http\Controllers\Admin\AdminProductController;
 use App\Http\Controllers\Admin\AdminQuoteRequestController;
@@ -311,6 +312,9 @@ Route::prefix('v1')->group(function () {
             Route::put('orders/{id}', [AdminOrderController::class, 'update']);
             Route::patch('orders/{id}/status', [AdminOrderController::class, 'updateStatus']);
             Route::post('orders/{id}/mark-paid', [AdminOrderController::class, 'markPaid']);
+            Route::post('orders/{id}/shipment-events', [AdminOrderShipmentEventController::class, 'store']);
+            Route::put('orders/{id}/shipment-events/{event}', [AdminOrderShipmentEventController::class, 'update']);
+            Route::delete('orders/{id}/shipment-events/{event}', [AdminOrderShipmentEventController::class, 'destroy']);
             Route::middleware('admin.role:super_admin')->group(function () {
                 Route::delete('orders/{id}', [AdminOrderController::class, 'destroy']);
             });
