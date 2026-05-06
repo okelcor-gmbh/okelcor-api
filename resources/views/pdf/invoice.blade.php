@@ -284,16 +284,24 @@
                         <td style="padding:3px 0;font-size:11px;font-weight:700;color:#171a20;">{{ config('payment.bank_transfer.account_name') }}</td>
                     </tr>
                     <tr>
+                        <td style="padding:3px 12px 3px 0;font-size:11px;color:#5c5e62;">Account Number</td>
+                        <td style="padding:3px 0;font-size:11px;font-weight:700;color:#171a20;">{{ config('payment.bank_transfer.account_number') }}</td>
+                    </tr>
+                    <tr>
                         <td style="padding:3px 12px 3px 0;font-size:11px;color:#5c5e62;">IBAN</td>
                         <td style="padding:3px 0;font-size:11px;font-weight:700;color:#171a20;">{{ config('payment.bank_transfer.iban') }}</td>
                     </tr>
                     <tr>
-                        <td style="padding:3px 12px 3px 0;font-size:11px;color:#5c5e62;">SWIFT / BIC</td>
+                        <td style="padding:3px 12px 3px 0;font-size:11px;color:#5c5e62;">BIC / SWIFT</td>
                         <td style="padding:3px 0;font-size:11px;font-weight:700;color:#171a20;">{{ config('payment.bank_transfer.swift_bic') }}</td>
                     </tr>
                     <tr>
                         <td style="padding:3px 12px 3px 0;font-size:11px;color:#5c5e62;">Bank</td>
                         <td style="padding:3px 0;font-size:11px;color:#171a20;">{{ config('payment.bank_transfer.bank_name') }}, {{ config('payment.bank_transfer.bank_address') }}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding:6px 12px 0 0;font-size:11px;color:#5c5e62;">Payment Reference</td>
+                        <td style="padding:6px 0 0 0;font-size:11px;font-weight:700;color:#171a20;">{{ $order->ref }}</td>
                     </tr>
                     <tr>
                         <td style="padding:3px 12px 3px 0;font-size:11px;color:#5c5e62;">Delivery Term</td>
@@ -304,8 +312,10 @@
                         <td style="padding:3px 0;font-size:11px;color:#171a20;">{{ config('payment.bank_transfer.terms') }}</td>
                     </tr>
                     <tr>
-                        <td style="padding:6px 12px 0 0;font-size:11px;color:#5c5e62;">Reference</td>
-                        <td style="padding:6px 0 0 0;font-size:11px;font-weight:700;color:#171a20;">{{ $order->ref }}</td>
+                        <td colspan="2" style="padding:6px 0 0 0;font-size:11px;color:#5c5e62;line-height:1.5;">{{ config('payment.bank_transfer.sepa_note') }}</td>
+                    </tr>
+                    <tr>
+                        <td colspan="2" style="padding:3px 0 0 0;font-size:11px;color:#5c5e62;line-height:1.5;">{{ config('payment.bank_transfer.international_note') }}</td>
                     </tr>
                 </table>
             </td>
