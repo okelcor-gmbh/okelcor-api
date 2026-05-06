@@ -3,12 +3,15 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Mail\OrderConfirmation;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderLog;
+use App\Services\InvoiceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\Rule;
 
 class AdminOrderController extends Controller
@@ -170,6 +173,86 @@ class AdminOrderController extends Controller
             ],
             'meta'    => [],
             'message' => 'Status updated successfully.',
+        ]);
+    }
+
+    /**
+     * POST /api/v1/admin/orders/{id}/mark-paid
+     *
+     * Manually confirm a bank transfer payment after the admin has verified
+     * the receipt in Wise/bank account.
+     */
+    public function markPaid(Request $request, int $id): JsonResponse
+    {
+        $request->validate([
+            'confirmation'      => ['required', 'accepted'],
+            'payment_reference' => ['sometimes', 'nullable', 'string', 'max:200'],
+            'admin_note'        => ['sometimes', 'nullable', 'string', 'max:500'],
+        ]);
+
+        $order = Order::with('items')->findOrFail($id);
+
+        if ($order->payment_method !== 'bank_transfer') {
+            return response()->json([
+                'message' => 'Only bank_transfer orders can be manually confirmed.',
+            ], 422);
+        }
+
+        if ($order->payment_status !== 'pending') {
+            return response()->json([
+                'message' => 'Order payment is not pending.',
+                'data'    => ['payment_status' => $order->payment_status],
+            ], 409);
+        }
+
+        $order->update([
+            'payment_status' => 'paid',
+            'status'         => 'confirmed',
+        ]);
+
+        $fresh = $order->fresh(['items']);
+
+        // Invoice — idempotent; won't duplicate if one already exists
+        $invoice = app(InvoiceService::class)->createForOrder($fresh);
+
+        // Customer confirmation email
+        try {
+            Mail::to($fresh->customer_email)->send(new OrderConfirmation($fresh, $invoice));
+            Log::info('Bank transfer payment confirmation email sent', [
+                'order_ref' => $fresh->ref,
+                'email'     => $fresh->customer_email,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Bank transfer payment confirmation email failed', [
+                'order_ref' => $fresh->ref,
+                'error'     => $e->getMessage(),
+            ]);
+        }
+
+        // Audit log
+        $noteParts = array_filter([
+            $request->filled('payment_reference') ? 'Payment reference: ' . $request->payment_reference : null,
+            $request->filled('admin_note') ? $request->admin_note : null,
+        ]);
+
+        $this->writeLog($request, $fresh, 'payment_status_changed', [
+            'old_value' => 'pending',
+            'new_value' => 'paid',
+            'notes'     => implode(' | ', $noteParts) ?: 'Bank transfer payment confirmed by admin.',
+        ]);
+
+        return response()->json([
+            'data' => [
+                'id'             => $fresh->id,
+                'order_ref'      => $fresh->ref,
+                'payment_status' => $fresh->payment_status,
+                'status'         => $fresh->status,
+                'invoice_number' => $invoice?->invoice_number,
+                'invoice_pdf'    => $invoice?->pdf_url
+                    ? url(\Illuminate\Support\Facades\Storage::url($invoice->pdf_url))
+                    : null,
+            ],
+            'message' => 'Payment confirmed successfully.',
         ]);
     }
 

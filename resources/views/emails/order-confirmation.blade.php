@@ -29,7 +29,7 @@
     <tr>
         <td style="padding:32px 36px 0 36px;">
             <p style="margin:0 0 6px 0;font-family:Arial,Helvetica,sans-serif;font-size:18px;font-weight:700;color:#171a20;">Order confirmed</p>
-            @if ($order->payment_method === 'bank_transfer')
+            @if ($order->payment_method === 'bank_transfer' && $order->payment_status !== 'paid')
             <p style="margin:0 0 24px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#5c5e62;line-height:1.6;">Hello {{ explode(' ', trim($order->customer_name))[0] }}, your order has been received. Please use the bank transfer details below to complete your payment.</p>
             @else
             <p style="margin:0 0 24px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#5c5e62;line-height:1.6;">Hello {{ explode(' ', trim($order->customer_name))[0] }}, your payment has been received. We will confirm availability and shipping details shortly.</p>
@@ -47,7 +47,7 @@
                 </tr>
                 <tr>
                     <td style="padding:12px 16px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#5c5e62;background-color:#fafafa;border-bottom:1px solid #eeeeee;">Payment</td>
-                    <td style="padding:12px 16px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#171a20;border-bottom:1px solid #eeeeee;">@if ($order->payment_method === 'bank_transfer')<span style="display:inline-block;padding:2px 10px;background-color:#fff8e1;color:#e65100;border-radius:3px;font-size:12px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;">Pending &mdash; Bank Transfer</span>@else Confirmed @endif</td>
+                    <td style="padding:12px 16px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#171a20;border-bottom:1px solid #eeeeee;">@if ($order->payment_method === 'bank_transfer' && $order->payment_status !== 'paid')<span style="display:inline-block;padding:2px 10px;background-color:#fff8e1;color:#e65100;border-radius:3px;font-size:12px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;">Pending &mdash; Bank Transfer</span>@else Confirmed @endif</td>
                 </tr>
                 @if ($order->carrier)
                 <tr>
@@ -149,7 +149,7 @@
             </table>
             @endif
 
-            @if ($order->payment_method === 'bank_transfer')
+            @if ($order->payment_method === 'bank_transfer' && $order->payment_status !== 'paid')
             <!-- Bank transfer details -->
             <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #e0e0e0;background-color:#fafafa;margin-bottom:32px;">
                 <tr>
