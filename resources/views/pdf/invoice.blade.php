@@ -272,6 +272,47 @@
     </p>
     @endif
 
+    @if ($order->payment_method === 'bank_transfer' && $invoice->status !== 'paid')
+    <!-- Bank transfer payment details -->
+    <table style="width:100%;border-collapse:collapse;margin-bottom:28px;border:1px solid #e0e0e0;background-color:#fafafa;">
+        <tr>
+            <td style="padding:14px 16px;" colspan="2">
+                <p style="margin:0 0 10px 0;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#9e9e9e;">Payment Details</p>
+                <table style="width:100%;border-collapse:collapse;">
+                    <tr>
+                        <td style="padding:3px 12px 3px 0;font-size:11px;color:#5c5e62;width:35%;">Account Name</td>
+                        <td style="padding:3px 0;font-size:11px;font-weight:700;color:#171a20;">{{ config('payment.bank_transfer.account_name') }}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding:3px 12px 3px 0;font-size:11px;color:#5c5e62;">IBAN</td>
+                        <td style="padding:3px 0;font-size:11px;font-weight:700;color:#171a20;">{{ config('payment.bank_transfer.iban') }}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding:3px 12px 3px 0;font-size:11px;color:#5c5e62;">SWIFT / BIC</td>
+                        <td style="padding:3px 0;font-size:11px;font-weight:700;color:#171a20;">{{ config('payment.bank_transfer.swift_bic') }}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding:3px 12px 3px 0;font-size:11px;color:#5c5e62;">Bank</td>
+                        <td style="padding:3px 0;font-size:11px;color:#171a20;">{{ config('payment.bank_transfer.bank_name') }}, {{ config('payment.bank_transfer.bank_address') }}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding:3px 12px 3px 0;font-size:11px;color:#5c5e62;">Delivery Term</td>
+                        <td style="padding:3px 0;font-size:11px;color:#171a20;">{{ config('payment.bank_transfer.delivery_term') }}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding:3px 12px 3px 0;font-size:11px;color:#5c5e62;">Payment Terms</td>
+                        <td style="padding:3px 0;font-size:11px;color:#171a20;">{{ config('payment.bank_transfer.terms') }}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding:6px 12px 0 0;font-size:11px;color:#5c5e62;">Reference</td>
+                        <td style="padding:6px 0 0 0;font-size:11px;font-weight:700;color:#171a20;">{{ $order->ref }}</td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+    @endif
+
     <!-- Footer -->
     <div class="footer">
         <p>Okelcor &mdash; support@okelcor.com &mdash; okelcor.com</p>

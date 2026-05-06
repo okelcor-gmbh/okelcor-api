@@ -60,8 +60,8 @@ class PaymentController extends Controller
             'delivery.postalCode'    => ['required', 'string', 'max:20'],
             'delivery.country'       => ['required', 'string', 'max:100'],
             'delivery.phone'         => ['sometimes', 'nullable', 'string', 'max:50'],
-            'paymentMethod'          => ['sometimes', 'nullable', 'string', 'in:stripe'],
-            'payment_method'         => ['sometimes', 'nullable', 'string', 'in:stripe'],
+            'paymentMethod'          => ['sometimes', 'nullable', 'string', 'in:stripe,bank_transfer'],
+            'payment_method'         => ['sometimes', 'nullable', 'string', 'in:stripe,bank_transfer'],
             'vat_number'             => ['sometimes', 'nullable', 'string', 'max:20'],
             'promo_code'             => ['sometimes', 'nullable', 'string', 'max:50'],
             'items'                  => ['required', 'array', 'min:1'],
@@ -154,7 +154,93 @@ class PaymentController extends Controller
         $taxAmount    = round($taxableBase * $tax['tax_rate'] / 100, 2);
         $total        = $taxableBase + $taxAmount;
 
-        $ref = $this->generateRef();
+        $ref           = $this->generateRef();
+        $paymentMethod = $validated['paymentMethod'] ?? $validated['payment_method'] ?? 'stripe';
+
+        // --- Bank transfer: create order and return details without Stripe ---
+        if ($paymentMethod === 'bank_transfer') {
+            try {
+                $order = DB::transaction(function () use (
+                    $delivery, $lineItems, $subtotal, $total, $ref, $request,
+                    $vatNumber, $vatValid, $tax, $taxAmount,
+                    $promoCode, $discountAmount, $discountLabel
+                ) {
+                    $order = Order::create([
+                        'ref'               => $ref,
+                        'customer_name'     => $delivery['name'],
+                        'customer_email'    => $delivery['email'],
+                        'customer_phone'    => $delivery['phone'] ?? null,
+                        'address'           => $delivery['address'],
+                        'city'              => $delivery['city'],
+                        'postal_code'       => $delivery['postalCode'],
+                        'country'           => $delivery['country'],
+                        'payment_method'    => 'bank_transfer',
+                        'subtotal'          => $subtotal,
+                        'delivery_cost'     => 0.00,
+                        'discount_amount'   => $discountAmount,
+                        'discount_label'    => $discountLabel,
+                        'promo_code'        => $promoCode,
+                        'total'             => $total,
+                        'status'            => 'confirmed',
+                        'payment_status'    => 'pending',
+                        'mode'              => 'manual',
+                        'ip_address'        => $request->ip(),
+                        'vat_number'        => $vatNumber,
+                        'vat_valid'         => $vatValid,
+                        'tax_treatment'     => $tax['tax_treatment'],
+                        'tax_rate'          => $tax['tax_rate'],
+                        'tax_amount'        => $taxAmount,
+                        'is_reverse_charge' => $tax['is_reverse_charge'],
+                    ]);
+
+                    foreach ($lineItems as $line) {
+                        OrderItem::create(['order_id' => $order->id] + $line);
+                    }
+
+                    return $order;
+                });
+
+                $order->load('items');
+
+                try {
+                    Mail::to($order->customer_email)->send(new OrderConfirmation($order, null));
+                } catch (\Throwable $e) {
+                    Log::error('Bank transfer order confirmation email failed', [
+                        'ref'   => $ref,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+
+                $adminEmail = config('mail.order_email');
+                if ($adminEmail) {
+                    try {
+                        Mail::to($adminEmail)->send(new OrderReceived($order));
+                    } catch (\Throwable $e) {
+                        Log::error('Bank transfer admin notification failed', [
+                            'ref'   => $ref,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                }
+
+                Log::info('Bank transfer order created', ['ref' => $ref, 'total' => $total]);
+
+                return response()->json([
+                    'data' => [
+                        'provider'       => 'bank_transfer',
+                        'order_ref'      => $ref,
+                        'payment_status' => 'pending',
+                        'bank_details'   => config('payment.bank_transfer'),
+                    ],
+                ], 201);
+            } catch (\Throwable $e) {
+                Log::error('Bank transfer order creation failed', ['error' => $e->getMessage(), 'ref' => $ref]);
+
+                return response()->json([
+                    'message' => 'Order creation failed. Please try again.',
+                ], 502);
+            }
+        }
 
         try {
             $order = DB::transaction(function () use (

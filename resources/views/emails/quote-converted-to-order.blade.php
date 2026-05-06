@@ -144,12 +144,50 @@
                 </tr>
             </table>
             @else
-            <!-- Bank transfer next steps -->
+            <!-- Bank transfer details -->
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #e0e0e0;background-color:#fafafa;margin-bottom:28px;">
+                <tr>
+                    <td style="padding:16px 20px;">
+                        <p style="margin:0 0 12px 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;color:#171a20;">Bank Transfer Details</p>
+                        <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                            <tr>
+                                <td style="padding:4px 12px 4px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#5c5e62;width:38%;vertical-align:top;">Account Name</td>
+                                <td style="padding:4px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;color:#171a20;">{{ config('payment.bank_transfer.account_name') }}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding:4px 12px 4px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#5c5e62;vertical-align:top;">IBAN</td>
+                                <td style="padding:4px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;color:#171a20;">{{ config('payment.bank_transfer.iban') }}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding:4px 12px 4px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#5c5e62;vertical-align:top;">SWIFT / BIC</td>
+                                <td style="padding:4px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;color:#171a20;">{{ config('payment.bank_transfer.swift_bic') }}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding:4px 12px 4px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#5c5e62;vertical-align:top;">Bank</td>
+                                <td style="padding:4px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#171a20;">{{ config('payment.bank_transfer.bank_name') }}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding:4px 12px 4px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#5c5e62;vertical-align:top;">Bank Address</td>
+                                <td style="padding:4px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#171a20;">{{ config('payment.bank_transfer.bank_address') }}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding:4px 12px 4px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#5c5e62;vertical-align:top;">Delivery Term</td>
+                                <td style="padding:4px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#171a20;">{{ config('payment.bank_transfer.delivery_term') }}</td>
+                            </tr>
+                            <tr>
+                                <td colspan="2" style="padding:10px 0 0 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#5c5e62;line-height:1.5;">{{ config('payment.bank_transfer.terms') }}</td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+            </table>
+
+            <!-- Next steps -->
             <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #e0e0e0;background-color:#fafafa;margin-bottom:28px;">
                 <tr>
                     <td style="padding:16px 20px;">
                         <p style="margin:0 0 8px 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;color:#171a20;">What happens next?</p>
-                        <p style="margin:0 0 6px 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#5c5e62;line-height:1.6;">1. Our team will send you payment instructions (bank transfer details) within 1 business day.</p>
+                        <p style="margin:0 0 6px 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#5c5e62;line-height:1.6;">1. Transfer the amount above using the bank details provided. Please quote your order reference <strong>{{ $order->ref }}</strong> as the payment reference.</p>
                         <p style="margin:0 0 6px 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#5c5e62;line-height:1.6;">2. Once payment is confirmed we will begin sourcing and preparing your order.</p>
                         <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#5c5e62;line-height:1.6;">3. You will receive shipping and tracking information as soon as your order dispatches.</p>
                     </td>

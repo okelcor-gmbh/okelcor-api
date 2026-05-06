@@ -29,7 +29,11 @@
     <tr>
         <td style="padding:32px 36px 0 36px;">
             <p style="margin:0 0 6px 0;font-family:Arial,Helvetica,sans-serif;font-size:18px;font-weight:700;color:#171a20;">Order confirmed</p>
+            @if ($order->payment_method === 'bank_transfer')
+            <p style="margin:0 0 24px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#5c5e62;line-height:1.6;">Hello {{ explode(' ', trim($order->customer_name))[0] }}, your order has been received. Please use the bank transfer details below to complete your payment.</p>
+            @else
             <p style="margin:0 0 24px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#5c5e62;line-height:1.6;">Hello {{ explode(' ', trim($order->customer_name))[0] }}, your payment has been received. We will confirm availability and shipping details shortly.</p>
+            @endif
 
             <!-- Order summary -->
             <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #eeeeee;margin-bottom:28px;">
@@ -43,7 +47,7 @@
                 </tr>
                 <tr>
                     <td style="padding:12px 16px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#5c5e62;background-color:#fafafa;border-bottom:1px solid #eeeeee;">Payment</td>
-                    <td style="padding:12px 16px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#171a20;border-bottom:1px solid #eeeeee;">Confirmed</td>
+                    <td style="padding:12px 16px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#171a20;border-bottom:1px solid #eeeeee;">@if ($order->payment_method === 'bank_transfer')<span style="display:inline-block;padding:2px 10px;background-color:#fff8e1;color:#e65100;border-radius:3px;font-size:12px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;">Pending &mdash; Bank Transfer</span>@else Confirmed @endif</td>
                 </tr>
                 @if ($order->carrier)
                 <tr>
@@ -140,6 +144,46 @@
                     <td style="padding:12px 16px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#5c5e62;background-color:#fafafa;border-top:1px solid #eeeeee;">Download / view</td>
                     <td style="padding:12px 16px;font-family:Arial,Helvetica,sans-serif;font-size:13px;border-top:1px solid #eeeeee;">
                         <a href="{{ $invoicesUrl }}" style="color:#171a20;text-decoration:underline;">View invoices in your account</a>
+                    </td>
+                </tr>
+            </table>
+            @endif
+
+            @if ($order->payment_method === 'bank_transfer')
+            <!-- Bank transfer details -->
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #e0e0e0;background-color:#fafafa;margin-bottom:32px;">
+                <tr>
+                    <td style="padding:16px 20px;">
+                        <p style="margin:0 0 12px 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;color:#171a20;">Bank Transfer Details</p>
+                        <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                            <tr>
+                                <td style="padding:4px 12px 4px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#5c5e62;width:38%;vertical-align:top;">Account Name</td>
+                                <td style="padding:4px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;color:#171a20;">{{ config('payment.bank_transfer.account_name') }}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding:4px 12px 4px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#5c5e62;vertical-align:top;">IBAN</td>
+                                <td style="padding:4px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;color:#171a20;">{{ config('payment.bank_transfer.iban') }}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding:4px 12px 4px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#5c5e62;vertical-align:top;">SWIFT / BIC</td>
+                                <td style="padding:4px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;color:#171a20;">{{ config('payment.bank_transfer.swift_bic') }}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding:4px 12px 4px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#5c5e62;vertical-align:top;">Bank</td>
+                                <td style="padding:4px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#171a20;">{{ config('payment.bank_transfer.bank_name') }}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding:4px 12px 4px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#5c5e62;vertical-align:top;">Bank Address</td>
+                                <td style="padding:4px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#171a20;">{{ config('payment.bank_transfer.bank_address') }}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding:4px 12px 4px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#5c5e62;vertical-align:top;">Delivery Term</td>
+                                <td style="padding:4px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#171a20;">{{ config('payment.bank_transfer.delivery_term') }}</td>
+                            </tr>
+                            <tr>
+                                <td colspan="2" style="padding:10px 0 0 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#5c5e62;line-height:1.5;">{{ config('payment.bank_transfer.terms') }}</td>
+                            </tr>
+                        </table>
                     </td>
                 </tr>
             </table>
