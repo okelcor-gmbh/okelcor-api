@@ -63,7 +63,7 @@ class AdminOrderController extends Controller
 
     public function show(int $id): JsonResponse
     {
-        $order = Order::with(['items', 'logs', 'shipmentEvents'])->findOrFail($id);
+        $order = Order::with(['items', 'logs', 'shipmentEvents', 'euDeclaration'])->findOrFail($id);
 
         return response()->json([
             'data'    => $this->formatOrderDetail($order),
@@ -94,7 +94,7 @@ class AdminOrderController extends Controller
         }
 
         $order->update($request->only(['status', 'carrier', 'carrier_type', 'tracking_number', 'container_number', 'estimated_delivery', 'eta', 'admin_notes']));
-        $order->load(['items', 'logs']);
+        $order->load(['items', 'logs', 'euDeclaration']);
 
         $this->logStatusChange($request, $order, $previousStatus);
         $this->logTrackingChange($request, $order);
@@ -391,6 +391,12 @@ class AdminOrderController extends Controller
                     'created_at'       => $l->created_at?->toIso8601String(),
                 ])->values()
                 : [],
+
+            // EU entry certificate
+            'declaration_required'  => $o->is_reverse_charge === true,
+            'declaration_status'    => $o->relationLoaded('euDeclaration') ? $o->euDeclaration?->status : null,
+            'declaration_id'        => $o->relationLoaded('euDeclaration') ? $o->euDeclaration?->id : null,
+            'declaration_signed_at' => $o->relationLoaded('euDeclaration') ? $o->euDeclaration?->signed_at?->toIso8601String() : null,
         ];
     }
 }

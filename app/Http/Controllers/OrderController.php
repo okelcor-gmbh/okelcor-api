@@ -31,7 +31,7 @@ class OrderController extends Controller
             'email' => ['required', 'email', 'max:255'],
         ]);
 
-        $orders = Order::with(['items', 'shipmentEvents'])
+        $orders = Order::with(['items', 'shipmentEvents', 'euDeclaration'])
             ->where('customer_email', $request->email)
             ->orderByDesc('created_at')
             ->get();
@@ -51,7 +51,7 @@ class OrderController extends Controller
      */
     public function show(string $ref): JsonResponse
     {
-        $order = Order::with(['items', 'shipmentEvents'])
+        $order = Order::with(['items', 'shipmentEvents', 'euDeclaration'])
             ->where('ref', $ref)
             ->firstOrFail();
 
@@ -88,6 +88,11 @@ class OrderController extends Controller
                     'created_at'   => $e->created_at?->toIso8601String(),
                 ])->values()
                 : [],
+            // EU entry certificate — customer-visible status only
+            'declaration_required'  => $o->is_reverse_charge === true,
+            'declaration_status'    => $o->relationLoaded('euDeclaration') ? $o->euDeclaration?->status : null,
+            'declaration_signed_at' => $o->relationLoaded('euDeclaration') ? $o->euDeclaration?->signed_at?->toIso8601String() : null,
+
             'items'             => $o->items->map(fn ($i) => [
                 'product_id'   => $i->product_id,
                 'product_name' => $i->name,

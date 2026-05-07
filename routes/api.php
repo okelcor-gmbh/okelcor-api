@@ -44,6 +44,7 @@ use App\Http\Controllers\PromotionController;
 use App\Http\Controllers\Admin\AdminFetEngineController;
 use App\Http\Controllers\Admin\AdminPromotionController;
 use App\Http\Controllers\Admin\AdminDashboardController;
+use App\Http\Controllers\Admin\AdminEuDeclarationController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
@@ -318,6 +319,10 @@ Route::prefix('v1')->group(function () {
             Route::middleware('admin.role:super_admin')->group(function () {
                 Route::delete('orders/{id}', [AdminOrderController::class, 'destroy']);
             });
+
+            // EU entry certificates (Gelangensbestätigung) — reverse-charge orders
+            Route::get('eu-declarations', [AdminEuDeclarationController::class, 'index']);
+            Route::get('eu-declarations/{id}', [AdminEuDeclarationController::class, 'show']);
 
             // Newsletter subscribers
             Route::get('newsletter', [AdminNewsletterController::class, 'index']);

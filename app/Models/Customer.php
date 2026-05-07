@@ -75,6 +75,11 @@ class Customer extends Authenticatable
         return $this->hasMany(Invoice::class);
     }
 
+    public function euDeclarations(): HasMany
+    {
+        return $this->hasMany(EuDeclaration::class);
+    }
+
     public function loginHistory(): HasMany
     {
         return $this->hasMany(LoginHistory::class)->orderByDesc('created_at');

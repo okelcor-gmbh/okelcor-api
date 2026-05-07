@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\Order;
+use App\Services\EuDeclarationService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -92,6 +93,23 @@ class InvoiceService
                 Log::warning('Invoice PDF generation failed', [
                     'invoice' => $invoice->invoice_number,
                     'error'   => $e->getMessage(),
+                ]);
+            }
+
+            // Non-blocking: create EU entry certificate for reverse-charge orders
+            try {
+                $declarationService = app(EuDeclarationService::class);
+                if ($declarationService->shouldRequireForOrder($order)) {
+                    $declarationService->createForOrder($order, $invoice);
+                    Log::info('EU declaration created for reverse-charge order', [
+                        'order_ref'      => $order->ref,
+                        'invoice_number' => $invoice->invoice_number,
+                    ]);
+                }
+            } catch (\Throwable $e) {
+                Log::warning('EU declaration creation failed for order', [
+                    'order_ref' => $order->ref,
+                    'error'     => $e->getMessage(),
                 ]);
             }
 

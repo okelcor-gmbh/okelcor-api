@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Order extends Model
 {
@@ -77,5 +78,10 @@ class Order extends Model
     public function quoteRequest()
     {
         return $this->hasOne(QuoteRequest::class);
+    }
+
+    public function euDeclaration(): HasOne
+    {
+        return $this->hasOne(EuDeclaration::class);
     }
 }
