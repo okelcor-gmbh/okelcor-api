@@ -1,5 +1,5 @@
 # Session Handoff — Okelcor API
-Last updated: 2026-05-07 (session 5)
+Last updated: 2026-05-07 (session 6)
 
 ## Project
 Laravel 13.2 / PHP 8.3 REST API for Okelcor B2B tyre wholesale.
@@ -65,7 +65,9 @@ POST   /api/v1/auth/addresses
 PUT    /api/v1/auth/addresses/{id}
 DELETE /api/v1/auth/addresses/{id}
 
-POST   /api/v1/auth/orders/{ref}/checkout   ← Pay Now — creates/refreshes Stripe Checkout Session for pending order
+POST   /api/v1/auth/orders/{ref}/checkout              ← Pay Now — creates/refreshes Stripe Checkout Session for pending order
+POST   /api/v1/auth/orders/{ref}/declaration           ← sign EU entry certificate (Gelangensbestätigung)
+GET    /api/v1/auth/orders/{ref}/declaration/download  ← download signed declaration PDF
 ```
 
 #### GET /api/v1/auth/quotes — response shape
@@ -278,6 +280,8 @@ POST   /admin/quote-requests/{id}/convert-to-order   ← converts quoted quote t
 
 GET    /admin/eu-declarations
 GET    /admin/eu-declarations/{id}
+GET    /admin/eu-declarations/{id}/download          ← download signed PDF from private disk
+POST   /admin/eu-declarations/{id}/acknowledge       ← mark declaration acknowledged
 
 GET    /admin/contact-messages
 GET    /admin/contact-messages/{id}
@@ -689,6 +693,8 @@ Indexes: `order_ref`, `status`, `customer_email`
 **Admin endpoints:**
 - `GET /admin/eu-declarations` — paginated list; filterable by `status` and `q` (order_ref, company_name, email, vat_number); roles: super_admin, admin, order_manager
 - `GET /admin/eu-declarations/{id}` — full detail including `has_signature` and `has_pdf` booleans; `signature_path` itself is never returned
+- `GET /admin/eu-declarations/{id}/download` — download signed PDF from private disk; 404 if not signed or file missing
+- `POST /admin/eu-declarations/{id}/acknowledge` — mark signed declaration as acknowledged; 409 if not in `signed` state
 
 ### `products`
 | Column | Type | Notes |
@@ -1133,38 +1139,46 @@ Required for all reverse-charge EU B2B orders where `is_reverse_charge=true` and
 **Signing endpoint — `POST /api/v1/auth/orders/{ref}/declaration`:**
 - Auth: `auth.customer` Bearer token
 - Ownership: `order.customer_email === customer.email` (case-insensitive); 404 if no match (does not leak order existence)
-- Guards: 404 — declaration not found | 409 — already signed/acknowledged | 422 — validation failure
+- **Missing row auto-create:** if no `eu_declarations` row exists for the order (common for orders placed before Phase 2B-2 was deployed), `EuDeclarationService::shouldRequireForOrder()` is called; if the order qualifies (all three conditions met) the row is created on the spot and signing continues; if the order does NOT qualify returns 422 `"This order does not require an EU entry certificate."`
+- Guards:
+  - 404 — order not found or wrong customer
+  - 409 — declaration already signed or acknowledged
+  - 422 — order does not require a declaration
+  - 422 — validation failure (FormRequest)
 - Stores signature PNG to `storage/app/private/eu-declarations/signatures/{uuid}.png`
-- Generates PDF to `storage/app/private/eu-declarations/pdf/{order_ref}.pdf` via DomPDF
-- PDF path stored in `eu_declarations.pdf_path`; PDF generation is non-blocking (failure logged, 200 still returned)
+- Generates PDF to `storage/app/private/eu-declarations/pdf/{order_ref}.pdf` via DomPDF — non-blocking (failure logged, 200 still returned)
 - Sends `EuDeclarationSigned` mailable to `declaration.customer_email` — non-blocking
-- Returns 200 with status, signed_at, order_ref, has_pdf
+- Returns 200: `{ status, signed_at, order_ref, has_pdf }`
 
 **Customer download — `GET /api/v1/auth/orders/{ref}/declaration/download`:**
-- Auth: `auth.customer` Bearer token
-- Ownership: same as above
-- 404 if not signed/acknowledged; 404 if pdf_path null or file missing on disk
-- Returns file download: `DECL-{order_ref}.pdf`
+- Auth: `auth.customer` Bearer token; ownership verified same as above
+- 404 if declaration not signed/acknowledged; 404 if pdf_path null or file missing on disk
+- Returns file: `DECL-{order_ref}.pdf`
 
 **Admin download — `GET /api/v1/admin/eu-declarations/{id}/download`:**
 - Auth: `auth:sanctum` + `admin.role:super_admin,admin,order_manager`
-- 404 if not signed; 404 if pdf missing; returns `DECL-{order_ref}.pdf`
+- 404 if not signed/acknowledged; 404 if pdf missing; returns `DECL-{order_ref}.pdf`
 
 **Admin acknowledge — `POST /api/v1/admin/eu-declarations/{id}/acknowledge`:**
 - Auth: `auth:sanctum` + `admin.role:super_admin,admin,order_manager`
-- 409 if status !== 'signed'; sets status='acknowledged', admin_acknowledged_at, admin_acknowledged_by
+- 409 if status !== `signed`; sets `status='acknowledged'`, `admin_acknowledged_at`, `admin_acknowledged_by`
 - Returns updated declaration detail
 
-**Files created/modified (Phase 2B-3):**
-- `app/Http/Requests/SignEuDeclarationRequest.php`
-- `app/Http/Controllers/EuDeclarationController.php`
-- `resources/views/pdf/eu-declaration.blade.php` — Gelangensbestätigung template (§17a UStDV format)
-- `app/Mail/EuDeclarationSigned.php`
-- `resources/views/emails/eu-declaration-signed.blade.php`
-- `resources/views/emails/eu-declaration-signed-text.blade.php`
-- `app/Http/Controllers/Admin/AdminEuDeclarationController.php` (added download + acknowledge)
-- `app/Http/Controllers/OrderController.php` (added declaration_signed_name + declaration_download_available to formatOrder)
-- `routes/api.php` (added 4 new routes)
+**Back-fill in order detail — `GET /api/v1/orders/{ref}` (show only, not list):**
+- After loading the order, if `is_reverse_charge=true` and `euDeclaration` relation is null, calls `EuDeclarationService::createForOrder()` to create the pending row immediately
+- `setRelation()` sets it on the in-memory model so the response always returns `declaration_status='pending'`
+- The list endpoint (`GET /api/v1/orders?email=`) does NOT auto-create (would create rows for all old orders)
+
+**Files created/modified (Phase 2B-3 + bug fix):**
+- `app/Http/Requests/SignEuDeclarationRequest.php` ← new
+- `app/Http/Controllers/EuDeclarationController.php` ← new; auto-create logic added in same session
+- `resources/views/pdf/eu-declaration.blade.php` ← new — §17a UStDV Gelangensbestätigung layout
+- `app/Mail/EuDeclarationSigned.php` ← new
+- `resources/views/emails/eu-declaration-signed.blade.php` ← new
+- `resources/views/emails/eu-declaration-signed-text.blade.php` ← new
+- `app/Http/Controllers/Admin/AdminEuDeclarationController.php` ← added `download()` + `acknowledge()`
+- `app/Http/Controllers/OrderController.php` ← injected `EuDeclarationService`; added `declaration_signed_name` + `declaration_download_available` to `formatOrder()`; back-fill in `show()`
+- `routes/api.php` ← added 4 new routes (2 customer + 2 admin)
 
 **Storage — private disk:**
 - `local` disk root: `storage_path('app/private')`
@@ -1173,9 +1187,13 @@ Required for all reverse-charge EU B2B orders where `is_reverse_charge=true` and
 - Physical path for serving: `storage_path('app/private/' . $decl->pdf_path)`
 
 **Service:** `App\Services\EuDeclarationService`
-- `shouldRequireForOrder(Order $order): bool`
-- `createForOrder(Order $order, ?Invoice $invoice = null): EuDeclaration` — idempotent
+- `shouldRequireForOrder(Order $order): bool` — all three conditions: `is_reverse_charge=true`, `tax_treatment='reverse_charge'`, `(bool)vat_valid=true`
+- `createForOrder(Order $order, ?Invoice $invoice = null): EuDeclaration` — idempotent; called by `InvoiceService` at payment time AND on-demand by `EuDeclarationController` and `OrderController::show()` for pre-2B-2 orders
 - `buildGoodsDescription(Order $order): [string, string]` — returns [goods_description, quantity_description]; quantity_description truncated to 300 chars
+
+**Controllers injecting `EuDeclarationService`:**
+- `EuDeclarationController` — via constructor; used to auto-create missing declaration before signing
+- `OrderController` — via constructor; used to back-fill missing row in `show()` only
 
 ### Order Security & Audit Logging
 
@@ -1308,11 +1326,16 @@ const ROLE_ACCESS = {
 ref, status, payment_status, payment_method, subtotal, delivery_cost, total,
 carrier, carrier_type, tracking_number, container_number, estimated_delivery, eta,
 created_at, items[], shipment_events[],
-declaration_required, declaration_status, declaration_signed_at
+declaration_required, declaration_status, declaration_signed_at,
+declaration_signed_name, declaration_download_available
 ```
 - `declaration_required` — `true` when `order.is_reverse_charge === true`; always present
-- `declaration_status` — `"pending"` | `"signed"` | `"acknowledged"` | `null` (no declaration exists)
+- `declaration_status` — `"pending"` | `"signed"` | `"acknowledged"` | `null`
+  - `GET /api/v1/orders/{ref}` (single-order show): if `declaration_required=true` and no row exists, a pending row is **auto-created** so `declaration_status` is always `"pending"`, never `null`, for qualifying orders
+  - `GET /api/v1/orders?email=` (list): no auto-create; `declaration_status` may be `null` for old pre-2B-2 orders
 - `declaration_signed_at` — ISO 8601 timestamp or `null`
+- `declaration_signed_name` — signed name in capitals or `null` until signed
+- `declaration_download_available` — `true` when `pdf_path` is set and `status` is `signed` or `acknowledged`
 
 Admin order detail (`GET /admin/orders/{id}`) additionally returns:
 - `declaration_id` — the EU declaration record ID (needed to fetch/manage declaration as admin)
