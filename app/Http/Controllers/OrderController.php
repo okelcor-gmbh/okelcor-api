@@ -5,8 +5,10 @@ namespace App\Http\Controllers;
 use App\Http\Requests\StoreOrderRequest;
 use App\Mail\OrderReceived;
 use App\Models\Customer;
+use App\Models\Invoice;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Services\EuDeclarationService;
 use App\Services\VatValidationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -17,7 +19,10 @@ use Laravel\Sanctum\PersonalAccessToken;
 
 class OrderController extends Controller
 {
-    public function __construct(private VatValidationService $vatService) {}
+    public function __construct(
+        private VatValidationService $vatService,
+        private EuDeclarationService $declarationService,
+    ) {}
 
     /**
      * GET /api/v1/orders?email=customer@example.com
@@ -48,12 +53,25 @@ class OrderController extends Controller
      *
      * Returns the full current state of one order by its ref.
      * Used by the customer tracking page (fetched with cache: "no-store").
+     *
+     * Auto-creates a pending eu_declarations row for qualifying reverse-charge
+     * orders that pre-date Phase 2B-2 deployment, so declaration_status is
+     * always 'pending' (never null) when declaration_required is true.
      */
     public function show(string $ref): JsonResponse
     {
         $order = Order::with(['items', 'shipmentEvents', 'euDeclaration'])
             ->where('ref', $ref)
             ->firstOrFail();
+
+        // Back-fill missing declaration row for pre-2B-2 reverse-charge orders.
+        if ($order->is_reverse_charge && ! $order->euDeclaration) {
+            if ($this->declarationService->shouldRequireForOrder($order)) {
+                $invoice     = Invoice::where('order_ref', $order->ref)->first();
+                $declaration = $this->declarationService->createForOrder($order, $invoice);
+                $order->setRelation('euDeclaration', $declaration);
+            }
+        }
 
         return response()->json([
             'data'    => $this->formatOrder($order),

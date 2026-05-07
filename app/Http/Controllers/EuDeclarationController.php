@@ -5,7 +5,9 @@ namespace App\Http\Controllers;
 use App\Http\Requests\SignEuDeclarationRequest;
 use App\Mail\EuDeclarationSigned;
 use App\Models\EuDeclaration;
+use App\Models\Invoice;
 use App\Models\Order;
+use App\Services\EuDeclarationService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -17,11 +19,14 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class EuDeclarationController extends Controller
 {
+    public function __construct(private EuDeclarationService $declarationService) {}
+
     /**
      * POST /api/v1/auth/orders/{ref}/declaration
      *
      * Customer signs their EU entry certificate (Gelangensbestätigung).
-     * Declaration must exist with status=pending; order must belong to the authenticated customer.
+     * If no declaration row exists yet (order pre-dates Phase 2B-2 deployment),
+     * one is auto-created provided the order still qualifies (reverse-charge + valid VAT).
      */
     public function sign(SignEuDeclarationRequest $request, string $ref): JsonResponse
     {
@@ -36,7 +41,21 @@ class EuDeclarationController extends Controller
         $declaration = EuDeclaration::where('order_id', $order->id)->first();
 
         if (! $declaration) {
-            return response()->json(['message' => 'No entry certificate exists for this order.'], 404);
+            // Guard: only auto-create when the order genuinely requires a declaration.
+            // This covers reverse-charge orders created before Phase 2B-2 was deployed.
+            if (! $this->declarationService->shouldRequireForOrder($order)) {
+                return response()->json([
+                    'message' => 'This order does not require an EU entry certificate.',
+                ], 422);
+            }
+
+            $invoice     = Invoice::where('order_ref', $order->ref)->first();
+            $declaration = $this->declarationService->createForOrder($order, $invoice);
+
+            Log::info('EU declaration auto-created at signing time (pre-2B-2 order)', [
+                'order_ref'      => $order->ref,
+                'declaration_id' => $declaration->id,
+            ]);
         }
 
         if ($declaration->status !== 'pending') {
