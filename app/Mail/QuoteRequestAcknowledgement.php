@@ -28,6 +28,7 @@ class QuoteRequestAcknowledgement extends Mailable
     {
         return new Content(
             view: 'emails.quote-request-acknowledgement',
+            text: 'emails.quote-request-acknowledgement-text',
             with: [
                 'quote' => $this->quote,
             ],

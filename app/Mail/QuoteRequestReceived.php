@@ -34,6 +34,7 @@ class QuoteRequestReceived extends Mailable
 
         return new Content(
             view: 'emails.quote-request-received',
+            text: 'emails.quote-request-received-text',
             with: [
                 'quote'    => $this->quote,
                 'adminUrl' => $adminUrl,
