@@ -38,6 +38,18 @@ class EuDeclarationController extends Controller
             return response()->json(['message' => 'Order not found.'], 404);
         }
 
+        if ($order->payment_status !== 'paid') {
+            return response()->json([
+                'message' => 'Payment must be confirmed before the EU Entry Certificate can be signed.',
+            ], 422);
+        }
+
+        if ($order->status !== 'delivered') {
+            return response()->json([
+                'message' => 'The EU Entry Certificate can only be signed after the order has been delivered.',
+            ], 422);
+        }
+
         $declaration = EuDeclaration::where('order_id', $order->id)->first();
 
         if (! $declaration) {
