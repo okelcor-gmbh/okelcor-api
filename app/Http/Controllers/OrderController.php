@@ -36,7 +36,7 @@ class OrderController extends Controller
             'email' => ['required', 'email', 'max:255'],
         ]);
 
-        $orders = Order::with(['items', 'shipmentEvents', 'euDeclaration'])
+        $orders = Order::with(['items', 'shipmentEvents', 'euDeclaration', 'tradeDocuments'])
             ->where('customer_email', $request->email)
             ->orderByDesc('created_at')
             ->get();
@@ -60,7 +60,7 @@ class OrderController extends Controller
      */
     public function show(string $ref): JsonResponse
     {
-        $order = Order::with(['items', 'shipmentEvents', 'euDeclaration'])
+        $order = Order::with(['items', 'shipmentEvents', 'euDeclaration', 'tradeDocuments'])
             ->where('ref', $ref)
             ->firstOrFail();
 
@@ -125,6 +125,21 @@ class OrderController extends Controller
                 'unit_price'   => (float) $i->unit_price,
                 'subtotal'     => (float) $i->line_total,
             ])->values(),
+
+            // Trade documents — issued proformas and invoices only (no uploads)
+            'trade_documents' => $o->relationLoaded('tradeDocuments')
+                ? $o->tradeDocuments
+                    ->filter(fn ($d) => $d->status === 'issued'
+                        && in_array($d->type, ['proforma', 'commercial_invoice', 'packing_list'], true))
+                    ->map(fn ($d) => [
+                        'id'        => $d->id,
+                        'type'      => $d->type,
+                        'number'    => $d->number,
+                        'status'    => $d->status,
+                        'has_pdf'   => (bool) $d->getRawOriginal('pdf_path'),
+                        'issued_at' => $d->issued_at?->toIso8601String(),
+                    ])->values()
+                : [],
         ];
     }
 

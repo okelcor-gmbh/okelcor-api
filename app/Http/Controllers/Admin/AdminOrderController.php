@@ -63,7 +63,7 @@ class AdminOrderController extends Controller
 
     public function show(int $id): JsonResponse
     {
-        $order = Order::with(['items', 'logs', 'shipmentEvents', 'euDeclaration'])->findOrFail($id);
+        $order = Order::with(['items', 'logs', 'shipmentEvents', 'euDeclaration', 'tradeDocuments'])->findOrFail($id);
 
         return response()->json([
             'data'    => $this->formatOrderDetail($order),
@@ -94,7 +94,7 @@ class AdminOrderController extends Controller
         }
 
         $order->update($request->only(['status', 'carrier', 'carrier_type', 'tracking_number', 'container_number', 'estimated_delivery', 'eta', 'admin_notes']));
-        $order->load(['items', 'logs', 'euDeclaration']);
+        $order->load(['items', 'logs', 'euDeclaration', 'tradeDocuments']);
 
         $this->logStatusChange($request, $order, $previousStatus);
         $this->logTrackingChange($request, $order);
@@ -397,6 +397,19 @@ class AdminOrderController extends Controller
             'declaration_status'    => $o->relationLoaded('euDeclaration') ? $o->euDeclaration?->status : null,
             'declaration_id'        => $o->relationLoaded('euDeclaration') ? $o->euDeclaration?->id : null,
             'declaration_signed_at' => $o->relationLoaded('euDeclaration') ? $o->euDeclaration?->signed_at?->toIso8601String() : null,
+
+            // Trade documents
+            'trade_documents' => $o->relationLoaded('tradeDocuments')
+                ? $o->tradeDocuments->map(fn ($d) => [
+                    'id'        => $d->id,
+                    'type'      => $d->type,
+                    'number'    => $d->number,
+                    'status'    => $d->status,
+                    'has_pdf'   => (bool) $d->getRawOriginal('pdf_path'),
+                    'has_file'  => (bool) $d->getRawOriginal('file_path'),
+                    'issued_at' => $d->issued_at?->toIso8601String(),
+                ])->values()
+                : [],
         ];
     }
 }

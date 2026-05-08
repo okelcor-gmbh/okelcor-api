@@ -12,6 +12,7 @@ use App\Services\InvoiceService;
 use App\Services\PromoCodeService;
 use App\Services\StripeService;
 use App\Services\TaxService;
+use App\Services\TradeDocumentService;
 use App\Services\VatValidationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -220,6 +221,16 @@ class PaymentController extends Controller
                 });
 
                 $order->load('items');
+
+                // Auto-generate proforma invoice for bank transfer orders
+                try {
+                    app(TradeDocumentService::class)->generateProformaForOrder($order);
+                } catch (\Throwable $e) {
+                    Log::warning('Proforma auto-generation failed after bank transfer order creation', [
+                        'order_ref' => $order->ref,
+                        'error'     => $e->getMessage(),
+                    ]);
+                }
 
                 try {
                     Mail::to($order->customer_email)->send(new OrderConfirmation($order, null));

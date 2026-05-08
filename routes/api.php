@@ -45,7 +45,9 @@ use App\Http\Controllers\Admin\AdminFetEngineController;
 use App\Http\Controllers\Admin\AdminPromotionController;
 use App\Http\Controllers\Admin\AdminDashboardController;
 use App\Http\Controllers\Admin\AdminEuDeclarationController;
+use App\Http\Controllers\Admin\AdminTradeDocumentController;
 use App\Http\Controllers\EuDeclarationController;
+use App\Http\Controllers\TradeDocumentController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
@@ -82,10 +84,12 @@ Route::prefix('v1')->group(function () {
         Route::put('addresses/{id}', [CustomerAddressController::class, 'update']);
         Route::delete('addresses/{id}', [CustomerAddressController::class, 'destroy']);
 
-        // Orders — customer pay-now + EU entry certificate
+        // Orders — customer pay-now + EU entry certificate + trade documents
         Route::post('orders/{ref}/checkout', [CustomerOrderController::class, 'checkout']);
         Route::post('orders/{ref}/declaration', [EuDeclarationController::class, 'sign']);
         Route::get('orders/{ref}/declaration/download', [EuDeclarationController::class, 'download']);
+        Route::get('orders/{ref}/trade-documents', [TradeDocumentController::class, 'index']);
+        Route::get('trade-documents/{id}/download', [TradeDocumentController::class, 'download']);
     });
 
     // Invoice download — protected by customer Bearer token
@@ -328,6 +332,11 @@ Route::prefix('v1')->group(function () {
             Route::get('eu-declarations/{id}', [AdminEuDeclarationController::class, 'show']);
             Route::get('eu-declarations/{id}/download', [AdminEuDeclarationController::class, 'download']);
             Route::match(['post', 'patch'], 'eu-declarations/{id}/acknowledge', [AdminEuDeclarationController::class, 'acknowledge']);
+
+            // Trade documents
+            Route::post('orders/{id}/trade-documents/proforma', [AdminTradeDocumentController::class, 'generateProforma']);
+            Route::get('orders/{id}/trade-documents', [AdminTradeDocumentController::class, 'indexForOrder']);
+            Route::get('trade-documents/{id}/download', [AdminTradeDocumentController::class, 'download']);
 
             // Newsletter subscribers
             Route::get('newsletter', [AdminNewsletterController::class, 'index']);

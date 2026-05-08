@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Order extends Model
@@ -83,5 +84,10 @@ class Order extends Model
     public function euDeclaration(): HasOne
     {
         return $this->hasOne(EuDeclaration::class);
+    }
+
+    public function tradeDocuments(): HasMany
+    {
+        return $this->hasMany(TradeDocument::class)->orderByDesc('created_at');
     }
 }

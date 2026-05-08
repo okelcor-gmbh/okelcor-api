@@ -12,6 +12,7 @@ use App\Models\QuoteRequest;
 use App\Services\PromoCodeService;
 use App\Services\StripeService;
 use App\Services\TaxService;
+use App\Services\TradeDocumentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -246,6 +247,18 @@ class AdminQuoteRequestController extends Controller
 
         // Load items once — used by both Stripe session and email
         $order->load('items');
+
+        // Auto-generate proforma for bank transfer orders
+        if ($paymentMethod === 'bank_transfer') {
+            try {
+                app(TradeDocumentService::class)->generateProformaForOrder($order, $request->user());
+            } catch (\Throwable $e) {
+                Log::warning('Proforma auto-generation failed after quote conversion', [
+                    'order_ref' => $order->ref,
+                    'error'     => $e->getMessage(),
+                ]);
+            }
+        }
 
         // If payment is Stripe, create a Checkout Session for this order
         $checkoutUrl = null;
