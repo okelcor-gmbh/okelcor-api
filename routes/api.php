@@ -327,7 +327,7 @@ Route::prefix('v1')->group(function () {
             Route::get('eu-declarations', [AdminEuDeclarationController::class, 'index']);
             Route::get('eu-declarations/{id}', [AdminEuDeclarationController::class, 'show']);
             Route::get('eu-declarations/{id}/download', [AdminEuDeclarationController::class, 'download']);
-            Route::patch('eu-declarations/{id}/acknowledge', [AdminEuDeclarationController::class, 'acknowledge']);
+            Route::match(['post', 'patch'], 'eu-declarations/{id}/acknowledge', [AdminEuDeclarationController::class, 'acknowledge']);
 
             // Newsletter subscribers
             Route::get('newsletter', [AdminNewsletterController::class, 'index']);

@@ -35,8 +35,13 @@ class AdminEuDeclarationController extends Controller
         }
 
         if ($request->boolean('overdue')) {
-            $query->where('status', 'pending')
-                  ->where('created_at', '<=', now()->subDays(self::OVERDUE_DAYS));
+            // Only restrict to pending if the caller hasn't already applied a status filter.
+            // Without this guard, status=acknowledged&overdue=true would generate
+            // WHERE status='acknowledged' AND status='pending' and return 0 rows.
+            if (! $request->filled('status')) {
+                $query->where('status', 'pending');
+            }
+            $query->where('created_at', '<=', now()->subDays(self::OVERDUE_DAYS));
         }
 
         if ($request->filled('q')) {
