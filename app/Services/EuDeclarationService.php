@@ -51,13 +51,14 @@ class EuDeclarationService
         // Build goods + quantity descriptions from items
         [$goodsDescription, $quantityDescription] = $this->buildGoodsDescription($order);
 
-        // Snapshot delivery address from order fields
-        $customerAddress = implode(', ', array_filter([
-            $order->address,
-            $order->city,
-            $order->postal_code,
-            $order->country,
-        ])) ?: null;
+        // Snapshot delivery address parts separately.
+        // country is stored in its own column and must NOT be appended to customer_address,
+        // as a customer may have a German delivery address with a French VAT registration.
+        $street      = $order->address ?: null;
+        $city        = $order->city ?: null;
+        $postalCode  = $order->postal_code ?: null;
+
+        $customerAddress = implode(', ', array_filter([$street, $city, $postalCode])) ?: null;
 
         return EuDeclaration::create([
             'order_id'             => $order->id,
@@ -67,6 +68,9 @@ class EuDeclarationService
             'company_name'         => $companyName,
             'customer_email'       => $order->customer_email,
             'customer_address'     => $customerAddress,
+            'street'               => $street,
+            'city'                 => $city,
+            'postal_code'          => $postalCode,
             'vat_number'           => (string) ($order->vat_number ?? ''),
             'country'              => $order->country,
             'goods_description'    => $goodsDescription,

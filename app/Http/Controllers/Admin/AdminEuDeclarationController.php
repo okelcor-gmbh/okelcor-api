@@ -86,7 +86,7 @@ class AdminEuDeclarationController extends Controller
             return response()->json(['message' => 'Declaration PDF file was not found.'], 404);
         }
 
-        return response()->download($path, 'DECL-' . $decl->order_ref . '.pdf');
+        return response()->download($path, 'EU-Entry-Certificate-' . $decl->order_ref . '.pdf');
     }
 
     /**
@@ -140,18 +140,22 @@ class AdminEuDeclarationController extends Controller
     {
         return [
             'id'                         => $d->id,
+            'declaration_id'             => $d->id,
             'order_id'                   => $d->order_id,
             'order_ref'                  => $d->order_ref,
             'customer_id'                => $d->customer_id,
             'invoice_id'                 => $d->invoice_id,
             'invoice_number'             => $d->invoice?->invoice_number,
 
-            // Snapshot
+            // Snapshot — combined and individual address parts
             'company_name'               => $d->company_name,
             'customer_email'             => $d->customer_email,
             'customer_address'           => $d->customer_address,
-            'vat_number'                 => $d->vat_number,
+            'street'                     => $d->street,
+            'city'                       => $d->city,
+            'postal_code'                => $d->postal_code,
             'country'                    => $d->country,
+            'vat_number'                 => $d->vat_number,
             'goods_description'          => $d->goods_description,
             'quantity_description'       => $d->quantity_description,
 
@@ -174,7 +178,9 @@ class AdminEuDeclarationController extends Controller
 
             // Workflow
             'status'                     => $d->status,
+            'acknowledged_at'            => $d->admin_acknowledged_at?->toIso8601String(),
             'admin_acknowledged_at'      => $d->admin_acknowledged_at?->toIso8601String(),
+            'admin_acknowledged_by'      => $d->admin_acknowledged_by,
 
             'created_at'                 => $d->created_at?->toIso8601String(),
             'updated_at'                 => $d->updated_at?->toIso8601String(),
