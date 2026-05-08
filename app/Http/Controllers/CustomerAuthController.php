@@ -591,6 +591,7 @@ class CustomerAuthController extends Controller
     {
         $invoices = $request->user()
             ->invoices()
+            ->whereNotNull('released_at')
             ->orderByDesc('issued_at')
             ->get()
             ->map(fn ($inv) => [

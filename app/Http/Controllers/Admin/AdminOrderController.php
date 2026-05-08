@@ -218,9 +218,12 @@ class AdminOrderController extends Controller
         // Invoice — idempotent; won't duplicate if one already exists
         $invoice = app(InvoiceService::class)->createForOrder($fresh);
 
+        // Do not expose unreleased (reverse-charge) invoices in the confirmation email.
+        $invoiceForEmail = ($invoice && $fresh->is_reverse_charge) ? null : $invoice;
+
         // Customer confirmation email
         try {
-            Mail::to($fresh->customer_email)->send(new OrderConfirmation($fresh, $invoice));
+            Mail::to($fresh->customer_email)->send(new OrderConfirmation($fresh, $invoiceForEmail));
             Log::info('Bank transfer payment confirmation email sent', [
                 'order_ref' => $fresh->ref,
                 'email'     => $fresh->customer_email,

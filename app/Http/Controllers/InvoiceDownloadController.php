@@ -27,6 +27,12 @@ class InvoiceDownloadController extends Controller
             return response()->json(['message' => 'You do not have access to this invoice.'], 403);
         }
 
+        if (! $invoice->released_at) {
+            return response()->json([
+                'message' => 'Invoice is not available until the EU Entry Certificate is signed.',
+            ], 423);
+        }
+
         if (! $invoice->pdf_url) {
             Log::warning('Invoice download: pdf_url is null', [
                 'invoice_id'          => $invoice->id,

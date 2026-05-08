@@ -48,6 +48,10 @@ class InvoiceService
                     $sequence      = $lastNumber ? (int) substr($lastNumber, strlen($prefix)) + 1 : 1;
                     $invoiceNumber = $prefix . str_pad($sequence, 4, '0', STR_PAD_LEFT);
 
+                    // Reverse-charge invoices are held until the EU Entry Certificate is
+                    // signed. released_at = null keeps them invisible to the customer.
+                    $releasedAt = $order->is_reverse_charge ? null : now();
+
                     return Invoice::create([
                         'customer_id'       => $customer->id,
                         'invoice_number'    => $invoiceNumber,
@@ -56,6 +60,7 @@ class InvoiceService
                         'amount'            => $order->total,
                         'status'            => 'paid',
                         'pdf_url'           => null,
+                        'released_at'       => $releasedAt,
                         'order_ref'         => $order->ref,
                         'subtotal_net'      => (float) $order->subtotal + (float) $order->delivery_cost,
                         'tax_treatment'     => $order->tax_treatment,

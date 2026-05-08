@@ -565,8 +565,12 @@ class PaymentController extends Controller
 
         $invoice = $this->invoiceService->createForOrder($order);
 
+        // Do not expose unreleased (reverse-charge) invoices in the confirmation email.
+        // The customer will receive the invoice after signing the EU Entry Certificate.
+        $invoiceForEmail = ($invoice && $order->is_reverse_charge) ? null : $invoice;
+
         try {
-            Mail::to($order->customer_email)->send(new OrderConfirmation($order, $invoice));
+            Mail::to($order->customer_email)->send(new OrderConfirmation($order, $invoiceForEmail));
             Log::info('Stripe order confirmation email sent', [
                 'ref'            => $order->ref,
                 'customer_email' => $order->customer_email,

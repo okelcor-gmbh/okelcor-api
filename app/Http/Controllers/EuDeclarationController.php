@@ -101,6 +101,31 @@ class EuDeclarationController extends Controller
         $declaration->refresh();
 
         // ------------------------------------------------------------------
+        // Release linked invoice — non-blocking
+        // Customer can now see and download their final invoice.
+        // ------------------------------------------------------------------
+        try {
+            $invoice = $declaration->invoice_id
+                ? Invoice::find($declaration->invoice_id)
+                : Invoice::where('order_ref', $order->ref)->first();
+
+            if ($invoice && ! $invoice->released_at) {
+                $invoice->update(['released_at' => now()]);
+                Log::info('Invoice released after EU declaration signed', [
+                    'invoice_number' => $invoice->invoice_number,
+                    'order_ref'      => $order->ref,
+                    'declaration_id' => $declaration->id,
+                ]);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Invoice release failed after EU declaration signed', [
+                'order_ref'      => $order->ref,
+                'declaration_id' => $declaration->id,
+                'error'          => $e->getMessage(),
+            ]);
+        }
+
+        // ------------------------------------------------------------------
         // Generate PDF — non-blocking
         // ------------------------------------------------------------------
         try {

@@ -51,6 +51,13 @@ Track your order: {{ $trackingUrl }}
 @if ($invoice)
 Invoice number  : {{ $invoice->invoice_number }}
 View invoices   : {{ $invoicesUrl }}
+@elseif ($order->is_reverse_charge && $order->payment_status === 'paid')
+INVOICE NOTICE
+Your final invoice will be available after the EU Entry Certificate is signed.
+As your order qualifies for VAT zero-rating under the reverse-charge mechanism,
+the tax invoice will be released once you have signed the EU Entry Certificate
+(Gelangensbestätigung) confirming delivery to the destination EU member state.
+Sign and download from your account: {{ $trackingUrl }}
 @endif
 @if ($order->payment_method === 'bank_transfer' && $order->payment_status !== 'paid')
 ================================================================================

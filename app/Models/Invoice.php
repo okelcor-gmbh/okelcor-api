@@ -16,6 +16,7 @@ class Invoice extends Model
         'amount',
         'status',
         'pdf_url',
+        'released_at',
         'order_ref',
         'subtotal_net',
         'tax_treatment',
@@ -30,6 +31,7 @@ class Invoice extends Model
     protected $casts = [
         'issued_at'         => 'datetime',
         'due_at'            => 'datetime',
+        'released_at'       => 'datetime',
         'amount'            => 'decimal:2',
         'subtotal_net'      => 'decimal:2',
         'tax_rate'          => 'decimal:2',

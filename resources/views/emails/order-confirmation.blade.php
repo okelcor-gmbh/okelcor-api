@@ -147,6 +147,18 @@
                     </td>
                 </tr>
             </table>
+            @elseif ($order->is_reverse_charge && $order->payment_status === 'paid')
+            <!-- EU reverse-charge: invoice held until entry certificate signed -->
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-left:4px solid #f4511e;background-color:#fff8e1;margin-bottom:32px;">
+                <tr>
+                    <td style="padding:14px 18px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#5c5e62;line-height:1.6;">
+                        <strong style="color:#171a20;display:block;margin-bottom:4px;">Your final invoice will be available after the EU Entry Certificate is signed.</strong>
+                        As your order qualifies for VAT zero-rating under the reverse-charge mechanism (§&nbsp;6a UStG), the final tax invoice will be released once you have signed and submitted the EU Entry Certificate (Gelangensbestätigung) confirming that the goods have arrived in the destination EU member state.<br><br>
+                        You can sign the certificate and download your invoice from your account:
+                        <a href="{{ $trackingUrl }}" style="color:#171a20;text-decoration:underline;">{{ $trackingUrl }}</a>
+                    </td>
+                </tr>
+            </table>
             @endif
 
             @if ($order->payment_method === 'bank_transfer' && $order->payment_status !== 'paid')
