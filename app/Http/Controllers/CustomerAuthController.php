@@ -600,10 +600,24 @@ class CustomerAuthController extends Controller
         // InvoiceService skipped creation. Now that they are authenticated we can
         // create any missing invoices and link them to the account.
         try {
-            $existingOrderRefs = Invoice::whereIn(
-                'order_ref',
-                Order::where('customer_email', $customer->email)->pluck('ref')
-            )->pluck('order_ref');
+            $customerOrderRefs = Order::where('customer_email', $customer->email)->pluck('ref');
+
+            // Repair invoices linked to this customer's orders but with a stale
+            // customer_id (created before the right Customer account existed, or
+            // created from an imported/duplicate Customer row).
+            $repaired = Invoice::whereIn('order_ref', $customerOrderRefs)
+                ->where('customer_id', '!=', $customer->id)
+                ->update(['customer_id' => $customer->id]);
+
+            if ($repaired > 0) {
+                Log::info('Repaired stale invoice customer_id', [
+                    'customer_id' => $customer->id,
+                    'count'       => $repaired,
+                ]);
+            }
+
+            $existingOrderRefs = Invoice::whereIn('order_ref', $customerOrderRefs)
+                ->pluck('order_ref');
 
             $ordersNeedingInvoice = Order::where('customer_email', $customer->email)
                 ->where('payment_status', 'paid')

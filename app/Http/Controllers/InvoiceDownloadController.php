@@ -3,11 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Models\Invoice;
+use App\Models\Order;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Http\RedirectResponse;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class InvoiceDownloadController extends Controller
@@ -20,13 +21,26 @@ class InvoiceDownloadController extends Controller
             return response()->json(['message' => 'Unauthenticated.'], 401);
         }
 
-        if ($customer->id !== $invoice->customer_id) {
-            Log::warning('Invoice download: ownership check failed', [
-                'invoice_id'          => $invoice->id,
-                'invoice_customer_id' => $invoice->customer_id,
-                'auth_customer_id'    => $customer->id,
-            ]);
-            return response()->json(['message' => 'You do not have access to this invoice.'], 403);
+        if ((int) $customer->id !== (int) $invoice->customer_id) {
+            // Self-healing fallback: the stored customer_id may be stale (e.g. created
+            // before the right Customer account existed). Re-verify ownership via the
+            // order's customer_email and silently repair if confirmed.
+            $ownsOrder = $invoice->order_ref
+                && Order::where('ref', $invoice->order_ref)
+                         ->where('customer_email', $customer->email)
+                         ->exists();
+
+            if (! $ownsOrder) {
+                Log::warning('Invoice download: ownership check failed', [
+                    'invoice_id'          => $invoice->id,
+                    'invoice_customer_id' => $invoice->customer_id,
+                    'auth_customer_id'    => $customer->id,
+                ]);
+                return response()->json(['message' => 'You do not have access to this invoice.'], 403);
+            }
+
+            // Repair the stale customer_id so subsequent requests go through the fast path.
+            $invoice->updateQuietly(['customer_id' => $customer->id]);
         }
 
         if (! $invoice->released_at) {

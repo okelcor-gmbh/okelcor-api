@@ -31,8 +31,17 @@ class InvoiceService
 
             $invoice = Invoice::where('order_ref', $order->ref)->first();
 
-            if ($invoice && $invoice->pdf_url) {
-                return $invoice;
+            if ($invoice) {
+                // Repair stale customer_id when the invoice was created before
+                // the correct Customer account existed.
+                if ((int) $invoice->customer_id !== (int) $customer->id) {
+                    $invoice->updateQuietly(['customer_id' => $customer->id]);
+                    $invoice->customer_id = $customer->id;
+                }
+
+                if ($invoice->pdf_url) {
+                    return $invoice;
+                }
             }
 
             if (! $invoice) {
