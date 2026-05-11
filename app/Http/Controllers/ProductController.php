@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Brand;
 use App\Models\Product;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 class ProductController extends Controller
 {
@@ -201,10 +203,31 @@ class ProductController extends Controller
             'price_b2c'     => $p->price_b2c !== null ? (float) $p->price_b2c : null,
             'description'   => $p->description,
             'primary_image' => $p->primary_image ? url('storage/' . $p->primary_image) : null,
+            'brand_image'   => $this->brandImageFor($p->brand),
             'images'        => $p->images->map(fn ($img) => url('storage/' . $img->path))->values(),
             'is_active'     => (bool) $p->is_active,
             'stock'         => (int) $p->stock,
             'in_stock'      => (bool) $p->in_stock,
         ];
+    }
+
+    // Lazily loaded once per request; keyed by lowercase brand name.
+    private ?array $brandLogoCache = null;
+
+    private function brandLogoCache(): array
+    {
+        if ($this->brandLogoCache === null) {
+            $this->brandLogoCache = Brand::whereNotNull('logo')
+                ->get(['name', 'logo'])
+                ->mapWithKeys(fn ($b) => [strtolower($b->name) => url(Storage::url($b->logo))])
+                ->all();
+        }
+
+        return $this->brandLogoCache;
+    }
+
+    private function brandImageFor(string $brand): ?string
+    {
+        return $this->brandLogoCache()[strtolower($brand)] ?? null;
     }
 }
