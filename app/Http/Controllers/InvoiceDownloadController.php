@@ -43,21 +43,32 @@ class InvoiceDownloadController extends Controller
         }
 
         // Normalize pdf_url to a relative disk path regardless of how it was stored.
-        // Historical formats found in production:
-        //   "invoices/INV-2026-0004.pdf"                          → already correct
-        //   "/storage/invoices/INV-2026-0004.pdf"                 → strip /storage/ prefix
-        //   "https://api.okelcor.com/storage/invoices/INV-…pdf"  → extract after /storage/
+        // Supported formats:
+        //   "invoices/INV-2026-0004.pdf"                         → already correct
+        //   "/storage/invoices/INV-2026-0004.pdf"                → strip /storage/ prefix
+        //   "https://api.okelcor.com/storage/invoices/INV-….pdf" → extract after /storage/
         $diskPath = $this->normalizePdfPath($invoice->pdf_url);
 
+        // Fallback: if the stored/normalized path is missing, try the canonical name.
+        // Guards against a corrupted pdf_url column while the file is physically present.
+        $canonical = 'invoices/' . $invoice->invoice_number . '.pdf';
+
         if (! Storage::disk('public')->exists($diskPath)) {
-            Log::warning('Invoice download: file missing on disk', [
-                'invoice_id'   => $invoice->id,
-                'customer_id'  => $customer->id,
-                'pdf_url_raw'  => $invoice->pdf_url,
-                'pdf_url_norm' => $diskPath,
-                'full_path'    => Storage::disk('public')->path($diskPath),
-            ]);
-            return response()->json(['message' => 'Invoice PDF file was not found.'], 404);
+            if ($diskPath !== $canonical && Storage::disk('public')->exists($canonical)) {
+                // Silently repair pdf_url to the correct relative path
+                $invoice->updateQuietly(['pdf_url' => $canonical]);
+                $diskPath = $canonical;
+            } else {
+                Log::warning('Invoice download: file missing on disk', [
+                    'invoice_id'   => $invoice->id,
+                    'customer_id'  => $customer->id,
+                    'pdf_url_raw'  => $invoice->pdf_url,
+                    'pdf_url_norm' => $diskPath,
+                    'pdf_canonical'=> $canonical,
+                    'full_path'    => Storage::disk('public')->path($diskPath),
+                ]);
+                return response()->json(['message' => 'Invoice PDF file was not found.'], 404);
+            }
         }
 
         return response()->file(Storage::disk('public')->path($diskPath), [
