@@ -29,7 +29,7 @@ class InvoiceDownloadController extends Controller
 
         if (! $invoice->released_at) {
             return response()->json([
-                'message' => 'Invoice is not available until the EU Entry Certificate is signed.',
+                'message' => 'Invoice is not available until the EU Entry Certificate has been reviewed and acknowledged.',
             ], 423);
         }
 

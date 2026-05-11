@@ -1,5 +1,5 @@
 # Session Handoff — Okelcor API
-Last updated: 2026-05-07 (session 6)
+Last updated: 2026-05-08 (session 7)
 
 ## Project
 Laravel 13.2 / PHP 8.3 REST API for Okelcor B2B tyre wholesale.
@@ -35,9 +35,14 @@ composer install --no-dev
 /opt/alt/php83/usr/bin/php artisan route:cache
 ```
 
+**Session 8 deploy note:** Three migrations will run:
+- `2026_05_08_000003_create_trade_documents_table`
+- `2026_05_08_000004_add_released_at_to_invoices_table` (corrected backfill — releases RC invoices only on `acknowledged`, not `signed`)
+- `2026_05_11_000001_correct_released_at_for_signed_only_declarations` (nulls released_at for RC invoices whose declaration is signed-only)
+
 ---
 
-## Current Route Count: 157
+## Current Route Count: 162
 
 ### Customer Auth routes (public — no token)
 ```
@@ -57,7 +62,7 @@ PUT    /api/v1/auth/profile
 PUT    /api/v1/auth/change-password
 
 GET    /api/v1/auth/quotes       ← customer's own quote requests
-GET    /api/v1/auth/invoices     ← customer's own invoices
+GET    /api/v1/auth/invoices     ← customer's own invoices (released_at IS NOT NULL only)
 GET    /api/v1/invoices/{id}/download  ← download invoice PDF (auth.customer Bearer token)
 
 GET    /api/v1/auth/addresses
@@ -68,6 +73,9 @@ DELETE /api/v1/auth/addresses/{id}
 POST   /api/v1/auth/orders/{ref}/checkout              ← Pay Now — creates/refreshes Stripe Checkout Session for pending order
 POST   /api/v1/auth/orders/{ref}/declaration           ← sign EU entry certificate (Gelangensbestätigung)
 GET    /api/v1/auth/orders/{ref}/declaration/download  ← download signed declaration PDF
+
+GET    /api/v1/orders/{ref}/trade-documents            ← customer's trade documents for an order (issued docs only)
+GET    /api/v1/trade-documents/{id}/download           ← download a trade document PDF (auth.customer)
 ```
 
 #### GET /api/v1/auth/quotes — response shape
@@ -108,6 +116,8 @@ Status mapping (internal → customer-facing):
 ```
 Status values: `paid` | `unpaid` | `overdue`
 
+**Visibility gate:** only invoices where `released_at IS NOT NULL` are returned. For EU reverse-charge orders, `released_at` is `null` until admin acknowledges the EU Entry Certificate. Non-reverse-charge invoices have `released_at = issued_at` (immediately visible).
+
 #### GET /api/v1/invoices/{id}/download
 - Middleware: `auth.customer` — requires `Authorization: Bearer {customer_token}`
 - Verifies `invoice.customer_id === authenticated customer.id` — 403 if mismatch
@@ -115,10 +125,25 @@ Status values: `paid` | `unpaid` | `overdue`
 - Error responses (all JSON):
   - 401 `"Unauthenticated."` — no/invalid token
   - 403 `"You do not have access to this invoice."` — wrong customer
+  - 423 `"Invoice is not available until the EU Entry Certificate has been reviewed and acknowledged."` — `released_at` is null (reverse-charge orders pending admin acknowledgement)
   - 404 `"Invoice PDF is not available yet."` — `pdf_url` is null
   - 404 `"Invoice PDF file was not found."` — file missing on disk
 - Controller: `InvoiceDownloadController@download`
-- All 403/404 cases write `Log::warning` with `invoice_id`, `invoice_customer_id`, `auth_customer_id`, `pdf_url`
+- All 403/404/423 cases write `Log::warning` with `invoice_id`, `invoice_customer_id`, `auth_customer_id`, `pdf_url`
+
+#### GET /api/v1/orders/{ref}/trade-documents
+- Middleware: `auth.customer`
+- Ownership: matches `order.customer_email` to `customer.email` (case-insensitive); 404 if no match
+- Returns issued trade documents only: types `proforma`, `commercial_invoice`, `packing_list` with `status=issued`
+- Uploaded external files (customs clearance, etc.) are **not** returned on this endpoint
+- Response shape per item: `{ id, type, number, status, has_pdf, issued_at }`
+
+#### GET /api/v1/trade-documents/{id}/download
+- Middleware: `auth.customer`
+- Ownership: resolved via `order.customer_email`; 404 if no match (does not leak doc existence)
+- 404 if `pdf_path` is null or file missing on disk
+- Returns file as attachment: `PROFORMA-{number}.pdf` etc.
+- Controller: `TradeDocumentController@download`
 
 #### POST /api/v1/auth/orders/{ref}/checkout — Customer Pay Now
 - Middleware: `auth.customer` — requires `Authorization: Bearer {customer_token}`
@@ -281,7 +306,12 @@ POST   /admin/quote-requests/{id}/convert-to-order   ← converts quoted quote t
 GET    /admin/eu-declarations
 GET    /admin/eu-declarations/{id}
 GET    /admin/eu-declarations/{id}/download          ← download signed PDF from private disk
-POST   /admin/eu-declarations/{id}/acknowledge       ← mark declaration acknowledged
+POST   /admin/eu-declarations/{id}/acknowledge       ← mark declaration acknowledged; releases invoice + sends FinalInvoiceReleased email
+
+# Trade documents — super_admin, admin, order_manager
+POST   /admin/orders/{id}/trade-documents/proforma   ← generate/fetch proforma invoice PDF (idempotent)
+GET    /admin/orders/{id}/trade-documents            ← list all trade docs for an order (all types/statuses)
+GET    /admin/trade-documents/{id}/download          ← download any trade document file from private disk
 
 GET    /admin/contact-messages
 GET    /admin/contact-messages/{id}
@@ -448,10 +478,11 @@ Response (201):
 - `customerType` inferred: `company_name` present → `b2b`; else linked `customer.customer_type`; else null (treated as B2C)
 - `taxableBase = subtotal + delivery_cost`; `taxAmount = taxableBase × tax_rate / 100`; `total = taxableBase + taxAmount`
 - If `payment_method=stripe`: calls `StripeService::createCheckoutSessionForOrder($order)`, saves `payment_session_id`, passes `checkout_url` to email — failure is caught, logged, and does NOT block the 201 response
+- If `payment_method=bank_transfer`: auto-generates proforma invoice PDF via `TradeDocumentService::generateProformaForOrder()` — non-blocking (failure logged, never rolls back)
 - Sets `quote_requests.order_id` = new order ID to prevent re-conversion
 - Writes `OrderLog` entry with `action='status_changed'`, `new_value='confirmed'`, notes referencing quote ref
 - Sends `QuoteConvertedToOrder` email to `quote.email` after transaction — failure is caught and logged, never rolls back the order
-- Invoice is NOT auto-created on conversion — invoice is created by the Stripe webhook `checkout.session.completed` (Stripe path) or must be manually triggered (bank transfer path)
+- Invoice (INV-YYYY-NNNN) is NOT auto-created on conversion — invoice is created by the Stripe webhook (Stripe path) or when admin marks `payment_status=paid` (bank transfer path)
 - FormRequest: `ConvertQuoteToOrderRequest`
 
 #### GET /admin/quote-requests/{id} — detail response fields
@@ -634,6 +665,7 @@ NOT through the Vercel proxy.
 | `amount` | decimal(10,2) | |
 | `status` | enum | `paid`, `unpaid`, `overdue` — default `unpaid` |
 | `pdf_url` | varchar(500) | nullable — relative path e.g. `invoices/INV-2026-0001.pdf`; returned as absolute URL |
+| `released_at` | timestamp | nullable — null = hidden from customer; set to `issued_at` for non-reverse-charge invoices; set by admin acknowledge for reverse-charge |
 | `order_ref` | varchar(30) | nullable — unique per invoice |
 | `subtotal_net` | decimal(10,2) | nullable — `order.subtotal + order.delivery_cost` |
 | `tax_treatment` | varchar(30) | nullable — mirrors `orders.tax_treatment` |
@@ -641,6 +673,53 @@ NOT through the Vercel proxy.
 | `tax_amount` | decimal(10,2) | nullable |
 | `is_reverse_charge` | tinyint | default 0 |
 | `created_at` / `updated_at` | timestamp | |
+
+Migration: `2026_05_08_000004_add_released_at_to_invoices_table` — adds column + backfill (non-RC → `issued_at`, RC with **acknowledged** declaration → `admin_acknowledged_at`, RC signed-only or pending → `null`). Migration: `2026_05_11_000001_correct_released_at_for_signed_only_declarations` — correction for local DBs that ran the original backfill; nulls `released_at` for RC invoices whose declaration is only `signed` (not `acknowledged`).
+
+### `trade_documents`
+Migration: `2026_05_08_000003_create_trade_documents_table`
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | bigint | PK |
+| `order_id` | bigint FK | cascade delete → orders |
+| `order_ref` | varchar(30) | denormalized snapshot — readable after order deletion |
+| `created_by` | bigint FK | nullable → nullOnDelete → admin_users |
+| `type` | enum | `proforma`, `commercial_invoice`, `packing_list`, `customs_clearance`, `other` |
+| `number` | varchar(50) | nullable — document number e.g. `PRO-2026-0001` |
+| `status` | enum | `draft`, `issued`, `cancelled` — default `draft` |
+| `notes` | text | nullable |
+| `pdf_path` | varchar(500) | **hidden from API** — private disk path |
+| `file_path` | varchar(500) | **hidden from API** — private disk path for uploaded files |
+| `file_original_name` | varchar(255) | nullable — original filename of uploaded file |
+| `issued_at` | timestamp | nullable — when status became issued |
+| `created_at` / `updated_at` | timestamp | |
+
+Indexes: `order_id`, `order_ref`, `type`, `status`
+
+**Model:** `App\Models\TradeDocument` — `pdf_path` and `file_path` are in `$hidden`; use `getRawOriginal('pdf_path')` in controllers to access.
+
+**Service:** `App\Services\TradeDocumentService`
+- `generateProformaForOrder(Order $order, ?AdminUser $admin = null): TradeDocument` — idempotent; returns existing proforma if one exists for the order; creates new record + generates PDF (DomPDF) if not; PDF stored at `storage/app/private/trade-documents/PRO-{order_ref}.pdf`
+- Document number format: `PRO-YYYY-NNNN` — sequential, `lockForUpdate()` inside transaction to prevent races
+
+**Auto-generation (bank transfer orders):**
+- `PaymentController` — bank transfer webhook/manual pay path: auto-generates proforma after order is marked paid
+- `AdminQuoteRequestController::convertToOrder()` — auto-generates proforma after bank_transfer quote conversion
+- Both non-blocking (failure logged, never rolls back primary action)
+
+**PDF template:** `resources/views/pdf/proforma-invoice.blade.php` — DomPDF rendered, private disk
+
+**Admin-only endpoints:**
+- `POST /admin/orders/{id}/trade-documents/proforma` — idempotent; returns 201 if new, 200 if existing; response includes `{ id, type, number, status, has_pdf, issued_at }`
+- `GET /admin/orders/{id}/trade-documents` — all docs for the order (all types + statuses including uploads)
+- `GET /admin/trade-documents/{id}/download` — serves file from private disk; 404 if no file
+
+**Customer-facing filter:** only `type IN ('proforma','commercial_invoice','packing_list')` AND `status='issued'` docs are shown via customer endpoint. Uploaded customs/other docs are never exposed to customers.
+
+**Order response extensions (Phase 2C-2):**
+- Public/customer `GET /api/v1/orders/{ref}` and `GET /api/v1/orders` now include `trade_documents[]` array (filtered, issued only)
+- Admin `GET /admin/orders/{id}` now includes full `trade_documents[]` array (all types/statuses)
 
 ### `eu_declarations`
 Migration: `2026_05_07_200000_create_eu_declarations_table.php`
@@ -694,7 +773,7 @@ Indexes: `order_ref`, `status`, `customer_email`
 - `GET /admin/eu-declarations` — paginated list; filterable by `status` and `q` (order_ref, company_name, email, vat_number); roles: super_admin, admin, order_manager
 - `GET /admin/eu-declarations/{id}` — full detail including `has_signature` and `has_pdf` booleans; `signature_path` itself is never returned
 - `GET /admin/eu-declarations/{id}/download` — download signed PDF from private disk; 404 if not signed or file missing
-- `POST /admin/eu-declarations/{id}/acknowledge` — mark signed declaration as acknowledged; 409 if not in `signed` state
+- `POST /admin/eu-declarations/{id}/acknowledge` — mark signed declaration as acknowledged; 409 if status !== `signed`; sets `status='acknowledged'`, `admin_acknowledged_at`, `admin_acknowledged_by`; **releases the linked invoice** (`released_at = now()`); sends `FinalInvoiceReleased` email to customer (non-blocking try/catch)
 
 ### `products`
 | Column | Type | Notes |
@@ -818,6 +897,12 @@ Only quotes with `status='quoted'` can be converted to an order.
 **Order mode values:**
 - `live` — Stripe checkout orders
 - `manual` — Wix imported orders, organic manual orders, and quote-converted orders
+
+**Order model relationships:**
+- `items()` — `HasMany OrderItem`
+- `euDeclaration()` — `HasOne EuDeclaration`
+- `tradeDocuments()` — `HasMany TradeDocument` ordered by `created_at DESC`
+- `quoteRequest()` — `HasOne QuoteRequest`
 
 ### `order_items`
 | Column | Type | Notes |
@@ -1001,7 +1086,7 @@ Response (200):
 8. Stripe sends webhook to `POST /api/v1/payments/webhook`.
 9. Backend verifies `Stripe-Signature` header using `STRIPE_WEBHOOK_SECRET`.
 10. Handled events:
-    - `checkout.session.completed` → `payment_status=paid`, `status=confirmed`, creates invoice record + generates PDF, sends `OrderConfirmation` (with invoice number) to customer + `OrderReceived` to `ORDER_EMAIL`
+    - `checkout.session.completed` → `payment_status=paid`, `status=confirmed`, creates invoice record + generates PDF, sends `OrderConfirmation` (with invoice number for non-RC orders) to customer + `OrderReceived` to `ORDER_EMAIL`
     - `payment_intent.payment_failed` → `payment_status=failed`, `status=cancelled`
     - `charge.refunded` → `payment_status=refunded`
 
@@ -1011,9 +1096,17 @@ Response (200):
 - Invoice number: `INV-YYYY-NNNN` — sequence generated inside `DB::transaction` with `lockForUpdate()` on all same-year rows to prevent race conditions on concurrent webhook retries
 - PDF generated immediately via `barryvdh/laravel-dompdf` (v3.1.2) and stored to `storage/app/public/invoices/{invoice_number}.pdf`
 - `invoices.pdf_url` stores the **relative** path; `GET /api/v1/auth/invoices` returns an **absolute URL** via `url(Storage::url($path))`
+- `released_at`: set to `now()` for non-reverse-charge orders (immediately visible); set to `null` for reverse-charge orders (gated until admin acknowledges EU Entry Certificate)
 - Idempotency: if invoice record already exists with `pdf_url` set → return early; if `pdf_url` is null → skip record creation, re-run PDF generation only
 - PDF failure is non-blocking — logged as warning; invoice record is still returned and email still sent
 - Recovery: run `php artisan invoices:generate-missing-pdfs` to backfill any invoices where PDF generation failed
+
+**Reverse-charge invoice visibility (Phase 2C-3):**
+- Reverse-charge invoices are generated at payment time but `released_at = null`
+- Customer cannot see invoice in list or download until admin acknowledges the EU Entry Certificate
+- `GET /api/v1/auth/invoices` filters `WHERE released_at IS NOT NULL`
+- `GET /api/v1/invoices/{id}/download` returns 423 (Locked) if `released_at IS NULL`
+- Admin `POST /admin/eu-declarations/{id}/acknowledge` sets `released_at = now()` and sends `FinalInvoiceReleased` email
 
 **Order status flow (Stripe path):**
 ```
@@ -1053,12 +1146,21 @@ pending → confirmed (Stripe webhook) → processing (admin sets manually) → 
 | `AdminWelcome` | Super admin creates new admin user | new admin | `emails/admin-welcome.blade.php` |
 | `CustomerEmailVerification` | Customer registers | customer | `emails/customer-verify-email.blade.php` |
 | `CustomerPasswordReset` | Customer requests password reset | customer | `emails/customer-reset-password.blade.php` |
+| `FinalInvoiceReleased` | Admin acknowledges EU Entry Certificate | customer | `emails/final-invoice-released.blade.php` |
 
 - Manual order flow (`POST /api/v1/orders`) sends `OrderReceived` to admin only — no customer email on manual orders
+- **Reverse-charge OrderConfirmation:** invoice block is suppressed (invoice null passed) — instead shows amber notice: "Your final invoice will be available after the EU Entry Certificate is signed."
 - All sends are synchronous (`QUEUE_CONNECTION=sync`)
 - All failures are wrapped in try/catch — email failure never rolls back the primary action
 - Failures logged as `Log::error` (survives `LOG_LEVEL=error` on production)
 - Config keys (not env() calls): `config('mail.quote_email')` → `QUOTE_EMAIL`, `config('mail.order_email')` → `ORDER_EMAIL`
+
+**FinalInvoiceReleased email:**
+- Subject: `Your final invoice is ready — {order_ref}`
+- HTML view: `emails/final-invoice-released.blade.php` — orange accent, invoice details table, CTA button to `/account/invoices`
+- Plain-text: `emails/final-invoice-released-text.blade.php`
+- Variables: `declaration` (EuDeclaration), `invoice` (Invoice), `invoicesUrl` (frontend invoices page), `downloadUrl` (API download route)
+- Compliance note: explains §6a UStG reverse-charge zero-rating
 
 **QuoteRequestReceived (admin notification):**
 - Subject: `New quote request — {ref_number}`
@@ -1088,7 +1190,8 @@ pending → confirmed (Stripe webhook) → processing (admin sets manually) → 
 
 **OrderConfirmation email:**
 - Tax breakdown in tfoot: Subtotal (net) / Delivery / VAT / Total — guarded by `$order->tax_treatment !== null`
-- Optional invoice block (invoice number + link to `/account/invoices`) — omitted if invoice is null (guest checkout)
+- Optional invoice block (invoice number + link to `/account/invoices`) — omitted if invoice is null (guest checkout or reverse-charge order)
+- Reverse-charge paid orders: amber compliance notice explaining invoice will be released after EU Entry Certificate signing + admin acknowledgement
 
 **All email templates:**
 - Plain transactional HTML — white background, 3px orange top border, no image assets
@@ -1125,16 +1228,20 @@ Required for all reverse-charge EU B2B orders where `is_reverse_charge=true` and
 
 **Workflow:**
 1. Customer places order → payment confirmed → `InvoiceService::createForOrder()` fires
-2. `EuDeclarationService::shouldRequireForOrder()` checks the three conditions → if true, `createForOrder()` creates the `eu_declarations` record (status=`pending`)
-3. Frontend shows a "Complete your declaration" banner on the customer account order page when `declaration_required=true && declaration_status='pending'`
-4. Customer clicks → goes to signing form at `/account/orders/{ref}/declaration` (Next.js page)
-5. Customer fills & signs → `POST /api/v1/auth/orders/{ref}/declaration`
-6. Backend saves signing fields, signature PNG, generates PDF via DomPDF → status=`signed`
-7. Admin reviews via `GET /admin/eu-declarations` → marks acknowledged via `POST /admin/eu-declarations/{id}/acknowledge` → status=`acknowledged`
+2. Invoice created with `released_at = null` (reverse-charge gating)
+3. `EuDeclarationService::shouldRequireForOrder()` checks the three conditions → if true, `createForOrder()` creates the `eu_declarations` record (status=`pending`)
+4. Frontend shows a "Complete your declaration" banner on the customer account order page **only when** `declaration_required=true && declaration_status='pending' && payment_status='paid' && order.status='delivered'`
+5. Customer clicks → goes to signing form at `/account/orders/{ref}/declaration` (Next.js page)
+6. Customer fills & signs → `POST /api/v1/auth/orders/{ref}/declaration`
+7. Backend validates guards, saves signing fields, stores signature PNG, generates PDF → status=`signed`; invoice `released_at` is **NOT** set here
+8. Admin reviews via `GET /admin/eu-declarations` → marks acknowledged via `POST /admin/eu-declarations/{id}/acknowledge` → status=`acknowledged`; **sets `invoice.released_at = now()`**; sends `FinalInvoiceReleased` email to customer
+9. Customer can now see and download their invoice
 
 **Phase 2B-2 (DONE):** Migration, `EuDeclaration` model, `EuDeclarationService` (create + should-require logic), `AdminEuDeclarationController` (list + show), declaration fields wired into admin and public order detail responses.
 
 **Phase 2B-3 (DONE):** Customer signing endpoint `POST /auth/orders/{ref}/declaration`, `SignEuDeclarationRequest` FormRequest, signature PNG stored to private disk, DomPDF PDF generation, `EuDeclarationSigned` mailable (HTML + plain-text), admin download `GET /admin/eu-declarations/{id}/download`, admin acknowledge `POST /admin/eu-declarations/{id}/acknowledge`, customer download `GET /auth/orders/{ref}/declaration/download`, public/customer order response updated with `declaration_signed_name` + `declaration_download_available`.
+
+**Phase 2C-3 (DONE):** Invoice release gating via `released_at` column. Admin acknowledge now releases invoice and sends `FinalInvoiceReleased` email. **Compliance rule (final):** signing the declaration does NOT release the invoice — only admin acknowledgement does. Applies equally to Stripe and bank_transfer. Non-RC invoices are released immediately at payment.
 
 **Signing endpoint — `POST /api/v1/auth/orders/{ref}/declaration`:**
 - Auth: `auth.customer` Bearer token
@@ -1144,10 +1251,13 @@ Required for all reverse-charge EU B2B orders where `is_reverse_charge=true` and
   - 404 — order not found or wrong customer
   - 409 — declaration already signed or acknowledged
   - 422 — order does not require a declaration
+  - 422 `"Payment must be confirmed before the EU Entry Certificate can be signed."` — `order.payment_status !== 'paid'`
+  - 422 `"The EU Entry Certificate can only be signed after the order has been delivered."` — `order.status !== 'delivered'`
   - 422 — validation failure (FormRequest)
 - Stores signature PNG to `storage/app/private/eu-declarations/signatures/{uuid}.png`
 - Generates PDF to `storage/app/private/eu-declarations/pdf/{order_ref}.pdf` via DomPDF — non-blocking (failure logged, 200 still returned)
 - Sends `EuDeclarationSigned` mailable to `declaration.customer_email` — non-blocking
+- Sets `declaration.status = 'signed'`; does NOT release the invoice (`released_at` stays null)
 - Returns 200: `{ status, signed_at, order_ref, has_pdf }`
 
 **Customer download — `GET /api/v1/auth/orders/{ref}/declaration/download`:**
@@ -1162,6 +1272,9 @@ Required for all reverse-charge EU B2B orders where `is_reverse_charge=true` and
 **Admin acknowledge — `POST /api/v1/admin/eu-declarations/{id}/acknowledge`:**
 - Auth: `auth:sanctum` + `admin.role:super_admin,admin,order_manager`
 - 409 if status !== `signed`; sets `status='acknowledged'`, `admin_acknowledged_at`, `admin_acknowledged_by`
+- Finds linked invoice: `$decl->invoice ?? Invoice::where('order_ref', $decl->order_ref)->first()`
+- Sets `$invoice->released_at = now()` (makes invoice visible to customer)
+- Sends `FinalInvoiceReleased` email to `declaration.customer_email` (non-blocking try/catch)
 - Returns updated declaration detail
 
 **Back-fill in order detail — `GET /api/v1/orders/{ref}` (show only, not list):**
@@ -1169,16 +1282,19 @@ Required for all reverse-charge EU B2B orders where `is_reverse_charge=true` and
 - `setRelation()` sets it on the in-memory model so the response always returns `declaration_status='pending'`
 - The list endpoint (`GET /api/v1/orders?email=`) does NOT auto-create (would create rows for all old orders)
 
-**Files created/modified (Phase 2B-3 + bug fix):**
+**Files created/modified (Phase 2B-3 + 2C-3 + compliance adjustment):**
 - `app/Http/Requests/SignEuDeclarationRequest.php` ← new
-- `app/Http/Controllers/EuDeclarationController.php` ← new; auto-create logic added in same session
+- `app/Http/Controllers/EuDeclarationController.php` ← new; payment/delivery guards added; invoice release removed (moved to admin acknowledge)
 - `resources/views/pdf/eu-declaration.blade.php` ← new — §17a UStDV Gelangensbestätigung layout
 - `app/Mail/EuDeclarationSigned.php` ← new
 - `resources/views/emails/eu-declaration-signed.blade.php` ← new
 - `resources/views/emails/eu-declaration-signed-text.blade.php` ← new
-- `app/Http/Controllers/Admin/AdminEuDeclarationController.php` ← added `download()` + `acknowledge()`
-- `app/Http/Controllers/OrderController.php` ← injected `EuDeclarationService`; added `declaration_signed_name` + `declaration_download_available` to `formatOrder()`; back-fill in `show()`
-- `routes/api.php` ← added 4 new routes (2 customer + 2 admin)
+- `app/Mail/FinalInvoiceReleased.php` ← new (Phase 2C-3)
+- `resources/views/emails/final-invoice-released.blade.php` ← new (Phase 2C-3)
+- `resources/views/emails/final-invoice-released-text.blade.php` ← new (Phase 2C-3)
+- `app/Http/Controllers/Admin/AdminEuDeclarationController.php` ← added `download()` + `acknowledge()` + invoice release + FinalInvoiceReleased email
+- `app/Http/Controllers/OrderController.php` ← injected `EuDeclarationService`; added declaration fields + trade_documents to `formatOrder()`; back-fill in `show()`
+- `routes/api.php` ← added 9 new routes (2 EU declaration customer + 2 EU declaration admin + 5 trade document routes)
 
 **Storage — private disk:**
 - `local` disk root: `storage_path('app/private')`
@@ -1194,6 +1310,24 @@ Required for all reverse-charge EU B2B orders where `is_reverse_charge=true` and
 **Controllers injecting `EuDeclarationService`:**
 - `EuDeclarationController` — via constructor; used to auto-create missing declaration before signing
 - `OrderController` — via constructor; used to back-fill missing row in `show()` only
+
+### Trade Documents — Proforma Invoices (Phase 2C-2)
+
+Trade documents are commercial shipping/customs documents distinct from tax invoices (INV-YYYY-NNNN). The first supported type is the proforma invoice.
+
+**Use cases:**
+- Bank transfer orders: proforma sent to customer so they can initiate wire payment
+- Customs clearance documents uploaded by admin (type=`customs_clearance`)
+
+**Document number sequences:**
+- Proforma: `PRO-YYYY-NNNN` — sequential per year, `lockForUpdate()` inside transaction
+
+**Files:**
+- `app/Models/TradeDocument.php` — model with `$hidden = ['pdf_path', 'file_path']`
+- `app/Services/TradeDocumentService.php` — `generateProformaForOrder()` idempotent service
+- `resources/views/pdf/proforma-invoice.blade.php` — DomPDF template
+- `app/Http/Controllers/Admin/AdminTradeDocumentController.php` — admin endpoints
+- `app/Http/Controllers/TradeDocumentController.php` — customer endpoints
 
 ### Order Security & Audit Logging
 
@@ -1327,7 +1461,8 @@ ref, status, payment_status, payment_method, subtotal, delivery_cost, total,
 carrier, carrier_type, tracking_number, container_number, estimated_delivery, eta,
 created_at, items[], shipment_events[],
 declaration_required, declaration_status, declaration_signed_at,
-declaration_signed_name, declaration_download_available
+declaration_signed_name, declaration_download_available,
+trade_documents[]
 ```
 - `declaration_required` — `true` when `order.is_reverse_charge === true`; always present
 - `declaration_status` — `"pending"` | `"signed"` | `"acknowledged"` | `null`
@@ -1336,9 +1471,11 @@ declaration_signed_name, declaration_download_available
 - `declaration_signed_at` — ISO 8601 timestamp or `null`
 - `declaration_signed_name` — signed name in capitals or `null` until signed
 - `declaration_download_available` — `true` when `pdf_path` is set and `status` is `signed` or `acknowledged`
+- `trade_documents[]` — issued proforma/commercial_invoice/packing_list docs only; shape: `{ id, type, number, status, has_pdf, issued_at }`
 
 Admin order detail (`GET /admin/orders/{id}`) additionally returns:
 - `declaration_id` — the EU declaration record ID (needed to fetch/manage declaration as admin)
+- `trade_documents[]` — all docs for the order (all types + statuses, including uploads)
 
 ### CORS
 Allowed origins:
@@ -1361,6 +1498,7 @@ Allowed origins:
 - Validation error (422): `{ "message": "...", "errors": { "field": ["..."] } }`
 - Unauthenticated (401): `{ "message": "Unauthenticated." }`
 - Forbidden (403): `{ "message": "Forbidden. Insufficient role." }`
+- Locked (423): `{ "message": "Invoice is not available until the EU Entry Certificate is signed." }` — reverse-charge invoice before admin acknowledgement
 - Rate limited (429): `{ "message": "Too many failed login attempts. Try again in N seconds." }`
 - Import success: `{ "data": { "imported": N, "updated": N, "skipped": N, "errors": [] }, "message": "..." }`
 
@@ -1376,10 +1514,12 @@ Allowed origins:
 | `brands.logo` | relative: `brands/uuid.png` | absolute URL (`logo_url`) |
 | `hero_slides.image_url` | relative: `hero/uuid.jpg` | absolute URL |
 | `hero_slides.video_url` | relative: `hero/uuid.mp4` | absolute URL |
-| `invoices.pdf_url` | relative: `invoices/INV-YYYY-NNNN.pdf` | served via `/api/v1/invoices/{id}/download` (auth.customer) |
+| `invoices.pdf_url` | relative: `invoices/INV-YYYY-NNNN.pdf` | served via `/api/v1/invoices/{id}/download` (auth.customer); 423 if not yet released |
 | `quote_requests.attachment_path` | relative: `quote-attachments/uuid.ext` | absolute URL — admin only |
 | `eu_declarations.signature_path` | relative: `eu-declarations/uuid.png` | **private disk** — never returned raw in API; `has_signature` boolean returned instead |
-| `eu_declarations.pdf_path` | relative: `eu-declarations/DECL-OKL-XXXXX.pdf` | **private disk** — served via authenticated download endpoint (Phase 2B-3) |
+| `eu_declarations.pdf_path` | relative: `eu-declarations/DECL-OKL-XXXXX.pdf` | **private disk** — served via authenticated download endpoint |
+| `trade_documents.pdf_path` | relative: `trade-documents/PRO-OKL-XXXXX.pdf` | **private disk** — served via authenticated download endpoints |
+| `trade_documents.file_path` | relative: `trade-documents/uploads/uuid.ext` | **private disk** — served via admin download endpoint only |
 
 Storage disk: `public` → `storage/app/public/` → symlinked to `public/storage/`
 Conversion: `url(Storage::url($relativePath))` in controller formatters.
@@ -1422,7 +1562,15 @@ Conversion: `url(Storage::url($relativePath))` in controller formatters.
 | `import:wix-customers {file} --no-email` | Import customers without sending welcome emails |
 | `orders:cleanup-test-stripe --date=YYYY-MM-DD --email=EMAIL --dry-run` | Delete test Stripe orders by date + email (always dry-run first) |
 | `orders:delete-specific [--dry-run]` | Delete 9 specific hard-coded test order refs — dry-run first, then run without flag |
+| `orders:cleanup-test-data [--dry-run] [--force]` | Delete 10 specific hard-coded test order refs + all related data (items, invoices, declarations, trade docs, logs, files) — always dry-run first |
 | `invoices:generate-missing-pdfs [--dry-run] [--invoice=INV-YYYY-NNNN]` | Generate PDF files for invoices where `pdf_url IS NULL`; dry-run lists affected rows without writing |
+
+**`orders:cleanup-test-data` detail:**
+- Hard-coded refs: `OKL-14CVV2C`, `OKL-1303SMU`, `OKL-13180T5`, `OKL-YOTFQM`, `OKL-XW6LHC`, `OKL-1FES6QA`, `OKL-1A8IOAI`, `OKL-VDUWAD`, `OKL-1M84OQ9`, `OKL-1CDIP0E`
+- FK-safe deletion sequence: nullify `quote_requests.order_id` → delete `order_logs` (by order_ref) → `order_shipment_events` → `order_items` → `EuDeclaration` → `TradeDocument` → `Invoice` → `Order`
+- File cleanup AFTER DB transaction: public disk (invoice PDFs) + local/private disk (declaration PDFs, signatures, trade document files)
+- Customer accounts are NOT deleted
+- `--dry-run` shows preview table with counts; `--force` skips confirmation prompt
 
 ---
 
@@ -1434,8 +1582,9 @@ Conversion: `url(Storage::url($relativePath))` in controller formatters.
 | Adyen approval | Legacy/inactive until business account/API credentials are approved |
 | `GET /admin/products?trashed=only` | Restore works but no dedicated trashed product list endpoint |
 | Admin customer edit/deactivate | GET /admin/customers list exists; no PUT/DELETE per customer yet |
-| Quote-converted order invoice (bank transfer) | Invoice not auto-created on bank transfer conversion — created automatically on Stripe path via webhook; bank transfer requires admin to manually mark `payment_status=paid` |
-| Phase 2B-3 — EU Declaration signing flow | **DONE** — see Phase 2B-3 section above |
+| Trade document upload (customs clearance) | `type=customs_clearance` model/table exists; upload endpoint not yet built |
+| Phase 2C-2 — Trade Documents foundation | **DONE** — proforma auto-generation, admin endpoints, customer endpoints; see Phase 2C-2 section |
+| Phase 2C-3 — Invoice release gating | **DONE** — `released_at` column, 423 on locked download, admin acknowledge releases invoice + email |
 
 ---
 
