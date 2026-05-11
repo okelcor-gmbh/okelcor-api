@@ -23,10 +23,14 @@ return new class extends Migration
               AND  cost_price IS NULL
         ");
 
-        // Apply 35% discount: price = cost_price × 0.65
+        // Apply 35% discount to all three price fields.
+        // price_b2b and price_b2c were set to the same raw Excel price on
+        // import and must track price — Rapid has no B2B/B2C differentiation.
         DB::statement("
             UPDATE products
             SET    price      = ROUND(cost_price * 0.65, 2),
+                   price_b2b  = ROUND(cost_price * 0.65, 2),
+                   price_b2c  = ROUND(cost_price * 0.65, 2),
                    updated_at = NOW()
             WHERE  brand      = 'Rapid'
               AND  deleted_at IS NULL
@@ -39,6 +43,8 @@ return new class extends Migration
         DB::statement("
             UPDATE products
             SET    price      = cost_price,
+                   price_b2b  = cost_price,
+                   price_b2c  = cost_price,
                    updated_at = NOW()
             WHERE  brand      = 'Rapid'
               AND  deleted_at IS NULL

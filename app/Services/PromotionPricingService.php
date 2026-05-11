@@ -30,6 +30,8 @@ class PromotionPricingService
             ->whereNotNull('cost_price')
             ->update([
                 'price'      => DB::raw("ROUND(cost_price * {$factor}, 2)"),
+                'price_b2b'  => DB::raw("ROUND(cost_price * {$factor}, 2)"),
+                'price_b2c'  => DB::raw("ROUND(cost_price * {$factor}, 2)"),
                 'updated_at' => now(),
             ]);
     }
