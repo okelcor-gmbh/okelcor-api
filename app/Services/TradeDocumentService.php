@@ -115,14 +115,16 @@ class TradeDocumentService
         $invoice = Invoice::where('order_id', $order->id)->first();
 
         $document = DB::transaction(function () use ($order, $admin) {
+            $number = $this->sequentialNumber('packing_list');
             return TradeDocument::create([
-                'order_id'  => $order->id,
-                'order_ref' => $order->ref,
-                'type'      => 'packing_list',
-                'number'    => $this->sequentialNumber('packing_list'),
-                'status'    => 'issued',
-                'issued_by' => $admin?->id,
-                'issued_at' => now(),
+                'order_id'          => $order->id,
+                'order_ref'         => $order->ref,
+                'type'              => 'packing_list',
+                'number'            => $number,
+                'status'            => 'issued',
+                'original_filename' => $number . '.pdf',
+                'issued_by'         => $admin?->id,
+                'issued_at'         => now(),
             ]);
         });
 
