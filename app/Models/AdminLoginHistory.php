@@ -27,13 +27,21 @@ class AdminLoginHistory extends Model
 
     public static function record(AdminUser $admin, bool $success, bool $twoFaUsed, Request $request): void
     {
-        static::create([
-            'admin_id'    => $admin->id,
-            'admin_email' => $admin->email,
-            'success'     => $success,
-            'two_fa_used' => $twoFaUsed,
-            'ip_address'  => $request->ip(),
-            'user_agent'  => $request->userAgent(),
-        ]);
+        try {
+            static::create([
+                'admin_id'    => $admin->id,
+                'admin_email' => $admin->email,
+                'success'     => $success,
+                'two_fa_used' => $twoFaUsed,
+                'ip_address'  => $request->ip(),
+                'user_agent'  => $request->userAgent(),
+            ]);
+        } catch (\Throwable $e) {
+            // A failed history write must never block a login — log and continue.
+            \Illuminate\Support\Facades\Log::error('AdminLoginHistory::record failed', [
+                'admin_email' => $admin->email,
+                'error'       => $e->getMessage(),
+            ]);
+        }
     }
 }
