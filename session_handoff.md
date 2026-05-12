@@ -1,5 +1,5 @@
 # Session Handoff — Okelcor API
-Last updated: 2026-05-12 (session 10)
+Last updated: 2026-05-12 (session 11)
 
 ## Project
 Laravel 13.2 / PHP 8.3 REST API for Okelcor B2B tyre wholesale.
@@ -34,6 +34,34 @@ composer install --no-dev
 /opt/alt/php83/usr/bin/php artisan config:cache
 /opt/alt/php83/usr/bin/php artisan route:cache
 ```
+
+**Session 11 deploy note (Phase 2C-1/2/3 — Trade Documents):**
+
+**New database migration:**
+- `2026_05_12_163809_add_type_label_to_trade_documents_table` — adds nullable `type_label` column to `trade_documents`
+
+**Files changed (session 11):**
+- `app/Services/TradeDocumentService.php` — added `packing_list` (PL-) and `delivery_note` (DN-) to PREFIXES; added `generatePackingListForOrder()` and `generateDeliveryNoteForOrder()` methods; fixed Invoice lookup from wrong `order_id` column to correct `order_ref` column
+- `app/Http/Controllers/Admin/AdminTradeDocumentController.php` — added `generatePackingList()`, `generateDeliveryNote()`, `uploadShipmentDocument()`, `destroy()` methods; added `type_label` to `formatDocument()`; accepts `document_label` as alias for `type_label` on upload
+- `app/Http/Controllers/OrderController.php` — added `delivery_note` and `shipment_document` to customer trade_documents whitelist; added `type_label`, `has_file`, `sent_at`, `original_filename`, `mime_type`, `file_size` to response shape
+- `app/Http/Controllers/TradeDocumentController.php` — added `delivery_note` and `shipment_document` to customer whitelist; fixed download to check `file_path` as fallback for uploaded docs (was only checking `pdf_path`); added `type_label`, `has_file`, `mime_type`, `file_size` to response shape
+- `app/Models/TradeDocument.php` — added `type_label` to `$fillable`
+- `routes/api.php` — added `POST orders/{id}/generate-packing-list`, `POST orders/{id}/generate-delivery-note`, `POST orders/{id}/trade-documents/upload`, `DELETE trade-documents/{id}`
+- `resources/views/pdf/packing-list.blade.php` — new DomPDF template (PL)
+- `resources/views/pdf/delivery-note.blade.php` — new DomPDF template (DN) with EU reverse-charge Gelangensbestätigung notice
+- `database/migrations/2026_05_12_163809_add_type_label_to_trade_documents_table.php` — new
+
+**Deploy steps:**
+```bash
+git reset --hard origin/main
+composer install --no-dev
+/opt/alt/php83/usr/bin/php artisan migrate --force
+/opt/alt/php83/usr/bin/php artisan config:clear && /opt/alt/php83/usr/bin/php artisan config:cache
+/opt/alt/php83/usr/bin/php artisan route:cache
+/opt/alt/php83/usr/bin/php artisan view:clear
+```
+
+---
 
 **Session 10 deploy note (P1 Security Fixes):**
 
@@ -186,15 +214,14 @@ Status values: `paid` | `unpaid` | `overdue`
 #### GET /api/v1/orders/{ref}/trade-documents
 - Middleware: `auth.customer`
 - Ownership: matches `order.customer_email` to `customer.email` (case-insensitive); 404 if no match
-- Returns issued trade documents only: types `proforma`, `commercial_invoice`, `packing_list` with `status=issued`
-- Uploaded external files (customs clearance, etc.) are **not** returned on this endpoint
-- Response shape per item: `{ id, type, number, status, has_pdf, issued_at }`
+- Returns issued docs only: types `proforma`, `commercial_invoice`, `packing_list`, `delivery_note`, `shipment_document` with `status=issued`
+- Response shape per item: `{ id, type, type_label, number, status, has_pdf, has_file, issued_at, sent_at, original_filename, mime_type, file_size }`
 
 #### GET /api/v1/trade-documents/{id}/download
 - Middleware: `auth.customer`
 - Ownership: resolved via `order.customer_email`; 404 if no match (does not leak doc existence)
-- 404 if `pdf_path` is null or file missing on disk
-- Returns file as attachment: `PROFORMA-{number}.pdf` etc.
+- Checks `pdf_path` first, falls back to `file_path` (for uploaded shipment docs)
+- Returns file as download using `original_filename` as the filename
 - Controller: `TradeDocumentController@download`
 
 #### POST /api/v1/auth/orders/{ref}/checkout — Customer Pay Now
@@ -358,10 +385,14 @@ GET    /admin/eu-declarations/{id}
 GET    /admin/eu-declarations/{id}/download          ← download signed PDF from private disk
 POST   /admin/eu-declarations/{id}/acknowledge       ← mark declaration acknowledged; releases invoice + sends FinalInvoiceReleased email
 
-# Trade documents — super_admin, admin, order_manager
+# Trade documents — permission:trade_documents.manage
 POST   /admin/orders/{id}/trade-documents/proforma   ← generate/fetch proforma invoice PDF (idempotent)
+POST   /admin/orders/{id}/generate-packing-list      ← generate/fetch packing list PDF (idempotent)
+POST   /admin/orders/{id}/generate-delivery-note     ← generate/fetch delivery note PDF (idempotent)
+POST   /admin/orders/{id}/trade-documents/upload     ← upload shipment doc (Bill of Lading, CMR, etc.)
 GET    /admin/orders/{id}/trade-documents            ← list all trade docs for an order (all types/statuses)
 GET    /admin/trade-documents/{id}/download          ← download any trade document file from private disk
+DELETE /admin/trade-documents/{id}                   ← delete uploaded shipment_document only (generated PDFs protected)
 
 GET    /admin/contact-messages
 GET    /admin/contact-messages/{id}
@@ -727,49 +758,110 @@ NOT through the Vercel proxy.
 Migration: `2026_05_08_000004_add_released_at_to_invoices_table` — adds column + backfill (non-RC → `issued_at`, RC with **acknowledged** declaration → `admin_acknowledged_at`, RC signed-only or pending → `null`). Migration: `2026_05_11_000001_correct_released_at_for_signed_only_declarations` — correction for local DBs that ran the original backfill; nulls `released_at` for RC invoices whose declaration is only `signed` (not `acknowledged`).
 
 ### `trade_documents`
-Migration: `2026_05_08_000003_create_trade_documents_table`
+Migrations:
+- `2026_05_08_000003_create_trade_documents_table` — initial table
+- `2026_05_12_163809_add_type_label_to_trade_documents_table` — adds `type_label` column
 
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | bigint | PK |
 | `order_id` | bigint FK | cascade delete → orders |
 | `order_ref` | varchar(30) | denormalized snapshot — readable after order deletion |
-| `created_by` | bigint FK | nullable → nullOnDelete → admin_users |
-| `type` | enum | `proforma`, `commercial_invoice`, `packing_list`, `customs_clearance`, `other` |
-| `number` | varchar(50) | nullable — document number e.g. `PRO-2026-0001` |
-| `status` | enum | `draft`, `issued`, `cancelled` — default `draft` |
-| `notes` | text | nullable |
-| `pdf_path` | varchar(500) | **hidden from API** — private disk path |
+| `type` | varchar | `proforma`, `commercial_invoice`, `packing_list`, `delivery_note`, `shipment_document` |
+| `type_label` | varchar(100) | nullable — human label for shipment_document (e.g. "Bill of Lading", "CMR") |
+| `number` | varchar(50) | nullable — sequential document number e.g. `PI-2026-0001` |
+| `status` | varchar | `draft`, `issued`, `cancelled` — default `draft` |
+| `pdf_path` | varchar(500) | **hidden from API** — private disk path for generated PDFs |
 | `file_path` | varchar(500) | **hidden from API** — private disk path for uploaded files |
-| `file_original_name` | varchar(255) | nullable — original filename of uploaded file |
-| `issued_at` | timestamp | nullable — when status became issued |
+| `original_filename` | varchar(255) | nullable — original filename for uploads and generated docs |
+| `mime_type` | varchar(100) | nullable — MIME type of uploaded file |
+| `file_size` | int | nullable — file size in bytes |
+| `notes` | text | nullable — admin free-text notes |
+| `issued_by` | bigint FK | nullable → nullOnDelete → admin_users |
+| `issued_at` | timestamp | nullable — when document was issued |
+| `sent_at` | timestamp | nullable — when document was sent to customer |
 | `created_at` / `updated_at` | timestamp | |
 
 Indexes: `order_id`, `order_ref`, `type`, `status`
 
-**Model:** `App\Models\TradeDocument` — `pdf_path` and `file_path` are in `$hidden`; use `getRawOriginal('pdf_path')` in controllers to access.
+**Model:** `App\Models\TradeDocument` — `pdf_path` and `file_path` are in `$hidden`; use `getRawOriginal('pdf_path')` / `getRawOriginal('file_path')` in controllers to access.
+
+**Document number formats (sequential per year, `lockForUpdate()` in DB transaction):**
+| Type | Prefix | Example |
+|------|--------|---------|
+| `proforma` | PI | `PI-2026-0001` |
+| `commercial_invoice` | CI | `CI-2026-0001` |
+| `packing_list` | PL | `PL-2026-0001` |
+| `delivery_note` | DN | `DN-2026-0001` |
 
 **Service:** `App\Services\TradeDocumentService`
-- `generateProformaForOrder(Order $order, ?AdminUser $admin = null): TradeDocument` — idempotent; returns existing proforma if one exists for the order; creates new record + generates PDF (DomPDF) if not; PDF stored at `storage/app/private/trade-documents/PRO-{order_ref}.pdf`
-- Document number format: `PRO-YYYY-NNNN` — sequential, `lockForUpdate()` inside transaction to prevent races
+- `generateProformaForOrder(Order $order, ?AdminUser $admin = null): TradeDocument` — idempotent; returns existing issued proforma or creates new; generates PDF via DomPDF; stored at `trade-documents/proforma/PI-YYYY-XXXX.pdf`
+- `generatePackingListForOrder(Order $order, ?AdminUser $admin = null): TradeDocument` — idempotent; same pattern; stored at `trade-documents/packing-list/PL-YYYY-XXXX.pdf`; eager-loads `items.product` for tyre spec fields
+- `generateDeliveryNoteForOrder(Order $order, ?AdminUser $admin = null): TradeDocument` — idempotent; same pattern; stored at `trade-documents/delivery-note/DN-YYYY-XXXX.pdf`; includes EU reverse-charge Gelangensbestätigung notice when `is_reverse_charge=true`
+- All generation methods: PDF failure is non-blocking (logged as warning, DB record still returned)
+- Invoice lookup in packing list and delivery note: `Invoice::where('order_ref', $order->ref)` — NOT `order_id` (invoices table uses `order_ref` string FK, no `order_id` column)
 
 **Auto-generation (bank transfer orders):**
-- `PaymentController` — bank transfer webhook/manual pay path: auto-generates proforma after order is marked paid
-- `AdminQuoteRequestController::convertToOrder()` — auto-generates proforma after bank_transfer quote conversion
-- Both non-blocking (failure logged, never rolls back primary action)
+- `AdminQuoteRequestController::convertToOrder()` — auto-generates proforma after bank_transfer quote conversion (non-blocking)
 
-**PDF template:** `resources/views/pdf/proforma-invoice.blade.php` — DomPDF rendered, private disk
+**PDF templates:**
+- `resources/views/pdf/proforma-invoice.blade.php` — proforma invoice
+- `resources/views/pdf/packing-list.blade.php` — packing list with items table, weight placeholders, signature blocks
+- `resources/views/pdf/delivery-note.blade.php` — delivery note with receipt confirmation + EU reverse-charge notice; uses `@php $rowClass` for alternating rows (DomPDF nth-child unreliable)
 
-**Admin-only endpoints:**
-- `POST /admin/orders/{id}/trade-documents/proforma` — idempotent; returns 201 if new, 200 if existing; response includes `{ id, type, number, status, has_pdf, issued_at }`
-- `GET /admin/orders/{id}/trade-documents` — all docs for the order (all types + statuses including uploads)
-- `GET /admin/trade-documents/{id}/download` — serves file from private disk; 404 if no file
+**Storage paths (all on `local` disk = `storage/app/private/`):**
+| Type | Path |
+|------|------|
+| Proforma PDF | `trade-documents/proforma/PI-YYYY-XXXX.pdf` |
+| Packing list PDF | `trade-documents/packing-list/PL-YYYY-XXXX.pdf` |
+| Delivery note PDF | `trade-documents/delivery-note/DN-YYYY-XXXX.pdf` |
+| Shipment document upload | `trade-documents/uploads/{order_ref}/{YmdHis}_{safe-slug}.{ext}` |
 
-**Customer-facing filter:** only `type IN ('proforma','commercial_invoice','packing_list')` AND `status='issued'` docs are shown via customer endpoint. Uploaded customs/other docs are never exposed to customers.
+**Upload validation (shipment_document type):**
+- `file` required, `mimes:pdf,jpg,jpeg,png,xls,xlsx,csv`, `max:20480` (20 MB)
+- `type_label` required string max:100 — accepts either `type_label` or `document_label` field name (frontend alias)
+- `notes` optional string max:500
+- Filename sanitized: `Str::slug(basename, '_')` + timestamp prefix + original extension
 
-**Order response extensions (Phase 2C-2):**
-- Public/customer `GET /api/v1/orders/{ref}` and `GET /api/v1/orders` now include `trade_documents[]` array (filtered, issued only)
-- Admin `GET /admin/orders/{id}` now includes full `trade_documents[]` array (all types/statuses)
+**Admin endpoints:**
+- `POST /admin/orders/{id}/trade-documents/proforma` — idempotent; 201 new / 200 existing
+- `POST /admin/orders/{id}/generate-packing-list` — idempotent; 201 new / 200 existing
+- `POST /admin/orders/{id}/generate-delivery-note` — idempotent; 201 new / 200 existing
+- `POST /admin/orders/{id}/trade-documents/upload` — upload shipment doc; 201; logs `document_uploaded`
+- `DELETE /admin/trade-documents/{id}` — delete uploaded shipment_document only; 422 if type is not `shipment_document` (generated PDFs are protected); deletes physical file then DB record; logs `document_deleted`
+- `GET /admin/orders/{id}/trade-documents` — all docs for the order (all types + statuses)
+- `GET /admin/trade-documents/{id}/download` — serves `pdf_path ?? file_path` from private disk; 404 if no file
+- All write endpoints require `permission:trade_documents.manage`
+- All return `formatDocument()` shape: `{ id, order_id, order_ref, type, type_label, number, status, has_pdf, has_file, original_filename, mime_type, file_size, notes, issued_by, issued_at, sent_at, created_at, updated_at }`
+- All generate/upload endpoints write `document_generated` / `document_uploaded` to `order_logs` (try/catch — never blocks)
+
+**Customer-facing filter:** types `proforma`, `commercial_invoice`, `packing_list`, `delivery_note`, `shipment_document` with `status='issued'` are shown via both customer endpoints.
+
+**Customer download fix:** `GET /api/v1/auth/trade-documents/{id}/download` now falls back to `file_path` for uploaded docs (previously only checked `pdf_path`). Returns `original_filename` as the download filename.
+
+**Order response — trade_documents[] shape (customer endpoints):**
+```json
+{
+  "id": 6,
+  "type": "delivery_note",
+  "type_label": null,
+  "number": "DN-2026-0001",
+  "status": "issued",
+  "has_pdf": true,
+  "has_file": false,
+  "issued_at": "2026-05-12T...",
+  "sent_at": null,
+  "original_filename": "DN-2026-0001.pdf",
+  "mime_type": null,
+  "file_size": null
+}
+```
+For `shipment_document`: `type_label` = "Bill of Lading" etc., `has_pdf=false`, `has_file=true`, `number=null`, `mime_type` and `file_size` populated.
+
+**Public/customer order response includes `trade_documents[]`:**
+- `GET /api/v1/orders/{ref}` (inline in order) — all issued types including delivery_note and shipment_document
+- `GET /api/v1/auth/orders/{ref}/trade-documents` (standalone list) — same filter
+- Admin `GET /admin/orders/{id}` — full array (all types/statuses/uploads)
 
 ### `eu_declarations`
 Migration: `2026_05_07_200000_create_eu_declarations_table.php`
@@ -979,7 +1071,7 @@ Append-only audit trail — no `updated_at`, never mutated after insert.
 | `order_ref` | varchar(30) | denormalized — readable even after order hard-deleted |
 | `admin_user_id` | bigint FK | nullable → nullOnDelete — log survives user deletion |
 | `admin_user_email` | varchar(255) | nullable — denormalized |
-| `action` | enum | `status_changed`, `cancelled`, `deleted`, `tracking_updated`, `payment_status_changed` |
+| `action` | enum | `status_changed`, `cancelled`, `deleted`, `tracking_updated`, `payment_status_changed`, `document_generated`, `document_uploaded`, `document_deleted` |
 | `old_value` | varchar(100) | nullable — previous status/value |
 | `new_value` | varchar(100) | nullable — new status/value |
 | `notes` | text | nullable — optional context |
@@ -1363,23 +1455,27 @@ Required for all reverse-charge EU B2B orders where `is_reverse_charge=true` and
 - `EuDeclarationController` — via constructor; used to auto-create missing declaration before signing
 - `OrderController` — via constructor; used to back-fill missing row in `show()` only
 
-### Trade Documents — Proforma Invoices (Phase 2C-2)
+### Trade Documents — Generated + Uploaded (Phase 2C-1/2/3)
 
-Trade documents are commercial shipping/customs documents distinct from tax invoices (INV-YYYY-NNNN). The first supported type is the proforma invoice.
+Trade documents are commercial shipping/customs documents distinct from tax invoices (INV-YYYY-NNNN).
 
-**Use cases:**
-- Bank transfer orders: proforma sent to customer so they can initiate wire payment
-- Customs clearance documents uploaded by admin (type=`customs_clearance`)
+**Supported types:**
+| Type | Number prefix | Generated/Uploaded | Customer visible |
+|------|--------------|-------------------|-----------------|
+| `proforma` | PI- | Generated (DomPDF) | Yes |
+| `commercial_invoice` | CI- | Generated (DomPDF) | Yes |
+| `packing_list` | PL- | Generated (DomPDF) | Yes |
+| `delivery_note` | DN- | Generated (DomPDF) | Yes |
+| `shipment_document` | none | Uploaded by admin | Yes |
 
-**Document number sequences:**
-- Proforma: `PRO-YYYY-NNNN` — sequential per year, `lockForUpdate()` inside transaction
-
-**Files:**
-- `app/Models/TradeDocument.php` — model with `$hidden = ['pdf_path', 'file_path']`
-- `app/Services/TradeDocumentService.php` — `generateProformaForOrder()` idempotent service
-- `resources/views/pdf/proforma-invoice.blade.php` — DomPDF template
-- `app/Http/Controllers/Admin/AdminTradeDocumentController.php` — admin endpoints
-- `app/Http/Controllers/TradeDocumentController.php` — customer endpoints
+**Key files:**
+- `app/Models/TradeDocument.php` — `$hidden = ['pdf_path', 'file_path']`; use `getRawOriginal()` in controllers
+- `app/Services/TradeDocumentService.php` — all four idempotent generate methods; `PREFIXES` array defines number format
+- `resources/views/pdf/proforma-invoice.blade.php` — proforma DomPDF template
+- `resources/views/pdf/packing-list.blade.php` — packing list DomPDF template (items + weight block + sig blocks)
+- `resources/views/pdf/delivery-note.blade.php` — delivery note DomPDF template (receipt confirmation + EU RC Gelangensbestätigung notice)
+- `app/Http/Controllers/Admin/AdminTradeDocumentController.php` — all admin endpoints (generate/upload/delete/download/list)
+- `app/Http/Controllers/TradeDocumentController.php` — customer list + download endpoints
 
 ### Rapid Product Pricing — Auto-Recalculation (Session 8)
 
@@ -1469,7 +1565,7 @@ match(strtoupper($quote->incoterm)) {
   ]
 }
 ```
-- Actions logged: `status_changed` (any status transition including quote conversion), `cancelled` (status set to cancelled), `tracking_updated` (any of carrier/tracking_number/container_number/estimated_delivery/eta), `deleted` (hard delete before records removed)
+- Actions logged: `status_changed` (any status transition including quote conversion), `cancelled` (status set to cancelled), `tracking_updated` (any of carrier/tracking_number/container_number/estimated_delivery/eta), `deleted` (hard delete before records removed), `document_generated` (proforma/packing_list/delivery_note created), `document_uploaded` (shipment_document file uploaded), `document_deleted` (shipment_document file deleted)
 
 ### Container Tracking (Public)
 - `GET /api/v1/tracking/{container}` — auto-detects carrier by tracking number format
@@ -1579,7 +1675,7 @@ trade_documents[]
 - `declaration_signed_at` — ISO 8601 timestamp or `null`
 - `declaration_signed_name` — signed name in capitals or `null` until signed
 - `declaration_download_available` — `true` when `pdf_path` is set and `status` is `signed` or `acknowledged`
-- `trade_documents[]` — issued proforma/commercial_invoice/packing_list docs only; shape: `{ id, type, number, status, has_pdf, issued_at }`
+- `trade_documents[]` — issued docs (types: `proforma`, `commercial_invoice`, `packing_list`, `delivery_note`, `shipment_document`); shape: `{ id, type, type_label, number, status, has_pdf, has_file, issued_at, sent_at, original_filename, mime_type, file_size }`
 
 Admin order detail (`GET /admin/orders/{id}`) additionally returns:
 - `declaration_id` — the EU declaration record ID (needed to fetch/manage declaration as admin)
@@ -1626,8 +1722,8 @@ Allowed origins:
 | `quote_requests.attachment_path` | relative: `quote-attachments/uuid.ext` | absolute URL — admin only |
 | `eu_declarations.signature_path` | relative: `eu-declarations/uuid.png` | **private disk** — never returned raw in API; `has_signature` boolean returned instead |
 | `eu_declarations.pdf_path` | relative: `eu-declarations/DECL-OKL-XXXXX.pdf` | **private disk** — served via authenticated download endpoint |
-| `trade_documents.pdf_path` | relative: `trade-documents/PRO-OKL-XXXXX.pdf` | **private disk** — served via authenticated download endpoints |
-| `trade_documents.file_path` | relative: `trade-documents/uploads/uuid.ext` | **private disk** — served via admin download endpoint only |
+| `trade_documents.pdf_path` | relative: e.g. `trade-documents/proforma/PI-2026-0001.pdf` | **private disk** — served via admin + customer download endpoints |
+| `trade_documents.file_path` | relative: `trade-documents/uploads/{order_ref}/{ts}_{slug}.ext` | **private disk** — served via admin + customer download endpoints; customer download added in Phase 2C-3 |
 
 Storage disk: `public` → `storage/app/public/` → symlinked to `public/storage/`
 Conversion: `url(Storage::url($relativePath))` in controller formatters.
@@ -1692,9 +1788,10 @@ Conversion: `url(Storage::url($relativePath))` in controller formatters.
 | Adyen approval | Legacy/inactive until business account/API credentials are approved |
 | `GET /admin/products?trashed=only` | Restore works but no dedicated trashed product list endpoint |
 | Admin customer edit/deactivate | GET /admin/customers list exists; no PUT/DELETE per customer yet |
-| Trade document upload (customs clearance) | `type=customs_clearance` model/table exists; upload endpoint not yet built |
-| Phase 2C-2 — Trade Documents foundation | **DONE** — proforma auto-generation, admin endpoints, customer endpoints; see Phase 2C-2 section |
-| Phase 2C-3 — Invoice release gating | **DONE** — `released_at` column, 423 on locked download, admin acknowledge releases invoice + email |
+| Phase 2C-1 — Packing List | **DONE** — `PL-YYYY-XXXX` sequential numbers, DomPDF template, admin endpoint, customer whitelist |
+| Phase 2C-2 — Delivery Note | **DONE** — `DN-YYYY-XXXX` sequential numbers, DomPDF template with EU reverse-charge notice, admin endpoint, customer whitelist |
+| Phase 2C-3 — Shipment Document Uploads | **DONE** — `POST upload` + `DELETE` endpoints, private disk storage, `type_label` column, customer whitelist; accepts `document_label` or `type_label` field |
+| Invoice release gating | **DONE** — `released_at` column, 423 on locked download, admin acknowledge releases invoice + email |
 | Rapid product auto-pricing | **DONE** — `cost_price` base, PromotionPricingService, AdminPromotionController hook; price/price_b2b/price_b2c all aligned |
 | Incoterms FOB-first model | **DONE** — config, PDF templates, emails updated; `Custom` added as valid incoterm; label renamed to "Delivery / Shipping Terms" everywhere |
 
