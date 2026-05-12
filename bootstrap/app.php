@@ -30,6 +30,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'admin.role'    => \App\Http\Middleware\CheckAdminRole::class,
             'auth.customer' => \App\Http\Middleware\CustomerAuth::class,
+            'auth.admin'    => \App\Http\Middleware\EnsureAdminToken::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

@@ -24,20 +24,12 @@ class OrderController extends Controller
         private EuDeclarationService $declarationService,
     ) {}
 
-    /**
-     * GET /api/v1/orders?email=customer@example.com
-     *
-     * Returns orders for a given email address, with items.
-     * Requires ?email= — returns empty list if omitted.
-     */
     public function index(Request $request): JsonResponse
     {
-        $request->validate([
-            'email' => ['required', 'email', 'max:255'],
-        ]);
+        $email = $request->user()->email;
 
         $orders = Order::with(['items', 'shipmentEvents', 'euDeclaration', 'tradeDocuments'])
-            ->where('customer_email', $request->email)
+            ->where('customer_email', $email)
             ->orderByDesc('created_at')
             ->get();
 
@@ -51,17 +43,15 @@ class OrderController extends Controller
     /**
      * GET /api/v1/orders/{ref}
      *
-     * Returns the full current state of one order by its ref.
-     * Used by the customer tracking page (fetched with cache: "no-store").
-     *
      * Auto-creates a pending eu_declarations row for qualifying reverse-charge
      * orders that pre-date Phase 2B-2 deployment, so declaration_status is
      * always 'pending' (never null) when declaration_required is true.
      */
-    public function show(string $ref): JsonResponse
+    public function show(Request $request, string $ref): JsonResponse
     {
         $order = Order::with(['items', 'shipmentEvents', 'euDeclaration', 'tradeDocuments'])
             ->where('ref', $ref)
+            ->where('customer_email', $request->user()->email)
             ->firstOrFail();
 
         // Back-fill missing declaration row for pre-2B-2 reverse-charge orders.

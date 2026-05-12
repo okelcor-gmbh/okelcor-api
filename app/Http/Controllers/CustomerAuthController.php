@@ -218,15 +218,13 @@ class CustomerAuthController extends Controller
     public function recordLogin(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'last_login_at'       => ['nullable', 'date'],
-            'last_login_ip'       => ['nullable', 'string', 'max:45'],
             'last_login_location' => ['nullable', 'string', 'max:100'],
             'user_agent'          => ['nullable', 'string', 'max:500'],
         ]);
 
         $customer  = $request->user();
-        $loginAt   = isset($data['last_login_at']) ? now()->parse($data['last_login_at']) : now();
-        $ip        = $data['last_login_ip'] ?? $request->ip();
+        $loginAt   = now();
+        $ip        = $request->ip();
         $location  = $data['last_login_location'] ?? null;
         $userAgent = $data['user_agent'] ?? $request->userAgent();
 

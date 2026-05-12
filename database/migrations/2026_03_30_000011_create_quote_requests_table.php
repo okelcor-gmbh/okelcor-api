@@ -31,8 +31,8 @@ return new class extends Migration
             $table->timestamp('created_at')->useCurrent();
             $table->timestamp('updated_at')->useCurrent()->useCurrentOnUpdate();
 
-            $table->index('status', 'idx_status');
-            $table->index('email', 'idx_email');
+            $table->index('status', 'quote_requests_status_idx');
+            $table->index('email', 'quote_requests_email_idx');
         });
     }
 

@@ -17,7 +17,7 @@ return new class extends Migration
             $table->timestamp('subscribed_at')->useCurrent();
             $table->timestamp('unsubscribed_at')->nullable();
 
-            $table->index('email', 'idx_email');
+            $table->index('email', 'newsletter_subscribers_email_idx');
         });
     }
 

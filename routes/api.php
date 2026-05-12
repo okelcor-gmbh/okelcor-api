@@ -56,11 +56,20 @@ Route::prefix('v1')->group(function () {
     // Customer auth — public (no token required)
     // -------------------------------------------------------------------------
     Route::prefix('auth')->group(function () {
-        Route::post('register', [CustomerAuthController::class, 'register']);
-        Route::post('login', [CustomerAuthController::class, 'login']);
-        Route::post('forgot-password', [CustomerAuthController::class, 'forgotPassword']);
-        Route::post('reset-password', [CustomerAuthController::class, 'resetPassword']);
-        Route::post('resend-verification', [CustomerAuthController::class, 'resendVerification']);
+        // Standard credential endpoints — 10 per IP per minute
+        Route::middleware('throttle:auth')->group(function () {
+            Route::post('register', [CustomerAuthController::class, 'register']);
+            Route::post('login', [CustomerAuthController::class, 'login']);
+            Route::post('reset-password', [CustomerAuthController::class, 'resetPassword']);
+        });
+
+        // Email-dispatching endpoints — stricter: 5 per IP per minute
+        Route::middleware('throttle:auth-email')->group(function () {
+            Route::post('forgot-password', [CustomerAuthController::class, 'forgotPassword']);
+            Route::post('resend-verification', [CustomerAuthController::class, 'resendVerification']);
+        });
+
+        // Verification link — single-use, no rate limit needed
         Route::get('verify-email/{id}/{hash}', [CustomerAuthController::class, 'verifyEmail'])
             ->name('verification.verify');
     });
@@ -85,7 +94,7 @@ Route::prefix('v1')->group(function () {
         Route::delete('addresses/{id}', [CustomerAddressController::class, 'destroy']);
 
         // Orders — customer pay-now + EU entry certificate + trade documents
-        Route::post('orders/{ref}/checkout', [CustomerOrderController::class, 'checkout']);
+        Route::post('orders/{ref}/checkout', [CustomerOrderController::class, 'checkout'])->middleware('throttle:checkout');
         Route::post('orders/{ref}/declaration', [EuDeclarationController::class, 'sign']);
         Route::get('orders/{ref}/declaration/download', [EuDeclarationController::class, 'download']);
         Route::get('orders/{ref}/trade-documents', [TradeDocumentController::class, 'index']);
@@ -132,8 +141,10 @@ Route::prefix('v1')->group(function () {
     Route::get('settings/public', [SettingController::class, 'public']);
     Route::get('settings', [SettingController::class, 'index']);
 
-    // Container tracking — public, no auth
-    Route::get('tracking/{container}', ContainerTrackingController::class);
+    // Container tracking — rate limited: 30/min (guards external DHL + ShipsGo calls)
+    Route::middleware('throttle:tracking')->group(function () {
+        Route::get('tracking/{container}', ContainerTrackingController::class);
+    });
 
     // Search — rate limited: 30/min
     Route::middleware('throttle:search')->group(function () {
@@ -160,11 +171,15 @@ Route::prefix('v1')->group(function () {
         'message' => 'Mollie payments are currently disabled.',
     ], 410));
 
+    // Customer order history — protected by customer Bearer token
+    Route::middleware('auth.customer')->group(function () {
+        Route::get('orders', [OrderController::class, 'index']);
+        Route::get('orders/{ref}', [OrderController::class, 'show']);
+    });
+
     // Public forms — rate limited: 10/hour
     Route::middleware('throttle:public-form')->group(function () {
         Route::post('contact', [ContactController::class, 'store']);
-        Route::get('orders', [OrderController::class, 'index']);
-        Route::get('orders/{ref}', [OrderController::class, 'show']);
         Route::post('orders', [OrderController::class, 'store']);
         Route::post('newsletter/subscribe', [NewsletterController::class, 'subscribe']);
     });
@@ -190,7 +205,7 @@ Route::prefix('v1')->group(function () {
     //   editor       — content only (products, articles, categories, hero slides, brands, media, settings)
     //   order_manager — operations only (orders, quote requests, contacts, newsletter)
     // -------------------------------------------------------------------------
-    Route::middleware('auth:sanctum')->prefix('admin')->group(function () {
+    Route::middleware(['auth:sanctum', 'auth.admin'])->prefix('admin')->group(function () {
 
         // Dashboard — all authenticated admin roles
         Route::get('dashboard', [AdminDashboardController::class, 'stats']);

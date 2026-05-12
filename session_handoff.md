@@ -1,5 +1,5 @@
 # Session Handoff — Okelcor API
-Last updated: 2026-05-08 (session 7)
+Last updated: 2026-05-12 (session 10)
 
 ## Project
 Laravel 13.2 / PHP 8.3 REST API for Okelcor B2B tyre wholesale.
@@ -35,10 +35,53 @@ composer install --no-dev
 /opt/alt/php83/usr/bin/php artisan route:cache
 ```
 
-**Session 8 deploy note:** Three migrations will run:
-- `2026_05_08_000003_create_trade_documents_table`
-- `2026_05_08_000004_add_released_at_to_invoices_table` (corrected backfill — releases RC invoices only on `acknowledged`, not `signed`)
-- `2026_05_11_000001_correct_released_at_for_signed_only_declarations` (nulls released_at for RC invoices whose declaration is signed-only)
+**Session 10 deploy note (P1 Security Fixes):**
+
+**No new database migrations.**
+
+**Files changed (session 10):**
+- `routes/api.php` — auth public group split into `throttle:auth` (register, login, reset-password) and `throttle:auth-email` (forgot-password, resend-verification); `GET /orders` and `GET /orders/{ref}` moved from public to `auth.customer`; `throttle:checkout` added to checkout route; `throttle:tracking` added to tracking route
+- `app/Providers/AppServiceProvider.php` — added 4 named rate limiters: `auth` (10/min), `auth-email` (5/min), `checkout` (10/min by customer ID), `tracking` (30/min)
+- `app/Http/Controllers/CustomerAuthController.php` — `recordLogin()` no longer accepts client-supplied `last_login_ip` or `last_login_at`; server IP and `now()` always used
+- `app/Http/Controllers/OrderController.php` — `index()` uses `$request->user()->email` (token-derived) instead of `?email=` param; `show()` adds ownership check `WHERE customer_email = token email`
+
+**Deploy steps (no migration needed):**
+```bash
+git reset --hard origin/main
+composer install --no-dev
+php artisan config:clear && php artisan config:cache
+php artisan route:cache
+```
+
+---
+
+**Session 9 deploy note (Security Audit Phase 1 + P0 fix):**
+
+**No new database migrations** — this session's changes are middleware and migration-file-only.
+
+**Files changed (session 9):**
+- `app/Http/Middleware/EnsureAdminToken.php` — **NEW** — rejects any Sanctum token that is not an AdminUser instance (403)
+- `bootstrap/app.php` — registered alias `auth.admin` → `EnsureAdminToken`
+- `routes/api.php` — changed admin group from `middleware('auth:sanctum')` to `middleware(['auth:sanctum', 'auth.admin'])` — ALL 100+ admin routes now require AdminUser token
+- `tests/Feature/AdminTokenGuardTest.php` — **NEW** — 16 passing tests covering customer-rejected/admin-passes/role-stacking
+- `database/migrations/2026_03_30_000011_create_quote_requests_table.php` — renamed `idx_status` → `quote_requests_status_idx`, `idx_email` → `quote_requests_email_idx` (SQLite test compat only — no production effect)
+- `database/migrations/2026_03_30_000012_create_contact_messages_table.php` — same pattern
+- `database/migrations/2026_03_30_000013_create_orders_table.php` — same pattern
+- `database/migrations/2026_03_30_000015_create_newsletter_subscribers_table.php` — same pattern
+- `database/migrations/2026_04_19_185023_create_invoices_table.php` — same pattern
+
+**Deploy steps (no migration needed):**
+```bash
+git reset --hard origin/main
+composer install --no-dev
+php artisan config:clear && php artisan config:cache
+php artisan route:cache
+```
+
+**Session 8 migrations (all previously ran on production):**
+- `2026_05_11_140000_backfill_rapid_cost_price_and_recalculate_prices` — ran, did nothing
+- `2026_05_11_150000_force_rapid_prices_at_35pct` — applied 35% to Rapid price
+- `2026_05_11_160000_fix_rapid_price_b2b_b2c_to_match_price` — aligned price_b2b/price_b2c
 
 ---
 
@@ -76,6 +119,9 @@ GET    /api/v1/auth/orders/{ref}/declaration/download  ← download signed decla
 
 GET    /api/v1/orders/{ref}/trade-documents            ← customer's trade documents for an order (issued docs only)
 GET    /api/v1/trade-documents/{id}/download           ← download a trade document PDF (auth.customer)
+
+GET    /api/v1/orders                      ← customer's own orders (email from token — no ?email= param)
+GET    /api/v1/orders/{ref}               ← single order — ownership verified via token email
 ```
 
 #### GET /api/v1/auth/quotes — response shape
@@ -190,9 +236,7 @@ POST   /api/v1/vat/validate
 POST   /api/v1/payments/create-session
 POST   /api/v1/payments/tax-preview        ← tax calculation preview (no order/session created)
 POST   /api/v1/payments/webhook            ← Stripe webhook handler
-GET    /api/v1/tracking/{container}        ← auto-detects DHL vs sea freight
-GET    /api/v1/orders                      ← requires ?email=
-GET    /api/v1/orders/{ref}
+GET    /api/v1/tracking/{container}        ← auto-detects DHL vs sea freight (throttle:tracking)
 POST   /api/v1/orders
 POST   /api/v1/contact
 POST   /api/v1/newsletter/subscribe
@@ -791,7 +835,10 @@ Indexes: `order_ref`, `status`, `customer_email`
 | `spec` | varchar(50) | e.g. "88Y" |
 | `season` | enum | Summer / Winter / All Season / All-Terrain |
 | `type` | enum | PCR / TBR / Used / OTR |
-| `price` | decimal(10,2) | |
+| `cost_price` | decimal(10,2) | nullable — **permanent base/reference price** (Excel import value); never overwritten by sync or promotion recalculation |
+| `price` | decimal(10,2) | derived: `ROUND(cost_price * (1 - discount_pct/100), 2)` — recalculated by PromotionPricingService when admin changes discount |
+| `price_b2b` | decimal(10,2) | nullable — for Rapid: set equal to `price` by PromotionPricingService; new SyncRapidProducts imports leave this `null` so the service owns it |
+| `price_b2c` | decimal(10,2) | nullable — same as `price_b2b` for Rapid products |
 | `primary_image` | varchar | nullable, relative path e.g. `products/uuid.jpg` |
 | `width` | varchar(10) | nullable |
 | `height` | varchar(10) | nullable |
@@ -799,7 +846,6 @@ Indexes: `order_ref`, `status`, `customer_email`
 | `load_index` | varchar(10) | nullable |
 | `speed_rating` | varchar(5) | nullable |
 | `stock` | int | nullable |
-| `cost_price` | decimal(10,2) | nullable |
 | `is_active` | tinyint | default 1 |
 | `sort_order` | int | default 0 |
 
@@ -830,7 +876,7 @@ Indexes: `order_ref`, `status`, `customer_email`
 | `budget_range` | varchar(100) | nullable |
 | `delivery_location` | varchar(300) | |
 | `delivery_timeline` | varchar(100) | nullable |
-| `incoterm` | varchar(10) | nullable — `DAP`, `DDP`, `EXW`, `FOB`, `CIF` |
+| `incoterm` | varchar(10) | nullable — `DAP`, `DDP`, `EXW`, `FOB`, `CIF`, `Custom` |
 | `incoterm_type` | varchar(30) | nullable — `delivery_terms`, `shipping_terms` |
 | `notes` | text | |
 | `status` | enum | `new`, `reviewed`, `quoted`, `closed` — internal values |
@@ -1335,6 +1381,62 @@ Trade documents are commercial shipping/customs documents distinct from tax invo
 - `app/Http/Controllers/Admin/AdminTradeDocumentController.php` — admin endpoints
 - `app/Http/Controllers/TradeDocumentController.php` — customer endpoints
 
+### Rapid Product Pricing — Auto-Recalculation (Session 8)
+
+Rapid-brand products use a cost-plus discount model. The fields are:
+- `cost_price` — permanent base (Excel import value). Never overwritten after initial sync.
+- `price` — derived: `ROUND(cost_price * (1 - discount_pct/100), 2)`
+- `price_b2b` / `price_b2c` — set equal to `price` for Rapid (no B2B/B2C tier differentiation).
+
+**PromotionPricingService** (`app/Services/PromotionPricingService.php`):
+- `recalculateForPromotion(Promotion $promotion): int` — bulk-updates all products where `brand = $promotion->brand_name` and `cost_price IS NOT NULL` and `deleted_at IS NULL`.
+- Uses a single `DB::table()->update()` with `DB::raw("ROUND(cost_price * {$factor}, 2)")` for `price`, `price_b2b`, and `price_b2c`.
+- Returns count of updated rows.
+
+**Hook in AdminPromotionController:**
+- On `PUT /admin/promotions/{id}`, if `discount_pct` changed AND `brand_name` is set → PromotionPricingService fires automatically.
+- Response includes `recalculated_products` count when recalculation ran.
+
+**Migration history (session 8 — all ran on production):**
+- `2026_05_11_140000` — backfill `cost_price` from `price` for Rapid; then try to apply discount. **Silent fail** — the migration had a guard (`if (! $promo) return;`) that short-circuited when the promotion lookup returned nothing. Migration was recorded as run but did nothing.
+- `2026_05_11_150000` — hardcoded 0.65 factor (35% discount), no promotion lookup dependency; updated `price` only for Rapid products. **First version** ran before price_b2b/b2c were added to the UPDATE.
+- `2026_05_11_160000` — final fix: `SET price_b2b = price, price_b2c = price WHERE brand = 'Rapid' AND deleted_at IS NULL`. Aligned all three price fields.
+
+**Current state (production):** All 37 Rapid products have `price = price_b2b = price_b2c = ROUND(cost_price * 0.65, 2)` (35% off). Frontend `resolvePrice()` is field-selection only (picks between price_b2b / price_b2c / price by customer type) — no client-side arithmetic.
+
+**SyncRapidProducts command change:** `createProduct()` now sets `price_b2b = null`, `price_b2c = null` for new rows. This prevents future Excel syncs from overwriting the promotion-calculated values with raw supplier prices.
+
+---
+
+### Incoterms / Delivery Terms — FOB-First Model (Session 8)
+
+Replaced all hardcoded `"CIF"` defaults with a professional FOB-first logistics model across 8 files.
+
+**Single source of truth:** `config('payment.bank_transfer.delivery_term')` = `"Incoterms 2020: FOB Germany unless otherwise agreed in writing."`
+
+**Incoterm formatting rule** (used in proforma PDF + quote-converted email when `$quote->incoterm` is set):
+```php
+match(strtoupper($quote->incoterm)) {
+    'FOB'    => 'Incoterms 2020: FOB Germany',
+    'CIF'    => 'Incoterms 2020: CIF destination port — freight and insurance included to destination port.',
+    default  => 'Incoterms 2020: ' . strtoupper($quote->incoterm),
+}
+```
+
+**Valid incoterm values** (`StoreQuoteRequestRequest`): `DAP`, `DDP`, `EXW`, `FOB`, `CIF`, `Custom`
+
+**Files changed:**
+- `config/payment.php` — `delivery_term` updated to full FOB string
+- `app/Http/Requests/StoreQuoteRequestRequest.php` — added `Custom` to `in:` validation rule
+- `resources/views/pdf/invoice.blade.php` — label: "Delivery Term" → "Delivery / Shipping Terms"
+- `resources/views/pdf/proforma-invoice.blade.php` — full incoterm formatting with `match()`; removed hardcoded `'CIF'` fallback second argument from `config()` call
+- `resources/views/emails/order-confirmation.blade.php` — label renamed; uses config fallback (no `$quote` available)
+- `resources/views/emails/order-confirmation-text.blade.php` — same
+- `resources/views/emails/quote-converted-to-order.blade.php` — label renamed; incoterm formatting if `$quote->incoterm` set, else config fallback
+- `resources/views/emails/quote-converted-to-order-text.blade.php` — same in plain text
+
+---
+
 ### Order Security & Audit Logging
 
 **Order deletion (super_admin only):**
@@ -1566,6 +1668,8 @@ Conversion: `url(Storage::url($relativePath))` in controller formatters.
 | `import:wix-orders {file}` | Import orders from Wix CSV |
 | `import:wix-customers {file}` | Import customers from Wix contacts CSV |
 | `import:wix-customers {file} --no-email` | Import customers without sending welcome emails |
+| `products:sync-rapid {file}` | Import/upsert Rapid products from Excel; new rows created with `price_b2b=null`, `price_b2c=null` so PromotionPricingService owns those values |
+| `products:assign-rapid-images` | Copy `Image 1.png` / `Image 2.png` from storage and assign to all Rapid products that are missing images |
 | `orders:cleanup-test-stripe --date=YYYY-MM-DD --email=EMAIL --dry-run` | Delete test Stripe orders by date + email (always dry-run first) |
 | `orders:delete-specific [--dry-run]` | Delete 9 specific hard-coded test order refs — dry-run first, then run without flag |
 | `orders:cleanup-test-data [--dry-run] [--force]` | Delete 10 specific hard-coded test order refs + all related data (items, invoices, declarations, trade docs, logs, files) — always dry-run first |
@@ -1591,6 +1695,8 @@ Conversion: `url(Storage::url($relativePath))` in controller formatters.
 | Trade document upload (customs clearance) | `type=customs_clearance` model/table exists; upload endpoint not yet built |
 | Phase 2C-2 — Trade Documents foundation | **DONE** — proforma auto-generation, admin endpoints, customer endpoints; see Phase 2C-2 section |
 | Phase 2C-3 — Invoice release gating | **DONE** — `released_at` column, 423 on locked download, admin acknowledge releases invoice + email |
+| Rapid product auto-pricing | **DONE** — `cost_price` base, PromotionPricingService, AdminPromotionController hook; price/price_b2b/price_b2c all aligned |
+| Incoterms FOB-first model | **DONE** — config, PDF templates, emails updated; `Custom` added as valid incoterm; label renamed to "Delivery / Shipping Terms" everywhere |
 
 ---
 

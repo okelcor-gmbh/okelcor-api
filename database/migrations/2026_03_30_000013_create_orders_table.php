@@ -31,8 +31,8 @@ return new class extends Migration
             $table->timestamp('updated_at')->useCurrent()->useCurrentOnUpdate();
 
             $table->index('ref', 'idx_ref');
-            $table->index('status', 'idx_status');
-            $table->index('customer_email', 'idx_email');
+            $table->index('status', 'orders_status_idx');
+            $table->index('customer_email', 'orders_customer_email_idx');
         });
     }
 

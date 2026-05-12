@@ -21,7 +21,7 @@ return new class extends Migration
             $table->timestamps();
 
             $table->index('customer_id', 'idx_customer_id');
-            $table->index('status', 'idx_status');
+            $table->index('status', 'invoices_status_idx');
         });
     }
 
