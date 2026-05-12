@@ -86,10 +86,13 @@ class AuthController extends Controller
         AdminAuditLogger::info('login_success', 'Admin login successful (no 2FA)', $request, $admin);
         AdminLoginHistory::record($admin, true, false, $request);
 
-        return response()->json(['data' => [
-            'token' => $token,
-            'user'  => $this->formatUser($admin->fresh()),
-        ]]);
+        return response()->json([
+            'data' => [
+                'token' => $token,
+                'user'  => $this->formatUser($admin->fresh()),
+            ],
+            'message' => 'success',
+        ]);
     }
 
     public function logout(Request $request): JsonResponse
@@ -101,7 +104,10 @@ class AuthController extends Controller
 
     public function me(Request $request): JsonResponse
     {
-        return response()->json(['data' => $this->formatUser($request->user())]);
+        return response()->json([
+            'data'    => $this->formatUser($request->user()),
+            'message' => 'success',
+        ]);
     }
 
     private function formatUser(AdminUser $u): array
@@ -126,11 +132,15 @@ class AuthController extends Controller
     public static function roleLabel(string $role): string
     {
         return match ($role) {
-            'super_admin'   => 'Super Admin',
-            'admin'         => 'Admin',
-            'editor'        => 'Editor',
-            'order_manager' => 'Order Manager',
-            default         => ucfirst($role),
+            'super_admin'     => 'Super Admin',
+            'admin'           => 'Admin',
+            'editor'          => 'Editor',
+            'order_manager'   => 'Order Manager',
+            'sales_manager'   => 'Sales Manager',
+            'content_manager' => 'Content Manager',
+            'support'         => 'Support',
+            'viewer'          => 'Viewer',
+            default           => ucwords(str_replace('_', ' ', $role)),
         };
     }
 }

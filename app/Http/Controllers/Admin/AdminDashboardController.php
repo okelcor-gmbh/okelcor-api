@@ -156,6 +156,10 @@ class AdminDashboardController extends Controller
                 'pending_revenue'         => round($pendingRevenue, 2),
                 'revenue_last_7_days'     => $revenueLast7Days,
             ],
+            'message' => 'success',
+        ])->withHeaders([
+            'Cache-Control' => 'no-store, no-cache, must-revalidate',
+            'Pragma'        => 'no-cache',
         ]);
     }
 }
