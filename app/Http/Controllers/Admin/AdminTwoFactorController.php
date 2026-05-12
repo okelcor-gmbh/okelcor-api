@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\AdminUser;
+use App\Services\AdminAuditLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -132,11 +133,7 @@ class AdminTwoFactorController extends Controller
             'two_factor_confirmed_at'   => now(),
         ]);
 
-        Log::info('Admin 2FA enabled and confirmed', [
-            'admin_id' => $admin->id,
-            'email'    => $admin->email,
-            'ip'       => $request->ip(),
-        ]);
+        AdminAuditLogger::info('2fa_enabled', '2FA successfully enabled and confirmed', $request, $admin);
 
         return response()->json([
             'data'    => ['recovery_codes' => $recoveryCodes],
@@ -170,11 +167,7 @@ class AdminTwoFactorController extends Controller
             'two_factor_confirmed_at'   => null,
         ]);
 
-        Log::info('Admin 2FA disabled', [
-            'admin_id' => $admin->id,
-            'email'    => $admin->email,
-            'ip'       => $request->ip(),
-        ]);
+        AdminAuditLogger::warning('2fa_disabled', '2FA disabled by admin', $request, $admin);
 
         return response()->json(['message' => 'Two-factor authentication has been disabled.']);
     }

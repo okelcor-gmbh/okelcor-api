@@ -4,10 +4,9 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Mail\AdminTwoFactorNotice;
+use App\Models\AdminLoginHistory;
+use App\Models\AdminSecurityEvent;
 use App\Models\AdminUser;
-use App\Models\Customer;
-use App\Models\LoginHistory;
-use App\Models\SecurityEvent;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -118,34 +117,59 @@ class SecurityController extends Controller
     {
         $today = now()->startOfDay();
 
-        $lockedToday = SecurityEvent::where('type', 'account_lockout')
+        // Admin 2FA adoption
+        $totalAdmins      = AdminUser::where('is_active', true)->count();
+        $twoFaEnabled     = AdminUser::where('is_active', true)->whereNotNull('two_factor_confirmed_at')->count();
+        $twoFaAdoptionPct = $totalAdmins > 0 ? round(($twoFaEnabled / $totalAdmins) * 100, 1) : 0;
+
+        // Active admin sessions (Sanctum tokens for AdminUser)
+        $activeSessions = DB::table('personal_access_tokens')
+            ->where('tokenable_type', AdminUser::class)
+            ->count();
+
+        // Admin login stats today
+        $failedLoginsToday    = AdminLoginHistory::where('success', false)
+            ->where('created_at', '>=', $today)
+            ->count();
+        $successfulLoginsToday = AdminLoginHistory::where('success', true)
             ->where('created_at', '>=', $today)
             ->count();
 
-        $failedAttemptsToday = LoginHistory::where('success', false)
+        // Admin security events today
+        $permissionDeniedToday = AdminSecurityEvent::where('type', 'permission_denied')
             ->where('created_at', '>=', $today)
             ->count();
 
-        $newRegistrationsToday = Customer::where('created_at', '>=', $today)->count();
-
-        $suspiciousAccounts = Customer::where('status', 'suspended')->count();
-
-        $suspendedToday = SecurityEvent::where('type', 'account_suspend')
+        $webhookFailuresToday = AdminSecurityEvent::where('type', 'webhook_failed')
             ->where('created_at', '>=', $today)
             ->count();
 
-        $bannedToday = SecurityEvent::where('type', 'account_ban')
+        $criticalEventsToday = AdminSecurityEvent::where('severity', 'critical')
             ->where('created_at', '>=', $today)
             ->count();
+
+        // Recent events
+        $recentEvents = AdminSecurityEvent::orderByDesc('created_at')
+            ->limit(10)
+            ->get()
+            ->map(fn ($e) => $this->formatEvent($e));
 
         return response()->json([
             'data' => [
-                'locked_today'           => $lockedToday,
-                'failed_attempts_today'  => $failedAttemptsToday,
-                'new_registrations_today' => $newRegistrationsToday,
-                'suspicious_accounts'    => $suspiciousAccounts,
-                'suspended_today'        => $suspendedToday,
-                'banned_today'           => $bannedToday,
+                'admins' => [
+                    'total'              => $totalAdmins,
+                    'two_fa_enabled'     => $twoFaEnabled,
+                    'two_fa_adoption_pct' => $twoFaAdoptionPct,
+                    'active_sessions'    => $activeSessions,
+                ],
+                'today' => [
+                    'failed_logins'        => $failedLoginsToday,
+                    'successful_logins'    => $successfulLoginsToday,
+                    'permission_denied'    => $permissionDeniedToday,
+                    'webhook_failures'     => $webhookFailuresToday,
+                    'critical_events'      => $criticalEventsToday,
+                ],
+                'recent_events' => $recentEvents,
             ],
         ]);
     }
@@ -155,36 +179,84 @@ class SecurityController extends Controller
     public function events(Request $request): JsonResponse
     {
         $request->validate([
-            'type'        => ['nullable', 'in:failed_login,suspicious_activity,new_registration,password_reset,account_changes,account_lockout,account_unlock,account_suspend,account_ban'],
-            'customer_id' => ['nullable', 'integer'],
-            'per_page'    => ['nullable', 'integer', 'min:1', 'max:200'],
+            'type'      => ['nullable', 'string', 'max:60'],
+            'admin_id'  => ['nullable', 'integer'],
+            'severity'  => ['nullable', 'in:info,warning,critical'],
+            'date_from' => ['nullable', 'date'],
+            'date_to'   => ['nullable', 'date'],
+            'per_page'  => ['nullable', 'integer', 'min:1', 'max:200'],
         ]);
 
-        $query = SecurityEvent::with('customer:id,email')
-            ->orderByDesc('created_at');
+        $query = AdminSecurityEvent::orderByDesc('created_at');
 
         if ($request->filled('type')) {
             $query->where('type', $request->type);
         }
-
-        if ($request->filled('customer_id')) {
-            $query->where('customer_id', $request->integer('customer_id'));
+        if ($request->filled('admin_id')) {
+            $query->where('admin_id', $request->integer('admin_id'));
+        }
+        if ($request->filled('severity')) {
+            $query->where('severity', $request->severity);
+        }
+        if ($request->filled('date_from')) {
+            $query->whereDate('created_at', '>=', $request->date_from);
+        }
+        if ($request->filled('date_to')) {
+            $query->whereDate('created_at', '<=', $request->date_to);
         }
 
         $paginated = $query->paginate($request->integer('per_page', 50));
 
         return response()->json([
-            'data' => $paginated->map(fn ($e) => [
-                'id'             => $e->id,
-                'type'           => $e->type,
-                'severity'       => $e->severity,
-                'description'    => $e->description,
-                'customer_id'    => $e->customer_id,
-                'customer_email' => $e->customer?->email,
-                'ip_address'     => $e->ip_address,
-                'user_agent'     => $e->user_agent,
-                'location'       => $e->location,
-                'created_at'     => $e->created_at?->toIso8601String(),
+            'data' => $paginated->map(fn ($e) => $this->formatEvent($e))->values(),
+            'meta' => [
+                'current_page' => $paginated->currentPage(),
+                'per_page'     => $paginated->perPage(),
+                'total'        => $paginated->total(),
+                'last_page'    => $paginated->lastPage(),
+            ],
+        ]);
+    }
+
+    // ── GET /admin/security/login-history ────────────────────────────────────
+
+    public function loginHistory(Request $request): JsonResponse
+    {
+        $request->validate([
+            'admin_id'  => ['nullable', 'integer'],
+            'success'   => ['nullable', 'boolean'],
+            'date_from' => ['nullable', 'date'],
+            'date_to'   => ['nullable', 'date'],
+            'per_page'  => ['nullable', 'integer', 'min:1', 'max:200'],
+        ]);
+
+        $query = AdminLoginHistory::orderByDesc('created_at');
+
+        if ($request->filled('admin_id')) {
+            $query->where('admin_id', $request->integer('admin_id'));
+        }
+        if ($request->filled('success')) {
+            $query->where('success', $request->boolean('success'));
+        }
+        if ($request->filled('date_from')) {
+            $query->whereDate('created_at', '>=', $request->date_from);
+        }
+        if ($request->filled('date_to')) {
+            $query->whereDate('created_at', '<=', $request->date_to);
+        }
+
+        $paginated = $query->paginate($request->integer('per_page', 50));
+
+        return response()->json([
+            'data' => $paginated->map(fn ($h) => [
+                'id'          => $h->id,
+                'admin_id'    => $h->admin_id,
+                'admin_email' => $h->admin_email,
+                'success'     => $h->success,
+                'two_fa_used' => $h->two_fa_used,
+                'ip_address'  => $h->ip_address,
+                'user_agent'  => $h->user_agent,
+                'created_at'  => $h->created_at?->toIso8601String(),
             ])->values(),
             'meta' => [
                 'current_page' => $paginated->currentPage(),
@@ -193,5 +265,23 @@ class SecurityController extends Controller
                 'last_page'    => $paginated->lastPage(),
             ],
         ]);
+    }
+
+    // ── Formatter ─────────────────────────────────────────────────────────────
+
+    private function formatEvent(AdminSecurityEvent $e): array
+    {
+        return [
+            'id'          => $e->id,
+            'type'        => $e->type,
+            'severity'    => $e->severity,
+            'admin_id'    => $e->admin_id,
+            'admin_email' => $e->admin_email,
+            'admin_role'  => $e->admin_role,
+            'ip_address'  => $e->ip_address,
+            'description' => $e->description,
+            'metadata'    => $e->metadata,
+            'created_at'  => $e->created_at?->toIso8601String(),
+        ];
     }
 }

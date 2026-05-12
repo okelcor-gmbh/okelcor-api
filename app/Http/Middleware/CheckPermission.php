@@ -2,10 +2,10 @@
 
 namespace App\Http\Middleware;
 
+use App\Services\AdminAuditLogger;
 use App\Support\AdminPermissions;
 use Closure;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -25,14 +25,10 @@ class CheckPermission
             return $next($request);
         }
 
-        Log::warning('Admin permission denied', [
-            'admin_id'             => $user?->id,
-            'role'                 => $user?->role,
+        AdminAuditLogger::warning('permission_denied', "Permission denied: {$permission} on {$request->method()} /{$request->path()}", $request, $user, [
             'permission_attempted' => $permission,
-            'route'                => $request->path(),
             'method'               => $request->method(),
-            'ip'                   => $request->ip(),
-            'timestamp'            => now()->toIso8601String(),
+            'path'                 => $request->path(),
         ]);
 
         return response()->json([

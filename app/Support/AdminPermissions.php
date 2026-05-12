@@ -29,7 +29,7 @@ class AdminPermissions
         'admins.roles.assign'     => ['super_admin'],
 
         // ── Security / audit ──────────────────────────────────────────────
-        'security.view'           => ['super_admin', 'admin'],
+        'security.view'           => ['super_admin'],   // hardened: super_admin only
         'security.manage'         => ['super_admin'],
 
         // ── Orders ────────────────────────────────────────────────────────

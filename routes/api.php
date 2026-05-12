@@ -442,6 +442,7 @@ Route::prefix('v1')->group(function () {
         Route::middleware('permission:security.view')->group(function () {
             Route::get('security/summary', [SecurityController::class, 'summary']);
             Route::get('security/events', [SecurityController::class, 'events']);
+            Route::get('security/login-history', [SecurityController::class, 'loginHistory']);
             Route::get('security/2fa-status', [SecurityController::class, 'twoFactorStatus']);
         });
 

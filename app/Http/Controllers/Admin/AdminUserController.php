@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Mail\AdminWelcome;
 use App\Models\AdminUser;
+use App\Services\AdminAuditLogger;
 use App\Support\AdminPermissions;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -121,6 +122,12 @@ class AdminUserController extends Controller
             ? 'Admin user created. A welcome email with login instructions has been sent.'
             : 'Admin user created. Welcome email could not be delivered — use the resend-credentials endpoint to retry.';
 
+        AdminAuditLogger::info('admin_created', "Admin user created: {$user->email} ({$user->role})", $request, $request->user(), [
+            'new_admin_id'   => $user->id,
+            'new_admin_email' => $user->email,
+            'role'           => $user->role,
+        ]);
+
         return response()->json([
             'data'         => $this->formatUser($user),
             'message'      => $message,
@@ -173,10 +180,19 @@ class AdminUserController extends Controller
             'is_active'    => ['sometimes', 'boolean'],
         ]);
 
+        $oldRole = $user->role;
         $user->update($validated);
 
         if (isset($validated['password'])) {
             $user->tokens()->delete();
+        }
+
+        if (isset($validated['role']) && $validated['role'] !== $oldRole) {
+            AdminAuditLogger::warning('role_changed', "Admin role changed for {$user->email}", $request, $request->user(), [
+                'target_admin_id' => $user->id,
+                'old_role'        => $oldRole,
+                'new_role'        => $validated['role'],
+            ]);
         }
 
         return response()->json([
@@ -192,8 +208,16 @@ class AdminUserController extends Controller
         }
 
         $user = AdminUser::findOrFail($id);
+        $email = $user->email;
+        $role  = $user->role;
         $user->tokens()->delete();
         $user->delete();
+
+        AdminAuditLogger::critical('admin_deleted', "Admin user deleted: {$email} ({$role})", $request, $request->user(), [
+            'deleted_admin_id'    => $id,
+            'deleted_admin_email' => $email,
+            'deleted_admin_role'  => $role,
+        ]);
 
         return response()->noContent();
     }

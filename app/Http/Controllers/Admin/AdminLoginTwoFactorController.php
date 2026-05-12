@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\AdminLoginHistory;
 use App\Models\AdminUser;
+use App\Services\AdminAuditLogger;
 use App\Support\AdminPermissions;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -80,11 +82,8 @@ class AdminLoginTwoFactorController extends Controller
 
         if (! $passed) {
             RateLimiter::hit($key, 60);
-            Log::warning('Admin 2FA login: invalid code', [
-                'admin_id' => $admin->id,
-                'email'    => $admin->email,
-                'ip'       => $ip,
-            ]);
+            AdminAuditLogger::warning('2fa_failed', 'Admin 2FA login: invalid TOTP or recovery code', $request, $admin);
+            AdminLoginHistory::record($admin, false, true, $request);
             return response()->json(['message' => 'The provided code is invalid.'], 422);
         }
 
@@ -100,11 +99,8 @@ class AdminLoginTwoFactorController extends Controller
             'last_login_ip' => $ip,
         ]);
 
-        Log::info('Admin 2FA login success', [
-            'admin_id' => $admin->id,
-            'email'    => $admin->email,
-            'ip'       => $ip,
-        ]);
+        AdminAuditLogger::info('login_success', 'Admin login successful via 2FA', $request, $admin);
+        AdminLoginHistory::record($admin, true, true, $request);
 
         return response()->json(['data' => [
             'token' => $token,

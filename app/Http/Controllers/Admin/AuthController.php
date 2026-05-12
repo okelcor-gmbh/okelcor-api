@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\AdminLoginHistory;
 use App\Models\AdminUser;
+use App\Services\AdminAuditLogger;
 use App\Support\AdminPermissions;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -40,10 +42,10 @@ class AuthController extends Controller
 
         if (! $admin || ! Hash::check($request->password, $admin->password)) {
             RateLimiter::hit($key, 60);
-            Log::warning('Admin login failed', [
-                'email' => $request->email,
-                'ip'    => $ip,
-            ]);
+            AdminAuditLogger::warning('login_failed', 'Admin login failed — invalid credentials', $request, $admin ?? null, ['email_attempted' => $request->email]);
+            if ($admin) {
+                AdminLoginHistory::record($admin, false, false, $request);
+            }
             return response()->json([
                 'message' => 'The provided credentials are incorrect.',
                 'errors'  => ['email' => ['The provided credentials are incorrect.']],
@@ -52,10 +54,8 @@ class AuthController extends Controller
 
         if (! $admin->is_active) {
             RateLimiter::hit($key, 60);
-            Log::warning('Admin login attempt on inactive account', [
-                'email' => $request->email,
-                'ip'    => $ip,
-            ]);
+            AdminAuditLogger::warning('login_failed', 'Admin login attempt on inactive account', $request, $admin);
+            AdminLoginHistory::record($admin, false, false, $request);
             return response()->json(['message' => 'This account has been deactivated.'], 403);
         }
 
@@ -66,11 +66,7 @@ class AuthController extends Controller
             $sessionToken = (string) Str::uuid();
             Cache::put('2fa_challenge:' . $sessionToken, $admin->id, now()->addMinutes(5));
 
-            Log::info('Admin login: 2FA challenge issued', [
-                'admin_id' => $admin->id,
-                'email'    => $admin->email,
-                'ip'       => $ip,
-            ]);
+            AdminAuditLogger::info('2fa_challenge_issued', '2FA challenge issued — awaiting TOTP verification', $request, $admin);
 
             return response()->json([
                 'data'         => ['session_token' => $sessionToken],
@@ -87,7 +83,8 @@ class AuthController extends Controller
             'last_login_ip' => $ip,
         ]);
 
-        Log::info("Admin login: {$admin->email} from IP {$ip}");
+        AdminAuditLogger::info('login_success', 'Admin login successful (no 2FA)', $request, $admin);
+        AdminLoginHistory::record($admin, true, false, $request);
 
         return response()->json(['data' => [
             'token' => $token,

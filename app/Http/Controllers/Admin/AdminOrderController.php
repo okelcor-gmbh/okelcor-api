@@ -7,6 +7,7 @@ use App\Mail\OrderConfirmation;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderLog;
+use App\Services\AdminAuditLogger;
 use App\Services\InvoiceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -123,6 +124,11 @@ class AdminOrderController extends Controller
 
         // Log before deletion — order record still exists, FK will nullify after delete.
         $this->writeLog($request, $order, 'deleted', ['old_value' => $order->status]);
+        AdminAuditLogger::critical('order_deleted', "Order deleted: {$order->ref}", $request, $request->user(), [
+            'order_id'  => $order->id,
+            'order_ref' => $order->ref,
+            'status'    => $order->status,
+        ]);
 
         $order->items()->delete();
         $order->delete();
