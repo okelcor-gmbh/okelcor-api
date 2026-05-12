@@ -58,6 +58,47 @@ class AdminTradeDocumentController extends Controller
     }
 
     /**
+     * POST /api/v1/admin/orders/{id}/generate-packing-list
+     *
+     * Generate (or return existing) packing list for an order.
+     * Idempotent — calling multiple times returns the same issued document.
+     */
+    public function generatePackingList(Request $request, int $id): JsonResponse
+    {
+        $order = Order::with(['items', 'shipmentEvents'])->findOrFail($id);
+        $admin = $request->user();
+
+        $document = $this->service->generatePackingListForOrder($order, $admin);
+
+        if ($document->wasRecentlyCreated) {
+            try {
+                OrderLog::create([
+                    'order_id'         => $order->id,
+                    'order_ref'        => $order->ref,
+                    'admin_user_id'    => $admin?->id,
+                    'admin_user_email' => $admin?->email,
+                    'action'           => 'document_generated',
+                    'new_value'        => $document->number,
+                    'notes'            => 'Packing list generated.',
+                    'ip_address'       => $request->ip(),
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('OrderLog write failed (packing list generation)', [
+                    'order_ref' => $order->ref,
+                    'error'     => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return response()->json([
+            'data'    => $this->formatDocument($document),
+            'message' => $document->wasRecentlyCreated
+                ? 'Packing list generated.'
+                : 'Packing list already exists for this order.',
+        ], $document->wasRecentlyCreated ? 201 : 200);
+    }
+
+    /**
      * GET /api/v1/admin/orders/{id}/trade-documents
      *
      * List all trade documents attached to an order.

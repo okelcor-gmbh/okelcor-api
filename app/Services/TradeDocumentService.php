@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\AdminUser;
+use App\Models\Invoice;
 use App\Models\Order;
 use App\Models\QuoteRequest;
 use App\Models\TradeDocument;
@@ -83,6 +84,69 @@ class TradeDocumentService
         }
 
         Log::info('Proforma invoice generated', [
+            'number'    => $document->number,
+            'order_ref' => $order->ref,
+        ]);
+
+        return $document;
+    }
+
+    /**
+     * Idempotent — returns an existing issued packing list if one already exists
+     * for this order. Otherwise generates number, renders PDF, persists record.
+     */
+    public function generatePackingListForOrder(Order $order, ?AdminUser $admin = null): TradeDocument
+    {
+        $existing = TradeDocument::where('order_id', $order->id)
+            ->where('type', 'packing_list')
+            ->where('status', 'issued')
+            ->first();
+
+        if ($existing) {
+            return $existing;
+        }
+
+        $order->loadMissing('items', 'shipmentEvents');
+
+        // Eagerly load the product relation on each item for tyre spec fields
+        $order->items->each(fn ($item) => $item->loadMissing('product'));
+
+        $quote   = QuoteRequest::where('order_id', $order->id)->first();
+        $invoice = Invoice::where('order_id', $order->id)->first();
+
+        $document = DB::transaction(function () use ($order, $admin) {
+            return TradeDocument::create([
+                'order_id'  => $order->id,
+                'order_ref' => $order->ref,
+                'type'      => 'packing_list',
+                'number'    => $this->sequentialNumber('packing_list'),
+                'status'    => 'issued',
+                'issued_by' => $admin?->id,
+                'issued_at' => now(),
+            ]);
+        });
+
+        try {
+            $pdfContent = Pdf::loadView('pdf.packing-list', [
+                'document' => $document,
+                'order'    => $order,
+                'quote'    => $quote,
+                'invoice'  => $invoice,
+            ])->output();
+
+            $pdfPath = 'trade-documents/packing-list/' . $document->number . '.pdf';
+            Storage::disk('local')->put($pdfPath, $pdfContent);
+            $document->update(['pdf_path' => $pdfPath]);
+        } catch (\Throwable $e) {
+            Log::warning('Packing list PDF generation failed', [
+                'document_id' => $document->id,
+                'number'      => $document->number,
+                'order_ref'   => $order->ref,
+                'error'       => $e->getMessage(),
+            ]);
+        }
+
+        Log::info('Packing list generated', [
             'number'    => $document->number,
             'order_ref' => $order->ref,
         ]);
