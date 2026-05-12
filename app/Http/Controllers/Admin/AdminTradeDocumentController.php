@@ -111,6 +111,59 @@ class AdminTradeDocumentController extends Controller
     }
 
     /**
+     * POST /api/v1/admin/orders/{id}/generate-delivery-note
+     *
+     * Generate (or return existing) delivery note for an order.
+     * Idempotent — calling multiple times returns the same issued document.
+     */
+    public function generateDeliveryNote(Request $request, int $id): JsonResponse
+    {
+        $order = Order::with(['items', 'shipmentEvents'])->findOrFail($id);
+        $admin = $request->user();
+
+        try {
+            $document = $this->service->generateDeliveryNoteForOrder($order, $admin);
+        } catch (\Throwable $e) {
+            Log::error('Delivery note generation failed', [
+                'order_id'  => $id,
+                'order_ref' => $order->ref,
+                'error'     => $e->getMessage(),
+                'file'      => $e->getFile() . ':' . $e->getLine(),
+            ]);
+            return response()->json([
+                'message' => 'Unable to generate delivery note. Please try again or contact support.',
+            ], 500);
+        }
+
+        if ($document->wasRecentlyCreated) {
+            try {
+                OrderLog::create([
+                    'order_id'         => $order->id,
+                    'order_ref'        => $order->ref,
+                    'admin_user_id'    => $admin?->id,
+                    'admin_user_email' => $admin?->email,
+                    'action'           => 'document_generated',
+                    'new_value'        => $document->number,
+                    'notes'            => 'Delivery note generated.',
+                    'ip_address'       => $request->ip(),
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('OrderLog write failed (delivery note generation)', [
+                    'order_ref' => $order->ref,
+                    'error'     => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return response()->json([
+            'data'    => $this->formatDocument($document),
+            'message' => $document->wasRecentlyCreated
+                ? 'Delivery note generated.'
+                : 'Delivery note already exists for this order.',
+        ], $document->wasRecentlyCreated ? 201 : 200);
+    }
+
+    /**
      * GET /api/v1/admin/orders/{id}/trade-documents
      *
      * List all trade documents attached to an order.

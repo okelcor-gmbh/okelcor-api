@@ -18,6 +18,7 @@ class TradeDocumentService
         'proforma'           => 'PI',
         'commercial_invoice' => 'CI',
         'packing_list'       => 'PL',
+        'delivery_note'      => 'DN',
     ];
 
     /**
@@ -149,6 +150,69 @@ class TradeDocumentService
         }
 
         Log::info('Packing list generated', [
+            'number'    => $document->number,
+            'order_ref' => $order->ref,
+        ]);
+
+        return $document;
+    }
+
+    /**
+     * Idempotent — returns an existing issued delivery note if one already exists
+     * for this order. Otherwise generates number, renders PDF, persists record.
+     */
+    public function generateDeliveryNoteForOrder(Order $order, ?AdminUser $admin = null): TradeDocument
+    {
+        $existing = TradeDocument::where('order_id', $order->id)
+            ->where('type', 'delivery_note')
+            ->where('status', 'issued')
+            ->first();
+
+        if ($existing) {
+            return $existing;
+        }
+
+        $order->loadMissing('items', 'shipmentEvents');
+        $order->items->each(fn ($item) => $item->loadMissing('product'));
+
+        $quote   = QuoteRequest::where('order_id', $order->id)->first();
+        $invoice = Invoice::where('order_ref', $order->ref)->first();
+
+        $document = DB::transaction(function () use ($order, $admin) {
+            $number = $this->sequentialNumber('delivery_note');
+            return TradeDocument::create([
+                'order_id'          => $order->id,
+                'order_ref'         => $order->ref,
+                'type'              => 'delivery_note',
+                'number'            => $number,
+                'status'            => 'issued',
+                'original_filename' => $number . '.pdf',
+                'issued_by'         => $admin?->id,
+                'issued_at'         => now(),
+            ]);
+        });
+
+        try {
+            $pdfContent = Pdf::loadView('pdf.delivery-note', [
+                'document' => $document,
+                'order'    => $order,
+                'quote'    => $quote,
+                'invoice'  => $invoice,
+            ])->output();
+
+            $pdfPath = 'trade-documents/delivery-note/' . $document->number . '.pdf';
+            Storage::disk('local')->put($pdfPath, $pdfContent);
+            $document->update(['pdf_path' => $pdfPath]);
+        } catch (\Throwable $e) {
+            Log::warning('Delivery note PDF generation failed', [
+                'document_id' => $document->id,
+                'number'      => $document->number,
+                'order_ref'   => $order->ref,
+                'error'       => $e->getMessage(),
+            ]);
+        }
+
+        Log::info('Delivery note generated', [
             'number'    => $document->number,
             'order_ref' => $order->ref,
         ]);
