@@ -220,6 +220,7 @@ Route::prefix('v1')->group(function () {
 
         // 2FA management — all authenticated admin users
         Route::prefix('2fa')->group(function () {
+            Route::get('status', [AdminTwoFactorController::class, 'status']);
             Route::post('enable', [AdminTwoFactorController::class, 'enable']);
             Route::post('confirm', [AdminTwoFactorController::class, 'confirm']);
             Route::post('disable', [AdminTwoFactorController::class, 'disable']);

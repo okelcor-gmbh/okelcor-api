@@ -24,6 +24,39 @@ class AdminTwoFactorController extends Controller
     }
 
     /**
+     * GET /api/v1/admin/2fa/status
+     *
+     * Return current 2FA state for the authenticated admin.
+     */
+    public function status(Request $request): JsonResponse
+    {
+        /** @var AdminUser $admin */
+        $admin = $request->user();
+
+        $enabled        = $admin->hasTwoFactorEnabled();
+        $confirmed      = $enabled;
+        $recoveryCount  = 0;
+
+        if ($enabled && $admin->two_factor_recovery_codes) {
+            try {
+                $codes         = json_decode(decrypt($admin->two_factor_recovery_codes), true);
+                $recoveryCount = is_array($codes) ? count($codes) : 0;
+            } catch (\Throwable) {
+                $recoveryCount = 0;
+            }
+        }
+
+        return response()->json([
+            'data' => [
+                'enabled'               => $enabled,
+                'confirmed'             => $confirmed,
+                'enabled_at'            => $admin->two_factor_confirmed_at?->toIso8601String(),
+                'recovery_codes_count'  => $recoveryCount,
+            ],
+        ]);
+    }
+
+    /**
      * POST /api/v1/admin/2fa/enable
      *
      * Generate a new TOTP secret and return the QR code SVG + secret.
