@@ -35,6 +35,11 @@ class EuDeclarationController extends Controller
         $order = Order::where('ref', $ref)->first();
 
         if (! $order || strtolower($order->customer_email) !== strtolower($customer->email)) {
+            Log::warning('EU declaration sign: ownership check failed', [
+                'order_ref'   => $ref,
+                'customer_id' => $customer->id,
+                'ip'          => request()->ip(),
+            ]);
             return response()->json(['message' => 'Order not found.'], 404);
         }
 
@@ -170,6 +175,11 @@ class EuDeclarationController extends Controller
         $order = Order::where('ref', $ref)->first();
 
         if (! $order || strtolower($order->customer_email) !== strtolower($customer->email)) {
+            Log::warning('EU declaration download: ownership check failed', [
+                'order_ref'   => $ref,
+                'customer_id' => $customer->id,
+                'ip'          => request()->ip(),
+            ]);
             return response()->json(['message' => 'Order not found.'], 404);
         }
 

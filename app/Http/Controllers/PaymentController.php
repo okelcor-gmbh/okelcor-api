@@ -493,8 +493,19 @@ class PaymentController extends Controller
                 $secret
             );
         } catch (UnexpectedValueException $e) {
+            Log::warning('Stripe webhook rejected: invalid payload', [
+                'reason'    => $e->getMessage(),
+                'ip'        => $request->ip(),
+                'timestamp' => now()->toIso8601String(),
+            ]);
             return response()->json(['message' => 'Invalid payload.'], 400);
         } catch (SignatureVerificationException $e) {
+            Log::warning('Stripe webhook rejected: signature verification failed', [
+                'reason'           => $e->getMessage(),
+                'ip'               => $request->ip(),
+                'sig_header_start' => substr((string) $request->header('Stripe-Signature', ''), 0, 40),
+                'timestamp'        => now()->toIso8601String(),
+            ]);
             return response()->json(['message' => 'Invalid signature.'], 400);
         }
 
