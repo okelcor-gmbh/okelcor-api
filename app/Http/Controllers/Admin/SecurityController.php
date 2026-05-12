@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Mail\AdminTwoFactorNotice;
 use App\Models\AdminUser;
 use App\Models\Customer;
 use App\Models\LoginHistory;
@@ -10,9 +11,66 @@ use App\Models\SecurityEvent;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 
 class SecurityController extends Controller
 {
+    // ── POST /admin/security/send-2fa-notices ────────────────────────────────
+
+    public function sendTwoFactorNotices(Request $request): JsonResponse
+    {
+        $graceUntil = config('auth.admin_2fa_grace_until');
+        $sender     = $request->user();
+
+        // Target: active, non-super_admin users without confirmed 2FA
+        $users = AdminUser::where('is_active', true)
+            ->where('role', '!=', 'super_admin')
+            ->whereNull('two_factor_confirmed_at')
+            ->orderBy('email')
+            ->get();
+
+        $sent    = 0;
+        $skipped = 0;
+        $failed  = 0;
+
+        foreach ($users as $user) {
+            try {
+                Mail::to($user->email)->send(new AdminTwoFactorNotice($user, $graceUntil));
+
+                Log::info('2FA notice sent', [
+                    'recipient_id'    => $user->id,
+                    'recipient_email' => $user->email,
+                    'sent_by'         => $sender->id,
+                ]);
+
+                $sent++;
+            } catch (\Throwable $e) {
+                Log::error('2FA notice failed', [
+                    'recipient_id'    => $user->id,
+                    'recipient_email' => $user->email,
+                    'sent_by'         => $sender->id,
+                    'error'           => $e->getMessage(),
+                ]);
+
+                $failed++;
+            }
+        }
+
+        Log::info('Admin 2FA notice batch completed', [
+            'performed_by' => $sender->id,
+            'action'       => 'two_factor_notice_sent',
+            'sent'         => $sent,
+            'skipped'      => $skipped,
+            'failed'       => $failed,
+        ]);
+
+        return response()->json([
+            'data'    => compact('sent', 'skipped', 'failed'),
+            'message' => '2FA notice emails sent.',
+        ]);
+    }
+
     // ── GET /admin/security/2fa-status ───────────────────────────────────────
 
     public function twoFactorStatus(): JsonResponse

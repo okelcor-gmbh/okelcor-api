@@ -20,7 +20,7 @@ class AdminTwoFactorNotice extends Mailable
 
     public function envelope(): Envelope
     {
-        return new Envelope(subject: 'Action Required: Enable Two-Factor Authentication on Your Okelcor Admin Account');
+        return new Envelope(subject: 'Action required: Enable two-factor authentication for admin access');
     }
 
     public function content(): Content

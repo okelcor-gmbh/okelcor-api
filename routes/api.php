@@ -410,6 +410,10 @@ Route::prefix('v1')->group(function () {
             Route::get('security/2fa-status', [SecurityController::class, 'twoFactorStatus']);
         });
 
+        Route::middleware('admin.role:super_admin')->group(function () {
+            Route::post('security/send-2fa-notices', [SecurityController::class, 'sendTwoFactorNotices']);
+        });
+
         // -----------------------------------------------------------------
         // eBay listing sync — super_admin, admin
         // -----------------------------------------------------------------
