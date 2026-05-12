@@ -34,7 +34,7 @@ class StoreQuoteRequestRequest extends FormRequest
             'quantity'          => ['required', 'string', 'max:100'],   // legacy — kept for BC
             'tyre_condition'    => ['nullable', 'string', 'in:new,used'],
             'used_tyre_grade'   => ['nullable', 'string', 'in:grade_a,grade_b,mixed'],
-            'used_tyre_notes'   => ['nullable', 'string'],
+            'used_tyre_notes'   => ['nullable', 'string', 'max:500'],
 
             // Multi-row tyre items
             'tyre_items'            => ['nullable', 'array'],
@@ -52,7 +52,7 @@ class StoreQuoteRequestRequest extends FormRequest
             'incoterm_type'         => ['nullable', 'string', 'in:delivery_terms,shipping_terms'],
 
             // Other
-            'notes'         => ['required', 'string'],
+            'notes'         => ['required', 'string', 'max:2000'],
             'vat_number'    => ['nullable', 'string', 'min:4', 'max:20'],
             'attachment'    => ['nullable', 'file', 'mimes:pdf,csv,xls,xlsx', 'max:10240'],
         ];

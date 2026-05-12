@@ -29,6 +29,7 @@ use App\Http\Controllers\Admin\AdminOrderShipmentEventController;
 use App\Http\Controllers\Admin\OrderImportController;
 use App\Http\Controllers\Admin\AdminProductController;
 use App\Http\Controllers\Admin\AdminQuoteRequestController;
+use App\Http\Controllers\Admin\AdminQuoteAttachmentController;
 use App\Http\Controllers\Admin\AdminSettingController;
 use App\Http\Controllers\Admin\AdminUserController;
 use App\Http\Controllers\Admin\AuthController;
@@ -321,6 +322,9 @@ Route::prefix('v1')->group(function () {
             Route::put('quote-requests/{id}', [AdminQuoteRequestController::class, 'update']);
             Route::patch('quote-requests/{id}/status', [AdminQuoteRequestController::class, 'updateStatus']);
             Route::post('quote-requests/{id}/convert-to-order', [AdminQuoteRequestController::class, 'convertToOrder']);
+
+            // Quote attachments — streamed through controller, never via public URL
+            Route::get('quote-attachments/{id}/download', [AdminQuoteAttachmentController::class, 'download']);
 
             // Contact messages
             Route::get('contact-messages', [AdminContactController::class, 'index']);

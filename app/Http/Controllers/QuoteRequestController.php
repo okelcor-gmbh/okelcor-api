@@ -83,7 +83,7 @@ class QuoteRequestController extends Controller
             $ext      = strtolower($file->getClientOriginalExtension());
             $filename = Str::uuid() . '.' . $ext;
 
-            Storage::disk('public')->putFileAs('quote-attachments', $file, $filename);
+            Storage::disk('local')->putFileAs('quote-attachments', $file, $filename);
 
             $quote->update([
                 'attachment_path'          => 'quote-attachments/' . $filename,

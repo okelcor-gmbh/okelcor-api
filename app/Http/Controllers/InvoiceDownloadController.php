@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use App\Models\Invoice;
 use App\Models\Order;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -13,7 +12,7 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class InvoiceDownloadController extends Controller
 {
-    public function download(Request $request, Invoice $invoice): BinaryFileResponse|JsonResponse|RedirectResponse
+    public function download(Request $request, Invoice $invoice): BinaryFileResponse|JsonResponse
     {
         $customer = $request->user();
 
@@ -75,12 +74,12 @@ class InvoiceDownloadController extends Controller
                 $diskPath = $canonical;
             } else {
                 Log::warning('Invoice download: file missing on disk', [
-                    'invoice_id'   => $invoice->id,
-                    'customer_id'  => $customer->id,
-                    'pdf_url_raw'  => $invoice->pdf_url,
-                    'pdf_url_norm' => $diskPath,
-                    'pdf_canonical'=> $canonical,
-                    'full_path'    => Storage::disk('public')->path($diskPath),
+                    'invoice_id'    => $invoice->id,
+                    'customer_id'   => $customer->id,
+                    'pdf_url_raw'   => $invoice->pdf_url,
+                    'pdf_url_norm'  => $diskPath,
+                    'pdf_canonical' => $canonical,
+                    'full_path'     => Storage::disk('public')->path($diskPath),
                 ]);
                 return response()->json(['message' => 'Invoice PDF file was not found.'], 404);
             }
@@ -89,11 +88,11 @@ class InvoiceDownloadController extends Controller
         $absolutePath = Storage::disk('public')->path($diskPath);
 
         Log::info('Invoice download: serving file', [
-            'invoice_id'   => $invoice->id,
-            'disk_path'    => $diskPath,
-            'absolute'     => $absolutePath,
-            'is_readable'  => is_readable($absolutePath),
-            'filesize'     => file_exists($absolutePath) ? filesize($absolutePath) : 'N/A',
+            'invoice_id'  => $invoice->id,
+            'disk_path'   => $diskPath,
+            'absolute'    => $absolutePath,
+            'is_readable' => is_readable($absolutePath),
+            'filesize'    => file_exists($absolutePath) ? filesize($absolutePath) : 'N/A',
         ]);
 
         try {
@@ -102,17 +101,14 @@ class InvoiceDownloadController extends Controller
                 'Content-Disposition' => 'inline; filename="' . $invoice->invoice_number . '.pdf"',
             ]);
         } catch (\Throwable $e) {
-            Log::error('Invoice download: response()->file() threw an exception', [
+            Log::error('Invoice download: streaming failed — no fallback redirect', [
                 'invoice_id' => $invoice->id,
                 'disk_path'  => $diskPath,
-                'absolute'   => $absolutePath,
                 'error'      => $e->getMessage(),
                 'class'      => get_class($e),
             ]);
 
-            // Fall back to a web-server-served redirect when PHP streaming fails.
-            // The auth check has already passed above, so the redirect is safe.
-            return redirect(Storage::disk('public')->url($diskPath));
+            return response()->json(['message' => 'Invoice PDF could not be streamed. Please contact support.'], 500);
         }
     }
 

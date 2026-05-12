@@ -18,7 +18,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
@@ -399,7 +398,7 @@ class AdminQuoteRequestController extends Controller
             'created_at'               => $r->created_at?->toIso8601String(),
             'order_id'                 => $r->order_id,
             'has_attachment'           => (bool) $r->attachment_path,
-            'attachment_url'           => $r->attachment_path ? url(Storage::url($r->attachment_path)) : null,
+            'attachment_url'           => $r->attachment_path ? url('/api/v1/admin/quote-attachments/' . $r->id . '/download') : null,
             'attachment_name'          => $r->attachment_original_name,
             'attachment_original_name' => $r->attachment_original_name,
             'attachment_size'          => $r->attachment_size,
@@ -463,7 +462,7 @@ class AdminQuoteRequestController extends Controller
 
             // Attachment
             'has_attachment'           => (bool) $r->attachment_path,
-            'attachment_url'           => $r->attachment_path ? url(Storage::url($r->attachment_path)) : null,
+            'attachment_url'           => $r->attachment_path ? url('/api/v1/admin/quote-attachments/' . $r->id . '/download') : null,
             'attachment_name'          => $r->attachment_original_name,
             'attachment_original_name' => $r->attachment_original_name,
             'attachment_size'          => $r->attachment_size,
