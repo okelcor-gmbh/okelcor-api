@@ -103,7 +103,7 @@ class AdminHeroSlideController extends Controller
         }
 
         $file     = $request->file('media');
-        $filename = Str::uuid() . '.' . $file->getClientOriginalExtension();
+        $filename = Str::uuid() . '.' . ($file->guessExtension() ?? 'bin');
         $path     = Storage::disk('public')->putFileAs('hero', $file, $filename);
 
         if ($request->media_type === 'image') {

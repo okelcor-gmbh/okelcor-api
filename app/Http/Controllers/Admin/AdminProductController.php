@@ -226,7 +226,7 @@ class AdminProductController extends Controller
 
     private function storeImage($file, string $collection): string
     {
-        $ext      = $file->getClientOriginalExtension();
+        $ext      = $file->guessExtension() ?? 'bin';
         $filename = Str::uuid() . '.' . $ext;
 
         return Storage::disk('public')->putFileAs($collection, $file, $filename);

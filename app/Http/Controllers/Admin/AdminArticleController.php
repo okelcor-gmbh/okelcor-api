@@ -115,7 +115,7 @@ class AdminArticleController extends Controller
         }
 
         $file     = $request->file('image');
-        $filename = Str::uuid() . '.' . $file->getClientOriginalExtension();
+        $filename = Str::uuid() . '.' . ($file->guessExtension() ?? 'bin');
         $path     = $file->storeAs('articles', $filename, 'public');
 
         $article->update(['image' => $path]);

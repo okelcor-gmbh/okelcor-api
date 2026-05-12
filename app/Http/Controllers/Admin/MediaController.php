@@ -48,7 +48,7 @@ class MediaController extends Controller
         $isVideo    = str_starts_with($mimeType, 'video/');
 
         $uuid         = Str::uuid()->toString();
-        $ext          = $file->getClientOriginalExtension();
+        $ext          = $file->guessExtension() ?? 'bin';
         $filename     = $uuid . '.' . $ext;
         $originalName = $file->getClientOriginalName();
 

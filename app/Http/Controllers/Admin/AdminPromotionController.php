@@ -154,7 +154,7 @@ class AdminPromotionController extends Controller
             Storage::disk('public')->delete($promotion->image_url);
         }
 
-        $ext      = $request->file('image')->getClientOriginalExtension();
+        $ext      = $request->file('image')->guessExtension() ?? 'bin';
         $filename = Str::uuid() . '.' . $ext;
         $path     = Storage::disk('public')->putFileAs('promotions', $request->file('image'), $filename);
 

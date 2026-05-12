@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Mail\FinalInvoiceReleased;
 use App\Models\EuDeclaration;
 use App\Models\Invoice;
+use App\Models\Order;
+use App\Models\OrderLog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -156,6 +158,29 @@ class AdminEuDeclarationController extends Controller
                 Mail::to($decl->customer_email)->send(new FinalInvoiceReleased($decl->fresh(), $invoice));
             } catch (\Throwable $e) {
                 Log::error('FinalInvoiceReleased email failed', [
+                    'order_ref'      => $decl->order_ref,
+                    'declaration_id' => $decl->id,
+                    'error'          => $e->getMessage(),
+                ]);
+            }
+        }
+
+        // Audit log on the associated order
+        $order = Order::where('ref', $decl->order_ref)->first();
+        if ($order) {
+            try {
+                OrderLog::create([
+                    'order_id'         => $order->id,
+                    'order_ref'        => $order->ref,
+                    'admin_user_id'    => $request->user()->id,
+                    'admin_user_email' => $request->user()->email,
+                    'action'           => 'declaration_acknowledged',
+                    'new_value'        => 'acknowledged',
+                    'notes'            => 'EU entry certificate acknowledged. Declaration #' . $decl->id . '.',
+                    'ip_address'       => $request->ip(),
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('OrderLog write failed (declaration acknowledge)', [
                     'order_ref'      => $decl->order_ref,
                     'declaration_id' => $decl->id,
                     'error'          => $e->getMessage(),

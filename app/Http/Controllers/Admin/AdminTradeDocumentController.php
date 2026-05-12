@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Order;
+use App\Models\OrderLog;
 use App\Models\TradeDocument;
 use App\Services\TradeDocumentService;
 use Illuminate\Http\JsonResponse;
@@ -27,6 +28,26 @@ class AdminTradeDocumentController extends Controller
         $admin = $request->user();
 
         $document = $this->service->generateProformaForOrder($order, $admin);
+
+        if ($document->wasRecentlyCreated) {
+            try {
+                OrderLog::create([
+                    'order_id'         => $order->id,
+                    'order_ref'        => $order->ref,
+                    'admin_user_id'    => $admin?->id,
+                    'admin_user_email' => $admin?->email,
+                    'action'           => 'document_generated',
+                    'new_value'        => $document->number,
+                    'notes'            => 'Proforma invoice generated.',
+                    'ip_address'       => $request->ip(),
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('OrderLog write failed (proforma generation)', [
+                    'order_ref' => $order->ref,
+                    'error'     => $e->getMessage(),
+                ]);
+            }
+        }
 
         return response()->json([
             'data'    => $this->formatDocument($document),

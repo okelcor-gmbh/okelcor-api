@@ -71,7 +71,7 @@ class AdminBrandController extends Controller
             Storage::disk('public')->delete($brand->logo);
         }
 
-        $filename = Str::uuid() . '.' . $request->file('logo')->getClientOriginalExtension();
+        $filename = Str::uuid() . '.' . ($request->file('logo')->guessExtension() ?? 'bin');
         $path     = Storage::disk('public')->putFileAs('brands', $request->file('logo'), $filename);
         $brand->update(['logo' => $path]);
 
