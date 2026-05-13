@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Mail\TradeDocumentEmail;
 use App\Models\Order;
 use App\Models\OrderLog;
 use App\Models\TradeDocument;
@@ -10,6 +11,7 @@ use App\Services\TradeDocumentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -296,6 +298,107 @@ class AdminTradeDocumentController extends Controller
             'data'    => $this->formatDocument($document),
             'message' => 'Document uploaded successfully.',
         ], 201);
+    }
+
+    /**
+     * POST /api/v1/admin/trade-documents/{id}/send-email
+     *
+     * Send a trade document to a recipient by email with the file attached.
+     * Updates sent_at on success and writes a document_sent order log entry.
+     */
+    public function sendEmail(Request $request, int $id): JsonResponse
+    {
+        $document = TradeDocument::findOrFail($id);
+        $admin    = $request->user();
+
+        $request->validate([
+            'recipient_email' => ['nullable', 'email', 'max:255'],
+            'message'         => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        // Verify a file is present — either generated PDF or uploaded file
+        $storedPath = $document->getRawOriginal('pdf_path')
+            ?? $document->getRawOriginal('file_path');
+
+        if (! $storedPath) {
+            return response()->json([
+                'message' => 'This document has no file to send.',
+            ], 422);
+        }
+
+        $fullPath = storage_path('app/private/' . $storedPath);
+
+        if (! file_exists($fullPath)) {
+            Log::warning('Trade document send: file missing on disk', [
+                'document_id' => $document->id,
+                'stored_path' => $storedPath,
+            ]);
+            return response()->json([
+                'message' => 'Document file was not found.',
+            ], 404);
+        }
+
+        // Resolve recipient — fallback to the order's customer email
+        $order          = Order::find($document->order_id);
+        $recipientEmail = $request->input('recipient_email') ?? $order?->customer_email;
+
+        if (! $recipientEmail) {
+            return response()->json([
+                'message' => 'No recipient email could be determined. Please provide one.',
+            ], 422);
+        }
+
+        // Send mail
+        try {
+            Mail::to($recipientEmail)->send(new TradeDocumentEmail(
+                document:       $document,
+                order:          $order,
+                recipientEmail: $recipientEmail,
+                adminMessage:   $request->input('message'),
+            ));
+        } catch (\Throwable $e) {
+            Log::error('Trade document email failed', [
+                'document_id' => $document->id,
+                'order_ref'   => $document->order_ref,
+                'recipient'   => $recipientEmail,
+                'error'       => $e->getMessage(),
+            ]);
+            return response()->json([
+                'message' => 'Failed to send email. Please try again or contact support.',
+            ], 500);
+        }
+
+        // Stamp sent_at
+        $document->update(['sent_at' => now()]);
+
+        // Audit log — wrapped so it never blocks the 200 response
+        try {
+            OrderLog::create([
+                'order_id'         => $document->order_id,
+                'order_ref'        => $document->order_ref,
+                'admin_user_id'    => $admin?->id,
+                'admin_user_email' => $admin?->email,
+                'action'           => 'document_sent',
+                'new_value'        => $document->number ?? $document->type_label,
+                'notes'            => 'Document sent to ' . $recipientEmail
+                    . ': ' . ($document->original_filename ?? $document->number ?? $document->type),
+                'ip_address'       => $request->ip(),
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('OrderLog write failed (document send)', [
+                'order_ref' => $document->order_ref,
+                'error'     => $e->getMessage(),
+            ]);
+        }
+
+        return response()->json([
+            'data'    => [
+                'id'              => $document->id,
+                'sent_at'         => $document->sent_at->toIso8601String(),
+                'recipient_email' => $recipientEmail,
+            ],
+            'message' => 'Document sent successfully.',
+        ]);
     }
 
     /**
