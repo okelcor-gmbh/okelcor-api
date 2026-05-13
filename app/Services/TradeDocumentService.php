@@ -158,6 +158,69 @@ class TradeDocumentService
     }
 
     /**
+     * Idempotent — returns an existing issued commercial invoice if one already
+     * exists for this order. Otherwise generates number, renders PDF, persists record.
+     */
+    public function generateCommercialInvoiceForOrder(Order $order, ?AdminUser $admin = null): TradeDocument
+    {
+        $existing = TradeDocument::where('order_id', $order->id)
+            ->where('type', 'commercial_invoice')
+            ->where('status', 'issued')
+            ->first();
+
+        if ($existing) {
+            return $existing;
+        }
+
+        $order->loadMissing('items', 'shipmentEvents');
+        $order->items->each(fn ($item) => $item->loadMissing('product'));
+
+        $quote   = QuoteRequest::where('order_id', $order->id)->first();
+        $invoice = Invoice::where('order_ref', $order->ref)->first();
+
+        $document = DB::transaction(function () use ($order, $admin) {
+            $number = $this->sequentialNumber('commercial_invoice');
+            return TradeDocument::create([
+                'order_id'          => $order->id,
+                'order_ref'         => $order->ref,
+                'type'              => 'commercial_invoice',
+                'number'            => $number,
+                'status'            => 'issued',
+                'original_filename' => $number . '.pdf',
+                'issued_by'         => $admin?->id,
+                'issued_at'         => now(),
+            ]);
+        });
+
+        try {
+            $pdfContent = Pdf::loadView('pdf.commercial-invoice', [
+                'document' => $document,
+                'order'    => $order,
+                'quote'    => $quote,
+                'invoice'  => $invoice,
+            ])->output();
+
+            $pdfPath = 'trade-documents/commercial-invoice/' . $document->number . '.pdf';
+            Storage::disk('local')->put($pdfPath, $pdfContent);
+            $document->update(['pdf_path' => $pdfPath]);
+        } catch (\Throwable $e) {
+            Log::warning('Commercial invoice PDF generation failed', [
+                'document_id' => $document->id,
+                'number'      => $document->number,
+                'order_ref'   => $order->ref,
+                'error'       => $e->getMessage(),
+            ]);
+        }
+
+        Log::info('Commercial invoice generated', [
+            'number'    => $document->number,
+            'order_ref' => $order->ref,
+        ]);
+
+        return $document;
+    }
+
+    /**
      * Idempotent — returns an existing issued delivery note if one already exists
      * for this order. Otherwise generates number, renders PDF, persists record.
      */

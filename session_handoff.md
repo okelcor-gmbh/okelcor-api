@@ -1,5 +1,5 @@
 # Session Handoff — Okelcor API
-Last updated: 2026-05-12 (session 11)
+Last updated: 2026-05-13 (session 12)
 
 ## Project
 Laravel 13.2 / PHP 8.3 REST API for Okelcor B2B tyre wholesale.
@@ -34,6 +34,27 @@ composer install --no-dev
 /opt/alt/php83/usr/bin/php artisan config:cache
 /opt/alt/php83/usr/bin/php artisan route:cache
 ```
+
+**Session 12 deploy note (Phase 2C-4 — Commercial Invoice):**
+
+**No new database migrations** — uses existing `trade_documents` table.
+
+**Files changed (session 12):**
+- `app/Services/TradeDocumentService.php` — added `generateCommercialInvoiceForOrder()` method; idempotent on `commercial_invoice` + `status=issued`; stores PDF to `trade-documents/commercial-invoice/CI-YYYY-XXXX.pdf`
+- `app/Http/Controllers/Admin/AdminTradeDocumentController.php` — added `generateCommercialInvoice()` method; wraps service in try/catch; writes `document_generated` order log; returns 201 new / 200 existing
+- `routes/api.php` — added `POST orders/{id}/generate-commercial-invoice` under `permission:trade_documents.manage`
+- `resources/views/pdf/commercial-invoice.blade.php` — new DomPDF template with export notice, seller/buyer, trade terms bar (incoterms, country of export, destination, carrier, tracking), items table with HS code + country of origin placeholders, totals, VAT/customs declaration block (reverse-charge / exempt / standard), signature + stamp blocks
+
+**Deploy steps (no migration needed):**
+```bash
+git reset --hard origin/main
+composer install --no-dev
+/opt/alt/php83/usr/bin/php artisan config:clear && /opt/alt/php83/usr/bin/php artisan config:cache
+/opt/alt/php83/usr/bin/php artisan route:cache
+/opt/alt/php83/usr/bin/php artisan view:clear
+```
+
+---
 
 **Session 11 deploy note (Phase 2C-1/2/3 — Trade Documents):**
 
@@ -113,7 +134,7 @@ php artisan route:cache
 
 ---
 
-## Current Route Count: 162
+## Current Route Count: 163
 
 ### Customer Auth routes (public — no token)
 ```
@@ -386,13 +407,14 @@ GET    /admin/eu-declarations/{id}/download          ← download signed PDF fro
 POST   /admin/eu-declarations/{id}/acknowledge       ← mark declaration acknowledged; releases invoice + sends FinalInvoiceReleased email
 
 # Trade documents — permission:trade_documents.manage
-POST   /admin/orders/{id}/trade-documents/proforma   ← generate/fetch proforma invoice PDF (idempotent)
-POST   /admin/orders/{id}/generate-packing-list      ← generate/fetch packing list PDF (idempotent)
-POST   /admin/orders/{id}/generate-delivery-note     ← generate/fetch delivery note PDF (idempotent)
-POST   /admin/orders/{id}/trade-documents/upload     ← upload shipment doc (Bill of Lading, CMR, etc.)
-GET    /admin/orders/{id}/trade-documents            ← list all trade docs for an order (all types/statuses)
-GET    /admin/trade-documents/{id}/download          ← download any trade document file from private disk
-DELETE /admin/trade-documents/{id}                   ← delete uploaded shipment_document only (generated PDFs protected)
+POST   /admin/orders/{id}/trade-documents/proforma      ← generate/fetch proforma invoice PDF (idempotent)
+POST   /admin/orders/{id}/generate-commercial-invoice   ← generate/fetch commercial invoice PDF (idempotent)
+POST   /admin/orders/{id}/generate-packing-list         ← generate/fetch packing list PDF (idempotent)
+POST   /admin/orders/{id}/generate-delivery-note        ← generate/fetch delivery note PDF (idempotent)
+POST   /admin/orders/{id}/trade-documents/upload        ← upload shipment doc (Bill of Lading, CMR, etc.)
+GET    /admin/orders/{id}/trade-documents               ← list all trade docs for an order (all types/statuses)
+GET    /admin/trade-documents/{id}/download             ← download any trade document file from private disk
+DELETE /admin/trade-documents/{id}                      ← delete uploaded shipment_document only (generated PDFs protected)
 
 GET    /admin/contact-messages
 GET    /admin/contact-messages/{id}
@@ -796,16 +818,18 @@ Indexes: `order_id`, `order_ref`, `type`, `status`
 
 **Service:** `App\Services\TradeDocumentService`
 - `generateProformaForOrder(Order $order, ?AdminUser $admin = null): TradeDocument` — idempotent; returns existing issued proforma or creates new; generates PDF via DomPDF; stored at `trade-documents/proforma/PI-YYYY-XXXX.pdf`
+- `generateCommercialInvoiceForOrder(Order $order, ?AdminUser $admin = null): TradeDocument` — idempotent; same pattern; stored at `trade-documents/commercial-invoice/CI-YYYY-XXXX.pdf`; eager-loads `items.product`; includes invoice ref, trade terms bar, HS code/origin placeholders, customs declaration block
 - `generatePackingListForOrder(Order $order, ?AdminUser $admin = null): TradeDocument` — idempotent; same pattern; stored at `trade-documents/packing-list/PL-YYYY-XXXX.pdf`; eager-loads `items.product` for tyre spec fields
 - `generateDeliveryNoteForOrder(Order $order, ?AdminUser $admin = null): TradeDocument` — idempotent; same pattern; stored at `trade-documents/delivery-note/DN-YYYY-XXXX.pdf`; includes EU reverse-charge Gelangensbestätigung notice when `is_reverse_charge=true`
 - All generation methods: PDF failure is non-blocking (logged as warning, DB record still returned)
-- Invoice lookup in packing list and delivery note: `Invoice::where('order_ref', $order->ref)` — NOT `order_id` (invoices table uses `order_ref` string FK, no `order_id` column)
+- Invoice lookup in all generate methods: `Invoice::where('order_ref', $order->ref)` — NOT `order_id` (invoices table uses `order_ref` string FK, no `order_id` column)
 
 **Auto-generation (bank transfer orders):**
 - `AdminQuoteRequestController::convertToOrder()` — auto-generates proforma after bank_transfer quote conversion (non-blocking)
 
 **PDF templates:**
-- `resources/views/pdf/proforma-invoice.blade.php` — proforma invoice
+- `resources/views/pdf/proforma-invoice.blade.php` — proforma invoice (pre-payment quotation doc)
+- `resources/views/pdf/commercial-invoice.blade.php` — commercial invoice for export/customs; blue accent; export notice banner; trade terms bar (incoterms, country of export=Germany, destination, carrier, tracking); items with HS code + country of origin placeholders; customs declaration block (reverse-charge / exempt / standard); authorised signatory + stamp blocks
 - `resources/views/pdf/packing-list.blade.php` — packing list with items table, weight placeholders, signature blocks
 - `resources/views/pdf/delivery-note.blade.php` — delivery note with receipt confirmation + EU reverse-charge notice; uses `@php $rowClass` for alternating rows (DomPDF nth-child unreliable)
 
@@ -813,6 +837,7 @@ Indexes: `order_id`, `order_ref`, `type`, `status`
 | Type | Path |
 |------|------|
 | Proforma PDF | `trade-documents/proforma/PI-YYYY-XXXX.pdf` |
+| Commercial invoice PDF | `trade-documents/commercial-invoice/CI-YYYY-XXXX.pdf` |
 | Packing list PDF | `trade-documents/packing-list/PL-YYYY-XXXX.pdf` |
 | Delivery note PDF | `trade-documents/delivery-note/DN-YYYY-XXXX.pdf` |
 | Shipment document upload | `trade-documents/uploads/{order_ref}/{YmdHis}_{safe-slug}.{ext}` |
@@ -828,6 +853,7 @@ Indexes: `order_id`, `order_ref`, `type`, `status`
 - `POST /admin/orders/{id}/generate-packing-list` — idempotent; 201 new / 200 existing
 - `POST /admin/orders/{id}/generate-delivery-note` — idempotent; 201 new / 200 existing
 - `POST /admin/orders/{id}/trade-documents/upload` — upload shipment doc; 201; logs `document_uploaded`
+- `POST /admin/orders/{id}/generate-commercial-invoice` — idempotent; 201 new / 200 existing; logs `document_generated`
 - `DELETE /admin/trade-documents/{id}` — delete uploaded shipment_document only; 422 if type is not `shipment_document` (generated PDFs are protected); deletes physical file then DB record; logs `document_deleted`
 - `GET /admin/orders/{id}/trade-documents` — all docs for the order (all types + statuses)
 - `GET /admin/trade-documents/{id}/download` — serves `pdf_path ?? file_path` from private disk; 404 if no file
@@ -1470,8 +1496,9 @@ Trade documents are commercial shipping/customs documents distinct from tax invo
 
 **Key files:**
 - `app/Models/TradeDocument.php` — `$hidden = ['pdf_path', 'file_path']`; use `getRawOriginal()` in controllers
-- `app/Services/TradeDocumentService.php` — all four idempotent generate methods; `PREFIXES` array defines number format
+- `app/Services/TradeDocumentService.php` — five idempotent generate methods; `PREFIXES` array defines number format
 - `resources/views/pdf/proforma-invoice.blade.php` — proforma DomPDF template
+- `resources/views/pdf/commercial-invoice.blade.php` — commercial invoice DomPDF template (export notice, trade terms bar, customs declaration, sig blocks)
 - `resources/views/pdf/packing-list.blade.php` — packing list DomPDF template (items + weight block + sig blocks)
 - `resources/views/pdf/delivery-note.blade.php` — delivery note DomPDF template (receipt confirmation + EU RC Gelangensbestätigung notice)
 - `app/Http/Controllers/Admin/AdminTradeDocumentController.php` — all admin endpoints (generate/upload/delete/download/list)
@@ -1791,6 +1818,7 @@ Conversion: `url(Storage::url($relativePath))` in controller formatters.
 | Phase 2C-1 — Packing List | **DONE** — `PL-YYYY-XXXX` sequential numbers, DomPDF template, admin endpoint, customer whitelist |
 | Phase 2C-2 — Delivery Note | **DONE** — `DN-YYYY-XXXX` sequential numbers, DomPDF template with EU reverse-charge notice, admin endpoint, customer whitelist |
 | Phase 2C-3 — Shipment Document Uploads | **DONE** — `POST upload` + `DELETE` endpoints, private disk storage, `type_label` column, customer whitelist; accepts `document_label` or `type_label` field |
+| Phase 2C-4 — Commercial Invoice | **DONE** — `CI-YYYY-XXXX` sequential numbers, DomPDF template (export notice, trade terms bar, customs declaration, sig blocks), admin endpoint, customer whitelist |
 | Invoice release gating | **DONE** — `released_at` column, 423 on locked download, admin acknowledge releases invoice + email |
 | Rapid product auto-pricing | **DONE** — `cost_price` base, PromotionPricingService, AdminPromotionController hook; price/price_b2b/price_b2c all aligned |
 | Incoterms FOB-first model | **DONE** — config, PDF templates, emails updated; `Custom` added as valid incoterm; label renamed to "Delivery / Shipping Terms" everywhere |

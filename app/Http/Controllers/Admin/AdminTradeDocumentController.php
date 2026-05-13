@@ -166,6 +166,59 @@ class AdminTradeDocumentController extends Controller
     }
 
     /**
+     * POST /api/v1/admin/orders/{id}/generate-commercial-invoice
+     *
+     * Generate (or return existing) commercial invoice for an order.
+     * Idempotent — calling multiple times returns the same issued document.
+     */
+    public function generateCommercialInvoice(Request $request, int $id): JsonResponse
+    {
+        $order = Order::with(['items', 'shipmentEvents'])->findOrFail($id);
+        $admin = $request->user();
+
+        try {
+            $document = $this->service->generateCommercialInvoiceForOrder($order, $admin);
+        } catch (\Throwable $e) {
+            Log::error('Commercial invoice generation failed', [
+                'order_id'  => $id,
+                'order_ref' => $order->ref,
+                'error'     => $e->getMessage(),
+                'file'      => $e->getFile() . ':' . $e->getLine(),
+            ]);
+            return response()->json([
+                'message' => 'Unable to generate commercial invoice. Please try again or contact support.',
+            ], 500);
+        }
+
+        if ($document->wasRecentlyCreated) {
+            try {
+                OrderLog::create([
+                    'order_id'         => $order->id,
+                    'order_ref'        => $order->ref,
+                    'admin_user_id'    => $admin?->id,
+                    'admin_user_email' => $admin?->email,
+                    'action'           => 'document_generated',
+                    'new_value'        => $document->number,
+                    'notes'            => 'Commercial invoice generated.',
+                    'ip_address'       => $request->ip(),
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('OrderLog write failed (commercial invoice generation)', [
+                    'order_ref' => $order->ref,
+                    'error'     => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return response()->json([
+            'data'    => $this->formatDocument($document),
+            'message' => $document->wasRecentlyCreated
+                ? 'Commercial invoice generated.'
+                : 'Commercial invoice already exists for this order.',
+        ], $document->wasRecentlyCreated ? 201 : 200);
+    }
+
+    /**
      * POST /api/v1/admin/orders/{id}/trade-documents/upload
      *
      * Upload a shipment document (Bill of Lading, CMR, etc.) to an order.
