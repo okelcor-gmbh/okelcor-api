@@ -1,5 +1,5 @@
 # Session Handoff — Okelcor API
-Last updated: 2026-05-13 (session 12)
+Last updated: 2026-05-13 (session 13)
 
 ## Project
 Laravel 13.2 / PHP 8.3 REST API for Okelcor B2B tyre wholesale.
@@ -34,6 +34,31 @@ composer install --no-dev
 /opt/alt/php83/usr/bin/php artisan config:cache
 /opt/alt/php83/usr/bin/php artisan route:cache
 ```
+
+**Session 13 deploy note (Phase 2C-5 — Send Trade Document by Email):**
+
+**New database migration:**
+- `2026_05_13_090256_add_document_sent_to_order_logs_action` — extends `order_logs.action` enum to include `document_generated`, `document_uploaded`, `document_deleted` (backfill — these were used in code but missing from original migration) and new `document_sent` value
+
+**Files changed (session 13):**
+- `app/Http/Controllers/Admin/AdminTradeDocumentController.php` — added `sendEmail()` method; validates `recipient_email` (nullable email) + `message` (nullable string max:1000); checks `pdf_path ?? file_path` exists on disk; defaults recipient to `order.customer_email`; sends `TradeDocumentEmail` mailable with attachment; stamps `sent_at`; logs `document_sent` to order_logs
+- `app/Mail/TradeDocumentEmail.php` — new mailable; builds subject + label from document type; attaches file from private disk; passes `documentLabel` + `adminMessage` to views
+- `resources/views/emails/trade-document-email.blade.php` — transactional HTML email; orange top border; document details table; optional admin note block (orange left border); attachment notice
+- `resources/views/emails/trade-document-email-text.blade.php` — plain-text fallback
+- `routes/api.php` — added `POST trade-documents/{id}/send-email` under `permission:trade_documents.manage`
+- `database/migrations/2026_05_13_090256_add_document_sent_to_order_logs_action.php` — new
+
+**Deploy steps:**
+```bash
+git reset --hard origin/main
+composer install --no-dev
+/opt/alt/php83/usr/bin/php artisan migrate --force
+/opt/alt/php83/usr/bin/php artisan config:clear && /opt/alt/php83/usr/bin/php artisan config:cache
+/opt/alt/php83/usr/bin/php artisan route:cache
+/opt/alt/php83/usr/bin/php artisan view:clear
+```
+
+---
 
 **Session 12 deploy note (Phase 2C-4 — Commercial Invoice):**
 
@@ -134,7 +159,7 @@ php artisan route:cache
 
 ---
 
-## Current Route Count: 163
+## Current Route Count: 164
 
 ### Customer Auth routes (public — no token)
 ```
@@ -414,6 +439,7 @@ POST   /admin/orders/{id}/generate-delivery-note        ← generate/fetch deliv
 POST   /admin/orders/{id}/trade-documents/upload        ← upload shipment doc (Bill of Lading, CMR, etc.)
 GET    /admin/orders/{id}/trade-documents               ← list all trade docs for an order (all types/statuses)
 GET    /admin/trade-documents/{id}/download             ← download any trade document file from private disk
+POST   /admin/trade-documents/{id}/send-email           ← send document to customer by email with file attached; stamps sent_at; logs document_sent
 DELETE /admin/trade-documents/{id}                      ← delete uploaded shipment_document only (generated PDFs protected)
 
 GET    /admin/contact-messages
@@ -854,6 +880,7 @@ Indexes: `order_id`, `order_ref`, `type`, `status`
 - `POST /admin/orders/{id}/generate-delivery-note` — idempotent; 201 new / 200 existing
 - `POST /admin/orders/{id}/trade-documents/upload` — upload shipment doc; 201; logs `document_uploaded`
 - `POST /admin/orders/{id}/generate-commercial-invoice` — idempotent; 201 new / 200 existing; logs `document_generated`
+- `POST /admin/trade-documents/{id}/send-email` — send document by email with file attached; request: `{ recipient_email?: string, message?: string }`; defaults recipient to `order.customer_email`; 422 if no file; 404 if file missing on disk; 500 on mail failure; on success: stamps `sent_at`, logs `document_sent`, returns `{ data: { id, sent_at, recipient_email }, message }`
 - `DELETE /admin/trade-documents/{id}` — delete uploaded shipment_document only; 422 if type is not `shipment_document` (generated PDFs are protected); deletes physical file then DB record; logs `document_deleted`
 - `GET /admin/orders/{id}/trade-documents` — all docs for the order (all types + statuses)
 - `GET /admin/trade-documents/{id}/download` — serves `pdf_path ?? file_path` from private disk; 404 if no file
@@ -1097,7 +1124,7 @@ Append-only audit trail — no `updated_at`, never mutated after insert.
 | `order_ref` | varchar(30) | denormalized — readable even after order hard-deleted |
 | `admin_user_id` | bigint FK | nullable → nullOnDelete — log survives user deletion |
 | `admin_user_email` | varchar(255) | nullable — denormalized |
-| `action` | enum | `status_changed`, `cancelled`, `deleted`, `tracking_updated`, `payment_status_changed`, `document_generated`, `document_uploaded`, `document_deleted` |
+| `action` | enum | `status_changed`, `cancelled`, `deleted`, `tracking_updated`, `payment_status_changed`, `document_generated`, `document_uploaded`, `document_deleted`, `document_sent` |
 | `old_value` | varchar(100) | nullable — previous status/value |
 | `new_value` | varchar(100) | nullable — new status/value |
 | `notes` | text | nullable — optional context |
@@ -1317,6 +1344,7 @@ pending → confirmed (Stripe webhook) → processing (admin sets manually) → 
 | `CustomerEmailVerification` | Customer registers | customer | `emails/customer-verify-email.blade.php` |
 | `CustomerPasswordReset` | Customer requests password reset | customer | `emails/customer-reset-password.blade.php` |
 | `FinalInvoiceReleased` | Admin acknowledges EU Entry Certificate | customer | `emails/final-invoice-released.blade.php` |
+| `TradeDocumentEmail` | Admin sends trade document (`POST /admin/trade-documents/{id}/send-email`) | `recipient_email` (default: `order.customer_email`) | `emails/trade-document-email.blade.php` |
 
 - Manual order flow (`POST /api/v1/orders`) sends `OrderReceived` to admin only — no customer email on manual orders
 - **Reverse-charge OrderConfirmation:** invoice block is suppressed (invoice null passed) — instead shows amber notice: "Your final invoice will be available after the EU Entry Certificate is signed."
@@ -1592,7 +1620,7 @@ match(strtoupper($quote->incoterm)) {
   ]
 }
 ```
-- Actions logged: `status_changed` (any status transition including quote conversion), `cancelled` (status set to cancelled), `tracking_updated` (any of carrier/tracking_number/container_number/estimated_delivery/eta), `deleted` (hard delete before records removed), `document_generated` (proforma/packing_list/delivery_note created), `document_uploaded` (shipment_document file uploaded), `document_deleted` (shipment_document file deleted)
+- Actions logged: `status_changed` (any status transition including quote conversion), `cancelled` (status set to cancelled), `tracking_updated` (any of carrier/tracking_number/container_number/estimated_delivery/eta), `deleted` (hard delete before records removed), `document_generated` (proforma/packing_list/delivery_note/commercial_invoice created), `document_uploaded` (shipment_document file uploaded), `document_deleted` (shipment_document file deleted), `document_sent` (any trade document sent by email via `POST /admin/trade-documents/{id}/send-email`)
 
 ### Container Tracking (Public)
 - `GET /api/v1/tracking/{container}` — auto-detects carrier by tracking number format
@@ -1819,6 +1847,7 @@ Conversion: `url(Storage::url($relativePath))` in controller formatters.
 | Phase 2C-2 — Delivery Note | **DONE** — `DN-YYYY-XXXX` sequential numbers, DomPDF template with EU reverse-charge notice, admin endpoint, customer whitelist |
 | Phase 2C-3 — Shipment Document Uploads | **DONE** — `POST upload` + `DELETE` endpoints, private disk storage, `type_label` column, customer whitelist; accepts `document_label` or `type_label` field |
 | Phase 2C-4 — Commercial Invoice | **DONE** — `CI-YYYY-XXXX` sequential numbers, DomPDF template (export notice, trade terms bar, customs declaration, sig blocks), admin endpoint, customer whitelist |
+| Phase 2C-5 — Send Trade Document by Email | **DONE** — `POST /admin/trade-documents/{id}/send-email`; `TradeDocumentEmail` mailable with file attachment; `document_sent` OrderLog action; migration extends order_logs enum |
 | Invoice release gating | **DONE** — `released_at` column, 423 on locked download, admin acknowledge releases invoice + email |
 | Rapid product auto-pricing | **DONE** — `cost_price` base, PromotionPricingService, AdminPromotionController hook; price/price_b2b/price_b2c all aligned |
 | Incoterms FOB-first model | **DONE** — config, PDF templates, emails updated; `Custom` added as valid incoterm; label renamed to "Delivery / Shipping Terms" everywhere |
