@@ -1950,6 +1950,7 @@ Conversion: `url(Storage::url($relativePath))` in controller formatters.
 | Phase 2C-3 — Shipment Document Uploads | **DONE** — `POST upload` + `DELETE` endpoints, private disk storage, `type_label` column, customer whitelist; accepts `document_label` or `type_label` field |
 | Phase 2C-4 — Commercial Invoice | **DONE** — `CI-YYYY-XXXX` sequential numbers, DomPDF template (export notice, trade terms bar, customs declaration, sig blocks), admin endpoint, customer whitelist |
 | Phase 2C-5 — Send Trade Document by Email | **DONE** — `POST /admin/trade-documents/{id}/send-email`; `TradeDocumentEmail` mailable with file attachment; `document_sent` OrderLog action; migration extends order_logs enum |
+| Phase 2C-6 — Logistics Dashboard | **DONE** — `GET /admin/logistics/dashboard`; 10-metric summary; paginated order checklist; `missing[]`, `risk_level`, `next_action`, `eu_declaration` state; batch-loaded invoices; filters: status, payment_status, country, missing_document, risk_level=high, reverse_charge_only, date_from, date_to |
 | Invoice release gating | **DONE** — `released_at` column, 423 on locked download, admin acknowledge releases invoice + email |
 | Rapid product auto-pricing | **DONE** — `cost_price` base, PromotionPricingService, AdminPromotionController hook; price/price_b2b/price_b2c all aligned |
 | Incoterms FOB-first model | **DONE** — config, PDF templates, emails updated; `Custom` added as valid incoterm; label renamed to "Delivery / Shipping Terms" everywhere |
