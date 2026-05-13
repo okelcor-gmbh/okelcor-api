@@ -47,6 +47,7 @@ use App\Http\Controllers\Admin\AdminPromotionController;
 use App\Http\Controllers\Admin\AdminDashboardController;
 use App\Http\Controllers\Admin\AdminEuDeclarationController;
 use App\Http\Controllers\Admin\AdminTradeDocumentController;
+use App\Http\Controllers\Admin\AdminLogisticsController;
 use App\Http\Controllers\Admin\AdminTwoFactorController;
 use App\Http\Controllers\Admin\AdminLoginTwoFactorController;
 use App\Http\Controllers\EuDeclarationController;
@@ -401,6 +402,13 @@ Route::prefix('v1')->group(function () {
             Route::get('trade-documents/{id}/download', [AdminTradeDocumentController::class, 'download']);
             Route::post('trade-documents/{id}/send-email', [AdminTradeDocumentController::class, 'sendEmail']);
             Route::delete('trade-documents/{id}', [AdminTradeDocumentController::class, 'destroy']);
+        });
+
+        // -----------------------------------------------------------------
+        // Logistics dashboard — orders.view
+        // -----------------------------------------------------------------
+        Route::middleware('permission:orders.view')->group(function () {
+            Route::get('logistics/dashboard', [AdminLogisticsController::class, 'dashboard']);
         });
 
         // -----------------------------------------------------------------

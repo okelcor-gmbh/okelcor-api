@@ -1,5 +1,5 @@
 # Session Handoff — Okelcor API
-Last updated: 2026-05-13 (session 13)
+Last updated: 2026-05-13 (session 14)
 
 ## Project
 Laravel 13.2 / PHP 8.3 REST API for Okelcor B2B tyre wholesale.
@@ -34,6 +34,24 @@ composer install --no-dev
 /opt/alt/php83/usr/bin/php artisan config:cache
 /opt/alt/php83/usr/bin/php artisan route:cache
 ```
+
+**Session 14 deploy note (Phase 2C-6 — Logistics Dashboard):**
+
+**No new database migrations.**
+
+**Files changed (session 14):**
+- `app/Http/Controllers/Admin/AdminLogisticsController.php` — **NEW** — `dashboard()` method; builds 10-metric summary via COUNT queries; paginates non-cancelled orders with eager-loaded `tradeDocuments` (issued only) + `euDeclaration`; batch-loads `Invoice` records by `order_ref` to avoid N+1; per-order checklist: `checkDocuments()` (5 doc types), `computeMissing()` (business rules), `computeRiskLevel()` (high/medium/low/none), `computeNextAction()` (priority-ordered action string)
+- `routes/api.php` — added `GET logistics/dashboard` under `permission:orders.view`
+
+**Deploy steps (no migration needed):**
+```bash
+git reset --hard origin/main
+composer install --no-dev
+/opt/alt/php83/usr/bin/php artisan config:clear && /opt/alt/php83/usr/bin/php artisan config:cache
+/opt/alt/php83/usr/bin/php artisan route:cache
+```
+
+---
 
 **Session 13 deploy note (Phase 2C-5 — Send Trade Document by Email):**
 
@@ -159,7 +177,7 @@ php artisan route:cache
 
 ---
 
-## Current Route Count: 164
+## Current Route Count: 165
 
 ### Customer Auth routes (public — no token)
 ```
@@ -441,6 +459,9 @@ GET    /admin/orders/{id}/trade-documents               ← list all trade docs 
 GET    /admin/trade-documents/{id}/download             ← download any trade document file from private disk
 POST   /admin/trade-documents/{id}/send-email           ← send document to customer by email with file attached; stamps sent_at; logs document_sent
 DELETE /admin/trade-documents/{id}                      ← delete uploaded shipment_document only (generated PDFs protected)
+
+# Logistics dashboard — orders.view (super_admin, admin, order_manager, sales_manager)
+GET    /admin/logistics/dashboard              ← summary cards + paginated document checklist
 
 GET    /admin/contact-messages
 GET    /admin/contact-messages/{id}
@@ -910,6 +931,87 @@ Indexes: `order_id`, `order_ref`, `type`, `status`
 }
 ```
 For `shipment_document`: `type_label` = "Bill of Lading" etc., `has_pdf=false`, `has_file=true`, `number=null`, `mime_type` and `file_size` populated.
+
+#### GET /admin/logistics/dashboard — response shape
+Permission: `orders.view` (super_admin, admin, order_manager, sales_manager)
+
+Query params: `status`, `payment_status`, `country`, `missing_document` (packing_list | commercial_invoice | shipment_document | delivery_note), `risk_level` (high — DB-filtered; medium/low approximate), `reverse_charge_only` (boolean), `date_from`, `date_to`, `per_page` (max 100, default 20)
+
+```json
+{
+  "data": {
+    "summary": {
+      "total_active_orders": 42,
+      "awaiting_payment": 5,
+      "paid_orders": 37,
+      "orders_shipped": 18,
+      "orders_delivered": 12,
+      "missing_packing_list": 3,
+      "missing_commercial_invoice": 4,
+      "missing_shipment_document": 2,
+      "pending_eu_declarations": 1,
+      "high_risk_orders": 1
+    },
+    "checklist": [
+      {
+        "order_id": 172,
+        "order_ref": "OKL-XXXXXX",
+        "customer_name": "Hans Müller",
+        "customer_email": "hans@example.com",
+        "country": "Germany",
+        "status": "delivered",
+        "payment_status": "paid",
+        "is_reverse_charge": true,
+        "total": "4850.00",
+        "created_at": "2026-05-01T10:00:00+00:00",
+        "documents": {
+          "proforma": true,
+          "commercial_invoice": true,
+          "packing_list": true,
+          "delivery_note": true,
+          "shipment_document": false
+        },
+        "missing": ["shipment_document"],
+        "eu_declaration": {
+          "id": 8,
+          "status": "signed",
+          "signed_at": "2026-05-10T14:22:00+00:00",
+          "admin_acknowledged_at": null
+        },
+        "invoice_number": "INV-2026-0042",
+        "invoice_locked": true,
+        "risk_level": "high",
+        "next_action": "Acknowledge signed EU declaration"
+      }
+    ]
+  },
+  "meta": {
+    "current_page": 1,
+    "per_page": 20,
+    "total": 42,
+    "last_page": 3
+  },
+  "message": "success"
+}
+```
+
+**Risk level rules:**
+- `high` — reverse charge + delivered + declaration not acknowledged (or missing)
+- `medium` — declaration signed but not yet acknowledged, OR missing shipment_document/delivery_note
+- `low` — missing packing_list or commercial_invoice (paid order)
+- `none` — all docs present, compliance complete
+
+**Missing document rules (what triggers each entry in `missing[]`):**
+- `packing_list` — `payment_status=paid`
+- `commercial_invoice` — `payment_status=paid`
+- `shipment_document` — `status` in `[shipped, delivered]`
+- `delivery_note` — `status=delivered`
+
+**N+1 prevention:** invoices batch-loaded via `Invoice::whereIn('order_ref', $refs)->keyBy('order_ref')`; trade documents and eu_declarations eager-loaded with the paginated query.
+
+**Controller:** `AdminLogisticsController@dashboard`
+
+---
 
 **Public/customer order response includes `trade_documents[]`:**
 - `GET /api/v1/orders/{ref}` (inline in order) — all issued types including delivery_note and shipment_document
