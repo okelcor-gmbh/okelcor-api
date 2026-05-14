@@ -203,6 +203,13 @@ Route::prefix('v1')->group(function () {
     Route::post('admin/login/2fa', AdminLoginTwoFactorController::class);
 
     // -------------------------------------------------------------------------
+    // eBay OAuth callback — PUBLIC (no Sanctum; eBay redirects browser here)
+    // State param is the CSRF guard (verified against Cache in controller).
+    // -------------------------------------------------------------------------
+    Route::get('admin/ebay/callback', [EbayListingController::class, 'callback'])
+        ->middleware('throttle:10,1');
+
+    // -------------------------------------------------------------------------
     // Admin — protected by Sanctum token auth
     // Role hierarchy:
     //   super_admin  — full access
@@ -470,6 +477,8 @@ Route::prefix('v1')->group(function () {
         // -----------------------------------------------------------------
         Route::middleware('permission:ebay.manage')->group(function () {
             Route::get('ebay/auth-url', [EbayListingController::class, 'authUrl']);
+            Route::get('ebay/status', [EbayListingController::class, 'status']);
+            Route::post('ebay/disconnect', [EbayListingController::class, 'disconnect']);
             Route::get('ebay/listings', [EbayListingController::class, 'listings']);
             Route::post('ebay/sync-all', [EbayListingController::class, 'syncAll']);
             // Canonical URLs (per frontend spec)

@@ -1,5 +1,5 @@
 # Session Handoff — Okelcor API
-Last updated: 2026-05-13 (session 14)
+Last updated: 2026-05-14 (session 15)
 
 ## Project
 Laravel 13.2 / PHP 8.3 REST API for Okelcor B2B tyre wholesale.
@@ -34,6 +34,35 @@ composer install --no-dev
 /opt/alt/php83/usr/bin/php artisan config:cache
 /opt/alt/php83/usr/bin/php artisan route:cache
 ```
+
+**Session 15 deploy note (Phase EB-1 — eBay OAuth & Token Stability):**
+
+**New database migration:**
+- `2026_05_14_000001_create_ebay_tokens_table` — creates `ebay_tokens` table with encrypted `access_token` + `refresh_token`, expiry timestamps, `is_active` flag, marketplace_id, connected_at, last_refreshed_at
+
+**Files changed (session 15):**
+- `database/migrations/2026_05_14_000001_create_ebay_tokens_table.php` — **NEW**
+- `app/Models/EbayToken.php` — **NEW** — encrypted casts for access/refresh tokens; `scopeActive()`
+- `app/Services/EbaySellingService.php` — `getAccessToken()` now loads from DB (active token) → persists any rotated refresh_token on every refresh call; fallback to `EBAY_REFRESH_TOKEN` env var (legacy only); `getAuthUrl()` renamed to `buildAuthUrl(string $state)`; new `exchangeCodeForTokens(string $code)` method exchanges auth code and creates DB token record; `cacheKey()` helper extracted
+- `app/Http/Controllers/Admin/EbayListingController.php` — `authUrl()` now generates secure state (stored in cache 15 min); new `callback()` (public — redirects browser after eBay OAuth); new `status()` returns connection status + missing config; new `disconnect()` deactivates token + clears cache
+- `routes/api.php` — added `GET admin/ebay/callback` (public, throttle:10,1); added `GET admin/ebay/status`, `POST admin/ebay/disconnect` inside `permission:ebay.manage`
+- `.env.example` — `EBAY_REFRESH_TOKEN` marked as legacy fallback only
+
+**IMPORTANT — security action required before deploy:**
+- Rotate `EBAY_CLIENT_SECRET` in the eBay Developer Portal (it was exposed in a prior session)
+- Set `EBAY_RU_NAME` to the redirect URI registered in the eBay Developer Portal
+- The callback URL to register in the eBay Developer Portal is: `https://api.okelcor.com/api/v1/admin/ebay/callback`
+
+**Deploy steps:**
+```bash
+git reset --hard origin/main
+composer install --no-dev
+/opt/alt/php83/usr/bin/php artisan migrate --force
+/opt/alt/php83/usr/bin/php artisan config:clear && /opt/alt/php83/usr/bin/php artisan config:cache
+/opt/alt/php83/usr/bin/php artisan route:cache
+```
+
+---
 
 **Session 14 deploy note (Phase 2C-6 — Logistics Dashboard):**
 
@@ -177,7 +206,7 @@ php artisan route:cache
 
 ---
 
-## Current Route Count: 165
+## Current Route Count: 168
 
 ### Customer Auth routes (public — no token)
 ```
@@ -469,6 +498,17 @@ PATCH  /admin/contact-messages/{id}/status
 
 GET    /admin/newsletter
 DELETE /admin/newsletter/{email}
+
+# eBay marketplace — permission:ebay.manage (super_admin, admin)
+# Callback is PUBLIC (no auth — eBay redirects browser here after OAuth consent)
+GET    /admin/ebay/callback                          ← PUBLIC; verifies state, exchanges code, stores tokens in DB; redirects to frontend
+GET    /admin/ebay/auth-url                          ← returns { url, state }; state stored in cache (15 min CSRF guard)
+GET    /admin/ebay/status                            ← connection status + missing config keys
+POST   /admin/ebay/disconnect                        ← deactivates active token; clears cache; logs ebay_disconnected
+GET    /admin/ebay/listings                          ← products where ebay_listed=true
+POST   /admin/ebay/sync-all                          ← bulk stock sync for all listed products
+POST   /admin/products/{id}/ebay/list                ← publish product to eBay (canonical)
+DELETE /admin/products/{id}/ebay/remove              ← remove product from eBay (canonical)
 
 # Supplier intelligence — super_admin, admin, order_manager
 GET    /admin/supplier/search?q={query}&limit={1-50}
@@ -1071,6 +1111,32 @@ Indexes: `order_ref`, `status`, `customer_email`
 - `GET /admin/eu-declarations/{id}` — full detail including `has_signature` and `has_pdf` booleans; `signature_path` itself is never returned
 - `GET /admin/eu-declarations/{id}/download` — download signed PDF from private disk; 404 if not signed or file missing
 - `POST /admin/eu-declarations/{id}/acknowledge` — mark signed declaration as acknowledged; 409 if status !== `signed`; sets `status='acknowledged'`, `admin_acknowledged_at`, `admin_acknowledged_by`; **releases the linked invoice** (`released_at = now()`); sends `FinalInvoiceReleased` email to customer (non-blocking try/catch)
+
+### `ebay_tokens`
+Migration: `2026_05_14_000001_create_ebay_tokens_table`
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | bigint | PK |
+| `marketplace_id` | varchar(20) | default `EBAY_DE` |
+| `seller_username` | varchar | nullable — not populated automatically yet |
+| `access_token` | text | nullable — **encrypted** via Laravel `encrypted` cast |
+| `refresh_token` | text | **encrypted** via Laravel `encrypted` cast |
+| `access_token_expires_at` | timestamp | nullable |
+| `refresh_token_expires_at` | timestamp | nullable — eBay default ~18 months |
+| `scopes` | json | nullable — array of granted scope strings |
+| `connected_at` | timestamp | nullable — when OAuth flow completed |
+| `last_refreshed_at` | timestamp | nullable — updated on every token refresh |
+| `is_active` | boolean | default true — index; only one active token used |
+| `created_at` / `updated_at` | timestamp | |
+
+**Token access order:** Cache (hot path, TTL = `expires_in - 60s`) → DB active record → `EBAY_REFRESH_TOKEN` env fallback (legacy only).
+
+**Token rotation:** every `getAccessToken()` call that hits eBay's token endpoint persists the new access_token and any rotated refresh_token back to the DB record.
+
+**Model:** `App\Models\EbayToken` — `access_token` + `refresh_token` in `$hidden`; use `getRawOriginal()` if ever needed in service code (the service always reads via the model cast transparently).
+
+---
 
 ### `products`
 | Column | Type | Notes |
@@ -1941,7 +2007,8 @@ Conversion: `url(Storage::url($relativePath))` in controller formatters.
 
 | Item | Notes |
 |------|-------|
-| eBay production credentials | Live keys set in Namecheap .env — `EBAY_ENVIRONMENT=production` |
+| Phase EB-1 — eBay OAuth & Token Stability | **DONE** — `ebay_tokens` table; encrypted token storage; callback handler; refresh_token rotation; status + disconnect endpoints; `.env` fallback preserved |
+| eBay production credentials | Rotate `EBAY_CLIENT_SECRET` (exposed in prior session). Set `EBAY_RU_NAME`. Register callback URL `https://api.okelcor.com/api/v1/admin/ebay/callback` in eBay Developer Portal. Set `EBAY_ENVIRONMENT=production`. |
 | Adyen approval | Legacy/inactive until business account/API credentials are approved |
 | `GET /admin/products?trashed=only` | Restore works but no dedicated trashed product list endpoint |
 | Admin customer edit/deactivate | GET /admin/customers list exists; no PUT/DELETE per customer yet |

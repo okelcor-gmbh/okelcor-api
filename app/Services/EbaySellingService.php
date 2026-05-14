@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\EbayToken;
 use App\Models\Product;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -10,6 +11,12 @@ use Illuminate\Support\Facades\Storage;
 
 class EbaySellingService
 {
+    private const SCOPES = [
+        'https://api.ebay.com/oauth/api_scope/sell.inventory',
+        'https://api.ebay.com/oauth/api_scope/sell.inventory.readonly',
+        'https://api.ebay.com/oauth/api_scope/sell.account.readonly',
+    ];
+
     // -------------------------------------------------------------------------
     // Environment helpers
     // -------------------------------------------------------------------------
@@ -40,66 +47,187 @@ class EbaySellingService
             : 'https://auth.ebay.com/oauth2/authorize';
     }
 
+    private function cacheKey(): string
+    {
+        return 'ebay_sell_user_token_' . config('services.ebay.environment');
+    }
+
     // -------------------------------------------------------------------------
-    // OAuth — user token via refresh_token
-    // Different from EbayService which uses client_credentials (app token)
+    // OAuth — access token via refresh_token
+    //
+    // Priority order:
+    //   1. Laravel Cache (hot path — avoids DB + HTTP on every API call)
+    //   2. Active ebay_tokens DB record (persists across deployments, rotates)
+    //   3. EBAY_REFRESH_TOKEN env var (backward-compat fallback only)
     // -------------------------------------------------------------------------
 
     public function getAccessToken(): string
     {
-        $cacheKey = 'ebay_sell_user_token_' . config('services.ebay.environment');
+        if ($cached = Cache::get($this->cacheKey())) {
+            return $cached;
+        }
 
-        return Cache::remember($cacheKey, 7000, function () {
-            $refreshToken = config('services.ebay_sell.refresh_token');
+        $record = EbayToken::active()->latest()->first();
 
-            if (empty($refreshToken)) {
-                throw new \RuntimeException(
-                    'EBAY_REFRESH_TOKEN is not set. Visit GET /admin/ebay/auth-url to authorise the seller account first.'
-                );
-            }
+        if ($record) {
+            return $this->callRefreshGrant($record->refresh_token, $record);
+        }
 
-            $response = Http::asForm()
-                ->withBasicAuth(
-                    config('services.ebay_sell.client_id'),
-                    config('services.ebay_sell.client_secret')
-                )
-                ->post($this->oauthUrl(), [
-                    'grant_type'    => 'refresh_token',
-                    'refresh_token' => $refreshToken,
-                    'scope'         => implode(' ', [
-                        'https://api.ebay.com/oauth/api_scope/sell.inventory',
-                        'https://api.ebay.com/oauth/api_scope/sell.inventory.readonly',
-                        'https://api.ebay.com/oauth/api_scope/sell.account.readonly',
-                    ]),
+        // Backward-compat: .env fallback for pre-EB-1 setups
+        $envToken = config('services.ebay_sell.refresh_token');
+
+        if (empty($envToken)) {
+            throw new \RuntimeException(
+                'eBay seller account is not connected. ' .
+                'Visit GET /api/v1/admin/ebay/auth-url to authorise the seller account.'
+            );
+        }
+
+        Log::warning('eBay: using .env EBAY_REFRESH_TOKEN fallback — reconnect via OAuth to migrate tokens to DB.');
+
+        return $this->callRefreshGrant($envToken, null);
+    }
+
+    /**
+     * Call eBay's token endpoint using a refresh_token grant.
+     * If a DB record is provided, persists the new access_token (and any rotated
+     * refresh_token) back to the database and updates last_refreshed_at.
+     */
+    private function callRefreshGrant(string $refreshToken, ?EbayToken $record): string
+    {
+        $response = Http::asForm()
+            ->withBasicAuth(
+                config('services.ebay_sell.client_id'),
+                config('services.ebay_sell.client_secret')
+            )
+            ->post($this->oauthUrl(), [
+                'grant_type'    => 'refresh_token',
+                'refresh_token' => $refreshToken,
+                'scope'         => implode(' ', self::SCOPES),
+            ]);
+
+        if (! $response->ok()) {
+            Log::error('eBay token refresh failed.', [
+                'action' => 'ebay_token_refresh_failed',
+                'status' => $response->status(),
+                'body'   => $response->body(),
+            ]);
+
+            throw new \RuntimeException('eBay user token refresh failed: ' . $response->body());
+        }
+
+        $data        = $response->json();
+        $accessToken = $data['access_token'];
+        $expiresIn   = (int) ($data['expires_in'] ?? 7200);
+        $cacheTtl    = max(60, $expiresIn - 60); // 60s buffer before expiry
+
+        Cache::put($this->cacheKey(), $accessToken, $cacheTtl);
+
+        if ($record) {
+            $updates = [
+                'access_token'            => $accessToken,
+                'access_token_expires_at' => now()->addSeconds($expiresIn),
+                'last_refreshed_at'       => now(),
+            ];
+
+            // eBay rotates refresh_token — persist the new one so future refreshes work
+            if (! empty($data['refresh_token']) && $data['refresh_token'] !== $refreshToken) {
+                $updates['refresh_token'] = $data['refresh_token'];
+                Log::info('eBay: refresh_token rotated and persisted.', [
+                    'action'         => 'ebay_token_refreshed',
+                    'token_id'       => $record->id,
+                    'marketplace_id' => $record->marketplace_id,
                 ]);
-
-            if (! $response->ok()) {
-                throw new \RuntimeException('eBay user token refresh failed: ' . $response->body());
+            } else {
+                Log::info('eBay: access_token refreshed.', [
+                    'action'         => 'ebay_token_refreshed',
+                    'token_id'       => $record->id,
+                    'marketplace_id' => $record->marketplace_id,
+                ]);
             }
 
-            return $response->json('access_token');
-        });
+            $record->update($updates);
+        }
+
+        return $accessToken;
     }
 
     // -------------------------------------------------------------------------
-    // OAuth consent URL — admin must visit this once to authorise the app
+    // OAuth consent URL — controller generates the state, passes it here
     // -------------------------------------------------------------------------
 
-    public function getAuthUrl(): string
+    public function buildAuthUrl(string $state): string
     {
-        $scopes = implode(' ', [
-            'https://api.ebay.com/oauth/api_scope/sell.inventory',
-            'https://api.ebay.com/oauth/api_scope/sell.inventory.readonly',
-            'https://api.ebay.com/oauth/api_scope/sell.account.readonly',
-        ]);
-
         return $this->authBaseUrl() . '?' . http_build_query([
             'client_id'     => config('services.ebay_sell.client_id'),
             'redirect_uri'  => config('services.ebay_sell.ru_name'),
             'response_type' => 'code',
-            'scope'         => $scopes,
-            'state'         => 'okelcor_ebay_auth',
+            'scope'         => implode(' ', self::SCOPES),
+            'state'         => $state,
         ]);
+    }
+
+    // -------------------------------------------------------------------------
+    // Exchange authorization code for tokens (called by callback handler)
+    // Deactivates any existing active token before creating the new one.
+    // -------------------------------------------------------------------------
+
+    public function exchangeCodeForTokens(string $code): EbayToken
+    {
+        $response = Http::asForm()
+            ->withBasicAuth(
+                config('services.ebay_sell.client_id'),
+                config('services.ebay_sell.client_secret')
+            )
+            ->post($this->oauthUrl(), [
+                'grant_type'   => 'authorization_code',
+                'code'         => $code,
+                'redirect_uri' => config('services.ebay_sell.ru_name'),
+            ]);
+
+        if (! $response->ok()) {
+            Log::error('eBay authorization code exchange failed.', [
+                'action' => 'ebay_token_refresh_failed',
+                'status' => $response->status(),
+                'body'   => $response->body(),
+            ]);
+
+            throw new \RuntimeException('eBay code exchange failed: ' . $response->body());
+        }
+
+        $data = $response->json();
+
+        if (empty($data['refresh_token'])) {
+            throw new \RuntimeException('eBay token response did not include a refresh_token.');
+        }
+
+        // Deactivate all existing active tokens before storing the new one
+        EbayToken::where('is_active', true)->update(['is_active' => false]);
+
+        // Clear any stale cached access token
+        Cache::forget($this->cacheKey());
+
+        $expiresIn        = (int) ($data['expires_in'] ?? 7200);
+        $rtExpiresIn      = (int) ($data['refresh_token_expires_in'] ?? 47304000); // eBay default ~18 months
+        $marketplaceId    = config('services.ebay_sell.marketplace_id', 'EBAY_DE');
+
+        $token = EbayToken::create([
+            'marketplace_id'           => $marketplaceId,
+            'access_token'             => $data['access_token'] ?? null,
+            'refresh_token'            => $data['refresh_token'],
+            'access_token_expires_at'  => now()->addSeconds($expiresIn),
+            'refresh_token_expires_at' => now()->addSeconds($rtExpiresIn),
+            'scopes'                   => self::SCOPES,
+            'connected_at'             => now(),
+            'is_active'                => true,
+        ]);
+
+        // Prime the cache so the first listing call after connect is instant
+        if (! empty($data['access_token'])) {
+            Cache::put($this->cacheKey(), $data['access_token'], max(60, $expiresIn - 60));
+        }
+
+        return $token;
     }
 
     // -------------------------------------------------------------------------
@@ -144,7 +272,7 @@ class EbaySellingService
                         'quantity' => $quantity,
                     ],
                 ],
-                // Reuse existing product data — partial updates require the full body in Inventory API
+                // Partial updates require a full body in the Inventory API
                 'condition' => 'NEW',
                 'product'   => [
                     'title'     => $this->buildTitle($product),
@@ -216,7 +344,7 @@ class EbaySellingService
             ->withHeaders($this->commonHeaders())
             ->put("{$this->inventoryBaseUrl()}/inventory_item/{$product->sku}", $body);
 
-        // 200 = updated, 201 = created — both are success
+        // 200 = updated, 204 = created — both are success
         if (! in_array($response->status(), [200, 204])) {
             throw new \RuntimeException("eBay inventory item upsert failed for SKU {$product->sku}: " . $response->body());
         }
@@ -247,7 +375,7 @@ class EbaySellingService
             'listingDescription' => $this->buildDescription($product),
         ];
 
-        // Check if offer already exists for this SKU
+        // Check if an offer already exists for this SKU
         $existing = Http::withToken($token)
             ->withHeaders($this->commonHeaders())
             ->get("{$this->inventoryBaseUrl()}/offer", ['sku' => $product->sku]);
@@ -301,9 +429,7 @@ class EbaySellingService
             $product->season,
         ]);
 
-        $title = implode(' ', $parts);
-
-        return mb_substr($title, 0, 80);
+        return mb_substr(implode(' ', $parts), 0, 80);
     }
 
     private function buildDescription(Product $product): string
@@ -324,13 +450,13 @@ class EbaySellingService
     {
         $aspects = [];
 
-        if ($product->brand)       $aspects['Brand']        = [$product->brand];
-        if ($product->width)       $aspects['Tyre Width']   = [$product->width];
-        if ($product->height)      $aspects['Aspect Ratio'] = [$product->height];
-        if ($product->rim)         $aspects['Rim Diameter'] = [$product->rim];
-        if ($product->load_index)  $aspects['Load Rating']  = [$product->load_index];
+        if ($product->brand)        $aspects['Brand']        = [$product->brand];
+        if ($product->width)        $aspects['Tyre Width']   = [$product->width];
+        if ($product->height)       $aspects['Aspect Ratio'] = [$product->height];
+        if ($product->rim)          $aspects['Rim Diameter'] = [$product->rim];
+        if ($product->load_index)   $aspects['Load Rating']  = [$product->load_index];
         if ($product->speed_rating) $aspects['Speed Rating'] = [$product->speed_rating];
-        if ($product->season)      $aspects['Season']       = [$product->season];
+        if ($product->season)       $aspects['Season']       = [$product->season];
 
         return $aspects;
     }
@@ -370,15 +496,14 @@ class EbaySellingService
             empty(config('services.ebay_sell.return_policy_id'))
         ) {
             throw new \RuntimeException(
-                'eBay policy IDs are not configured. Set EBAY_FULFILLMENT_POLICY_ID, EBAY_PAYMENT_POLICY_ID, EBAY_RETURN_POLICY_ID in .env'
+                'eBay policy IDs are not configured. Set EBAY_FULFILLMENT_POLICY_ID, EBAY_PAYMENT_POLICY_ID, ' .
+                'EBAY_RETURN_POLICY_ID in .env'
             );
         }
     }
 
     private function commonHeaders(): array
     {
-        return [
-            'Content-Language' => 'en-US',
-        ];
+        return ['Content-Language' => 'en-US'];
     }
 }
