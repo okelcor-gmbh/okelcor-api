@@ -326,6 +326,84 @@ class EbaySellingService
     }
 
     // -------------------------------------------------------------------------
+    // Update an existing listing — title, description, price, stock.
+    // Strict: requires the product to already be listed (offer must exist on eBay).
+    // Does NOT re-publish — updates the offer in place.
+    // Returns ['offer_id' => string, 'listing_id' => string]
+    // -------------------------------------------------------------------------
+
+    public function updateListing(Product $product): array
+    {
+        $this->guardProduct($product);
+
+        $token = $this->getAccessToken();
+        $sku   = $product->sku;
+
+        $existing = Http::withToken($token)
+            ->withHeaders($this->commonHeaders())
+            ->get("{$this->inventoryBaseUrl()}/offer", ['sku' => $sku]);
+
+        if (! $existing->ok() || empty($existing->json('offers'))) {
+            throw new \RuntimeException(
+                "No existing eBay offer found for SKU {$sku}. Use 'List on eBay' to create and publish a listing first."
+            );
+        }
+
+        $offerId   = $existing->json('offers.0.offerId');
+        $listingId = $existing->json('offers.0.listing.listingId') ?? $product->ebay_item_id ?? '';
+
+        $this->upsertInventoryItem($product, $token);
+
+        $response = Http::withToken($token)
+            ->withHeaders($this->commonHeaders())
+            ->put("{$this->inventoryBaseUrl()}/offer/{$offerId}", $this->buildOfferBody($product));
+
+        if (! $response->ok()) {
+            throw new \RuntimeException("eBay offer update failed for SKU {$sku}: " . $response->body());
+        }
+
+        Log::info("eBay listing updated: SKU {$sku} → offerId {$offerId}");
+
+        return ['offer_id' => $offerId, 'listing_id' => (string) $listingId];
+    }
+
+    // -------------------------------------------------------------------------
+    // Full sync — stock, price, title, description.
+    // Permissive: skips if not listed or no offer found on eBay (does not throw).
+    // Used by sync-all batch.
+    // -------------------------------------------------------------------------
+
+    public function syncFull(Product $product): void
+    {
+        if (! $product->ebay_listed) {
+            return;
+        }
+
+        $token = $this->getAccessToken();
+        $sku   = $product->sku;
+
+        $this->upsertInventoryItem($product, $token);
+
+        $existing = Http::withToken($token)
+            ->withHeaders($this->commonHeaders())
+            ->get("{$this->inventoryBaseUrl()}/offer", ['sku' => $sku]);
+
+        if (! $existing->ok() || empty($existing->json('offers'))) {
+            Log::info("eBay syncFull: no offer found for SKU {$sku} — inventory updated, offer skipped.");
+            return;
+        }
+
+        $offerId  = $existing->json('offers.0.offerId');
+        $response = Http::withToken($token)
+            ->withHeaders($this->commonHeaders())
+            ->put("{$this->inventoryBaseUrl()}/offer/{$offerId}", $this->buildOfferBody($product));
+
+        if (! $response->ok()) {
+            throw new \RuntimeException("eBay offer update (syncFull) failed for SKU {$sku}: " . $response->body());
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Delete listing and inventory item
     // -------------------------------------------------------------------------
 
@@ -363,6 +441,29 @@ class EbaySellingService
     // Private helpers
     // -------------------------------------------------------------------------
 
+    private function buildOfferBody(Product $product): array
+    {
+        return [
+            'sku'               => $product->sku,
+            'marketplaceId'     => config('services.ebay_sell.marketplace_id', 'EBAY_DE'),
+            'format'            => 'FIXED_PRICE',
+            'availableQuantity' => max(0, (int) $product->stock),
+            'categoryId'        => config('services.ebay_sell.category_id', '11755'),
+            'listingPolicies'   => [
+                'fulfillmentPolicyId' => config('services.ebay_sell.fulfillment_policy_id'),
+                'paymentPolicyId'     => config('services.ebay_sell.payment_policy_id'),
+                'returnPolicyId'      => config('services.ebay_sell.return_policy_id'),
+            ],
+            'pricingSummary' => [
+                'price' => [
+                    'value'    => number_format((float) $product->price, 2, '.', ''),
+                    'currency' => 'EUR',
+                ],
+            ],
+            'listingDescription' => $this->buildDescription($product),
+        ];
+    }
+
     private function upsertInventoryItem(Product $product, string $token): void
     {
         $body = [
@@ -392,28 +493,7 @@ class EbaySellingService
 
     private function upsertOffer(Product $product, string $token): string
     {
-        $marketplaceId = config('services.ebay_sell.marketplace_id', 'EBAY_DE');
-        $categoryId    = config('services.ebay_sell.category_id', '11755');
-
-        $offerBody = [
-            'sku'               => $product->sku,
-            'marketplaceId'     => $marketplaceId,
-            'format'            => 'FIXED_PRICE',
-            'availableQuantity' => max(0, (int) $product->stock),
-            'categoryId'        => $categoryId,
-            'listingPolicies'   => [
-                'fulfillmentPolicyId' => config('services.ebay_sell.fulfillment_policy_id'),
-                'paymentPolicyId'     => config('services.ebay_sell.payment_policy_id'),
-                'returnPolicyId'      => config('services.ebay_sell.return_policy_id'),
-            ],
-            'pricingSummary' => [
-                'price' => [
-                    'value'    => number_format((float) $product->price, 2, '.', ''),
-                    'currency' => 'EUR',
-                ],
-            ],
-            'listingDescription' => $this->buildDescription($product),
-        ];
+        $offerBody = $this->buildOfferBody($product);
 
         // Check if an offer already exists for this SKU
         $existing = Http::withToken($token)
@@ -518,16 +598,46 @@ class EbaySellingService
 
     private function guardProduct(Product $product): void
     {
+        if (! EbayToken::active()->exists()) {
+            throw new \RuntimeException(
+                'eBay seller account is not connected. Visit GET /api/v1/admin/ebay/auth-url to authorise the seller account.'
+            );
+        }
+
         if (empty($product->sku)) {
             throw new \InvalidArgumentException("Product ID {$product->id} has no SKU — cannot list on eBay.");
+        }
+
+        $title = trim($this->buildTitle($product));
+        if (empty($title)) {
+            throw new \InvalidArgumentException("Product SKU {$product->sku} has no title — fill in brand, size, spec, or season fields.");
         }
 
         if (empty($product->price) || (float) $product->price <= 0) {
             throw new \InvalidArgumentException("Product SKU {$product->sku} has no price — cannot list on eBay.");
         }
 
-        if (empty($this->imageUrls($product))) {
+        if ((int) $product->stock <= 0) {
+            throw new \InvalidArgumentException("Product SKU {$product->sku} has no stock (quantity must be > 0) — cannot list on eBay.");
+        }
+
+        $imageUrls = $this->imageUrls($product);
+        if (empty($imageUrls)) {
             throw new \InvalidArgumentException("Product SKU {$product->sku} has no images — eBay requires at least one image.");
+        }
+
+        foreach ($imageUrls as $url) {
+            if (! filter_var($url, FILTER_VALIDATE_URL) || ! in_array(parse_url($url, PHP_URL_SCHEME), ['http', 'https'])) {
+                throw new \InvalidArgumentException("Product SKU {$product->sku} has an invalid image URL — eBay requires absolute HTTP/HTTPS image URLs.");
+            }
+        }
+
+        if (empty(config('services.ebay_sell.marketplace_id'))) {
+            throw new \RuntimeException('eBay marketplace ID is not configured. Set EBAY_MARKETPLACE_ID in .env');
+        }
+
+        if (empty(config('services.ebay_sell.category_id'))) {
+            throw new \RuntimeException('eBay category ID is not configured. Set EBAY_CATEGORY_ID in .env');
         }
 
         if (

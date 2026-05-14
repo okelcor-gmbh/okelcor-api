@@ -226,6 +226,24 @@ class EbayListingController extends Controller
                 ],
                 'message' => "Product SKU {$product->sku} listed on eBay (listing #{$result['listing_id']}).",
             ]);
+        } catch (\InvalidArgumentException $e) {
+            $safe = $this->safeError($e);
+
+            $product->update([
+                'ebay_status'     => 'error',
+                'ebay_sync_error' => $safe,
+            ]);
+
+            $this->writeLog([
+                'product_id'    => $product->id,
+                'admin_user_id' => $adminId,
+                'sku'           => $product->sku,
+                'action'        => 'validation_failed',
+                'status'        => 'error',
+                'error_message' => $safe,
+            ]);
+
+            return response()->json(['message' => $safe], 422);
         } catch (\Throwable $e) {
             $safe = $this->safeError($e);
 
@@ -296,8 +314,99 @@ class EbayListingController extends Controller
     }
 
     // -------------------------------------------------------------------------
+    // PATCH /admin/products/{id}/ebay/update
+    // Updates an existing eBay listing — title, description, price, stock.
+    // Requires the product to already be listed (ebay_listed = true).
+    // Does NOT re-publish the offer.
+    // -------------------------------------------------------------------------
+
+    public function updateProduct(int $id): JsonResponse
+    {
+        $product = Product::findOrFail($id);
+        $adminId = auth()->id();
+
+        if (! $product->ebay_listed) {
+            return response()->json([
+                'message' => 'Product is not listed on eBay. Use the "List on eBay" action to create a listing first.',
+            ], 422);
+        }
+
+        try {
+            $result = $this->ebay->updateListing($product);
+
+            $product->update([
+                'ebay_item_id'        => $result['listing_id'] ?: $product->ebay_item_id,
+                'ebay_offer_id'       => $result['offer_id'],
+                'ebay_status'         => 'active',
+                'ebay_last_synced_at' => now(),
+                'ebay_sync_error'     => null,
+            ]);
+
+            $this->writeLog([
+                'product_id'      => $product->id,
+                'admin_user_id'   => $adminId,
+                'sku'             => $product->sku,
+                'action'          => 'update',
+                'ebay_item_id'    => $result['listing_id'] ?: $product->ebay_item_id,
+                'ebay_offer_id'   => $result['offer_id'],
+                'status'          => 'active',
+                'payload_summary' => ['price' => $product->price, 'stock' => $product->stock],
+            ]);
+
+            return response()->json([
+                'data' => [
+                    'offer_id'    => $result['offer_id'],
+                    'listing_id'  => $result['listing_id'],
+                    'sku'         => $product->sku,
+                    'ebay_status' => 'active',
+                ],
+                'message' => "eBay listing updated for SKU {$product->sku}.",
+            ]);
+        } catch (\InvalidArgumentException $e) {
+            $safe = $this->safeError($e);
+
+            $product->update([
+                'ebay_status'     => 'error',
+                'ebay_sync_error' => $safe,
+            ]);
+
+            $this->writeLog([
+                'product_id'    => $product->id,
+                'admin_user_id' => $adminId,
+                'sku'           => $product->sku,
+                'action'        => 'validation_failed',
+                'ebay_item_id'  => $product->ebay_item_id,
+                'status'        => 'error',
+                'error_message' => $safe,
+            ]);
+
+            return response()->json(['message' => $safe], 422);
+        } catch (\Throwable $e) {
+            $safe = $this->safeError($e);
+
+            $product->update([
+                'ebay_status'     => 'error',
+                'ebay_sync_error' => $safe,
+            ]);
+
+            $this->writeLog([
+                'product_id'    => $product->id,
+                'admin_user_id' => $adminId,
+                'sku'           => $product->sku,
+                'action'        => 'update_failed',
+                'ebay_item_id'  => $product->ebay_item_id,
+                'status'        => 'error',
+                'error_message' => $safe,
+            ]);
+
+            return response()->json(['message' => $safe], 502);
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // POST /admin/ebay/sync-all
-    // Syncs stock for all listed products. Logs each result individually.
+    // Syncs stock, price, title, and description for all listed products.
+    // Logs each result individually.
     // A single product failure does not stop the rest of the batch.
     // -------------------------------------------------------------------------
 
@@ -310,7 +419,7 @@ class EbayListingController extends Controller
 
         foreach ($products as $product) {
             try {
-                $this->ebay->syncInventory($product);
+                $this->ebay->syncFull($product);
 
                 // Best-effort status refresh — failure here does not break the sync
                 $ebayStatus = $product->ebay_status ?? 'active';
@@ -333,14 +442,14 @@ class EbayListingController extends Controller
                 ]);
 
                 $this->writeLog([
-                    'product_id'    => $product->id,
-                    'admin_user_id' => $adminId,
-                    'sku'           => $product->sku,
-                    'action'        => 'sync',
-                    'ebay_item_id'  => $product->ebay_item_id,
-                    'ebay_offer_id' => $product->ebay_offer_id,
-                    'status'        => $ebayStatus,
-                    'payload_summary' => ['stock' => $product->stock],
+                    'product_id'      => $product->id,
+                    'admin_user_id'   => $adminId,
+                    'sku'             => $product->sku,
+                    'action'          => 'sync',
+                    'ebay_item_id'    => $product->ebay_item_id,
+                    'ebay_offer_id'   => $product->ebay_offer_id,
+                    'status'          => $ebayStatus,
+                    'payload_summary' => ['stock' => $product->stock, 'price' => $product->price],
                 ]);
 
                 $synced++;
@@ -507,16 +616,40 @@ class EbayListingController extends Controller
             return 'eBay listing policy IDs are not configured. Set EBAY_FULFILLMENT_POLICY_ID, EBAY_PAYMENT_POLICY_ID, and EBAY_RETURN_POLICY_ID in your environment.';
         }
 
+        if (str_contains($msg, 'marketplace ID is not configured')) {
+            return 'eBay marketplace ID is not configured. Set EBAY_MARKETPLACE_ID in .env';
+        }
+
+        if (str_contains($msg, 'category ID is not configured')) {
+            return 'eBay category ID is not configured. Set EBAY_CATEGORY_ID in .env';
+        }
+
+        if (str_contains($msg, 'No existing eBay offer found') || str_contains($msg, "Use 'List on eBay'")) {
+            return 'No eBay listing found for this product. Use "List on eBay" to create and publish a listing first.';
+        }
+
         if (str_contains($msg, 'no SKU')) {
             return 'Product has no SKU — a unique SKU is required for eBay listing.';
+        }
+
+        if (str_contains($msg, 'has no title')) {
+            return 'Product has no title — fill in brand, size, spec, or season fields before listing.';
         }
 
         if (str_contains($msg, 'no price')) {
             return 'Product has no price — a price greater than 0 is required for eBay listing.';
         }
 
+        if (str_contains($msg, 'no stock') || str_contains($msg, 'quantity must be > 0')) {
+            return 'Product has no stock (quantity is 0 or less) — update stock before listing on eBay.';
+        }
+
         if (str_contains($msg, 'no images')) {
             return 'Product has no images — eBay requires at least one image before listing.';
+        }
+
+        if (str_contains($msg, 'invalid image URL') || str_contains($msg, 'absolute HTTP')) {
+            return 'Product has an invalid image URL — eBay requires absolute HTTPS image URLs.';
         }
 
         if (str_contains($msg, 'inventory item upsert failed')) {
@@ -525,6 +658,10 @@ class EbayListingController extends Controller
 
         if (str_contains($msg, 'offer create failed') || str_contains($msg, 'offer update failed')) {
             return 'eBay rejected the listing offer. Check that category ID and listing policy IDs are valid for this marketplace.';
+        }
+
+        if (str_contains($msg, 'offer update (syncFull) failed')) {
+            return 'eBay offer update failed during sync. Check that category ID and policy IDs are valid for this marketplace.';
         }
 
         if (str_contains($msg, 'offer publish failed')) {

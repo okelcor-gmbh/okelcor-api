@@ -484,6 +484,7 @@ Route::prefix('v1')->group(function () {
             Route::get('ebay/logs', [EbayListingController::class, 'logs']);
             // Canonical URLs (per frontend spec)
             Route::post('products/{id}/ebay/list', [EbayListingController::class, 'listProduct']);
+            Route::patch('products/{id}/ebay/update', [EbayListingController::class, 'updateProduct']);
             Route::delete('products/{id}/ebay/remove', [EbayListingController::class, 'removeListing']);
             Route::post('products/{id}/ebay/refresh-status', [EbayListingController::class, 'refreshStatus']);
             // Legacy aliases (backward compat)
