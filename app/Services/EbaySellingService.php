@@ -762,17 +762,42 @@ class EbaySellingService
 
     private function buildAspects(Product $product): array
     {
-        $aspects = [];
+        $aspects     = [];
+        $marketplace = config('services.ebay_sell.marketplace_id', 'EBAY_DE');
+        $isGerman    = in_array($marketplace, ['EBAY_DE', 'EBAY_AT', 'EBAY_CH'], true);
 
-        if ($product->brand)        $aspects['Brand']        = [$product->brand];
-        if ($product->width)        $aspects['Tyre Width']   = [$product->width];
-        if ($product->height)       $aspects['Aspect Ratio'] = [$product->height];
-        if ($product->rim)          $aspects['Rim Diameter'] = [$product->rim];
-        if ($product->load_index)   $aspects['Load Rating']  = [$product->load_index];
-        if ($product->speed_rating) $aspects['Speed Rating'] = [$product->speed_rating];
-        if ($product->season)       $aspects['Season']       = [$product->season];
+        if ($isGerman) {
+            // EBAY_DE / EBAY_AT / EBAY_CH category 10183 (PKW-Reifen) requires German aspect names.
+            // Proven by errorId 25002: "Das Artikelmerkmal Marke fehlt" on publishOffer.
+            if ($product->brand)        $aspects['Marke']                 = [$product->brand];
+            if ($product->width)        $aspects['Reifenbreite']          = [(string) $product->width];
+            if ($product->height)       $aspects['Querschnitt']           = [(string) $product->height];
+            if ($product->rim)          $aspects['Felgengröße']           = [(string) $product->rim];
+            if ($product->load_index)   $aspects['Lastindex']             = [(string) $product->load_index];
+            if ($product->speed_rating) $aspects['Geschwindigkeitsindex'] = [(string) $product->speed_rating];
+            if ($product->season)       $aspects['Saison']                = [$this->mapSeasonDe($product->season)];
+        } else {
+            if ($product->brand)        $aspects['Brand']        = [$product->brand];
+            if ($product->width)        $aspects['Tyre Width']   = [(string) $product->width];
+            if ($product->height)       $aspects['Aspect Ratio'] = [(string) $product->height];
+            if ($product->rim)          $aspects['Rim Diameter'] = [(string) $product->rim];
+            if ($product->load_index)   $aspects['Load Rating']  = [(string) $product->load_index];
+            if ($product->speed_rating) $aspects['Speed Rating'] = [(string) $product->speed_rating];
+            if ($product->season)       $aspects['Season']       = [$product->season];
+        }
 
         return $aspects;
+    }
+
+    private function mapSeasonDe(string $season): string
+    {
+        return match (strtolower(trim($season))) {
+            'summer', 'sommer', 'sommerreifen'                                       => 'Sommerreifen',
+            'winter', 'winterreifen'                                                 => 'Winterreifen',
+            'all-season', 'all season', 'all-weather', 'all weather',
+            'all year', 'ganzjahr', 'ganzjahresreifen'                              => 'Ganzjahresreifen',
+            default                                                                  => $season,
+        };
     }
 
     private function imageUrls(Product $product): array
