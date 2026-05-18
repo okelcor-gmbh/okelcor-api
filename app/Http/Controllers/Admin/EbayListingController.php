@@ -988,6 +988,13 @@ class EbayListingController extends Controller
             return $this->withEbayDetail($e, 'eBay status check failed. The listing may no longer exist on eBay.');
         }
 
+        // Inventory indexing race condition — eBay errorId 25751
+        // waitForInventoryItem() throws this when PUT inventory_item is not yet readable
+        if (str_contains($msg, 'error 25751') || str_contains($msg, 'was not available after')) {
+            return 'eBay inventory item not yet indexed — please retry in a few seconds (error 25751). '
+                . 'eBay needs a moment to index newly-uploaded inventory before an offer can be created.';
+        }
+
         // Surface sanitised eBay API errors (already safe — originate from our service)
         if (str_contains($msg, 'eBay')) {
             return $msg;
