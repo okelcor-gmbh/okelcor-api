@@ -897,11 +897,27 @@ class EbaySellingService
 
     // -------------------------------------------------------------------------
     // Step-by-step diagnostic for the Artisan ebay:debug-product command.
-    // Returns a structured report without publishing unless $withPublish = true.
+    //
+    // Steps (all always run except offer_create_test and publish):
+    //   validation        → local field checks
+    //   token             → OAuth access token retrieval
+    //   inventory_get_before → GET before any PUT (what eBay currently has)
+    //   inventory_put     → PUT inventory_item
+    //   inventory_get_after  → GET after PUT (confirm eBay indexed it)
+    //   offer_check       → GET offers for this SKU
+    //   offer_create_test → POST/PUT offer without publishing (only $withOffer)
+    //   publish           → publish offer (only $withPublish)
     // -------------------------------------------------------------------------
 
-    public function diagnoseProduct(Product $product, bool $withPublish = false): array
-    {
+    public function diagnoseProduct(
+        Product $product,
+        bool $withPublish = false,
+        bool $withOffer = false
+    ): array {
+        $encodedSku     = rawurlencode($product->sku);
+        $itemEndpoint   = "{$this->inventoryBaseUrl()}/inventory_item/{$encodedSku}";
+        $offersEndpoint = "{$this->inventoryBaseUrl()}/offer";
+
         $report = [
             'product' => [
                 'id'            => $product->id,
@@ -914,6 +930,8 @@ class EbaySellingService
                 'image_url'     => $product->primary_image
                     ? url(Storage::url($product->primary_image))
                     : null,
+                'image_count'   => count($this->imageUrls($product)),
+                'all_image_urls' => $this->imageUrls($product),
             ],
             'config' => [
                 'marketplace_id'        => config('services.ebay_sell.marketplace_id', 'EBAY_DE'),
@@ -922,16 +940,26 @@ class EbaySellingService
                 'payment_policy_id'     => config('services.ebay_sell.payment_policy_id'),
                 'return_policy_id'      => config('services.ebay_sell.return_policy_id'),
                 'environment'           => config('services.ebay.environment', 'sandbox'),
+                'seller_postal_code'    => config('services.ebay_sell.seller_postal_code'),
+                'seller_location'       => config('services.ebay_sell.seller_location', 'Germany'),
             ],
             'steps'  => [],
             'result' => null,
             'error'  => null,
         ];
 
-        // ── Step 1: Validation ────────────────────────────────────────────────
+        // ── Step A: Validation ────────────────────────────────────────────────
         try {
             $this->guardProduct($product);
-            $report['steps']['validation'] = ['status' => 'pass'];
+            $report['steps']['validation'] = [
+                'status'     => 'pass',
+                'sku'        => $product->sku,
+                'title'      => $this->buildTitle($product),
+                'price'      => $product->price,
+                'stock'      => $product->stock,
+                'image_urls' => $this->imageUrls($product),
+                'aspects'    => $this->buildAspects($product),
+            ];
         } catch (\Throwable $e) {
             $report['steps']['validation'] = ['status' => 'fail', 'error' => $e->getMessage()];
             $report['result'] = 'failed_at_validation';
@@ -939,10 +967,14 @@ class EbaySellingService
             return $report;
         }
 
-        // ── Step 2: Token ─────────────────────────────────────────────────────
+        // ── Step B: Token ─────────────────────────────────────────────────────
         try {
             $token = $this->getAccessToken();
-            $report['steps']['token'] = ['status' => 'pass', 'source' => $this->tokenSource];
+            $report['steps']['token'] = [
+                'status'         => 'pass',
+                'source'         => $this->tokenSource,
+                'marketplace_id' => config('services.ebay_sell.marketplace_id', 'EBAY_DE'),
+            ];
         } catch (\Throwable $e) {
             $report['steps']['token'] = ['status' => 'fail', 'error' => $e->getMessage()];
             $report['result'] = 'failed_at_token';
@@ -950,7 +982,18 @@ class EbaySellingService
             return $report;
         }
 
-        // ── Step 3: PUT inventory item ────────────────────────────────────────
+        // ── Step C: GET inventory BEFORE PUT ──────────────────────────────────
+        $preGetResponse = Http::withToken($token)->withHeaders($this->commonHeaders())->get($itemEndpoint);
+        $report['steps']['inventory_get_before'] = [
+            'status'       => 'info',
+            'endpoint'     => $itemEndpoint,
+            'http_status'  => $preGetResponse->status(),
+            'sku_exists'   => $preGetResponse->ok(),
+            'raw_preview'  => mb_substr($preGetResponse->body(), 0, 800),
+            'ebay_errors'  => $preGetResponse->ok() ? [] : $this->parseEbayErrors($preGetResponse->body()),
+        ];
+
+        // ── Step D: PUT inventory item ────────────────────────────────────────
         $inventoryBody = [
             'condition'    => 'NEW',
             'availability' => [
@@ -963,24 +1006,24 @@ class EbaySellingService
                 'aspects'     => $this->buildAspects($product),
             ],
         ];
-        $encodedSku  = rawurlencode($product->sku);
-        $putEndpoint = "{$this->inventoryBaseUrl()}/inventory_item/{$encodedSku}";
-        $putResponse = Http::withToken($token)->withHeaders($this->commonHeaders())->put($putEndpoint, $inventoryBody);
+
+        $putResponse = Http::withToken($token)->withHeaders($this->commonHeaders())->put($itemEndpoint, $inventoryBody);
         $putOk       = in_array($putResponse->status(), [200, 204]);
 
         $report['steps']['inventory_put'] = [
-            'status'       => $putOk ? 'pass' : 'fail',
-            'endpoint'     => $putEndpoint,
-            'http_status'  => $putResponse->status(),
-            'request_body' => [
-                'condition'       => $inventoryBody['condition'],
-                'quantity'        => $inventoryBody['availability']['shipToLocationAvailability']['quantity'],
-                'title'           => $inventoryBody['product']['title'],
-                'image_count'     => count($inventoryBody['product']['imageUrls']),
-                'image_urls'      => $inventoryBody['product']['imageUrls'],
-                'aspects'         => $inventoryBody['product']['aspects'],
+            'status'          => $putOk ? 'pass' : 'fail',
+            'endpoint'        => $itemEndpoint,
+            'http_status'     => $putResponse->status(),
+            'request_payload' => [
+                'condition'   => $inventoryBody['condition'],
+                'quantity'    => $inventoryBody['availability']['shipToLocationAvailability']['quantity'],
+                'title'       => $inventoryBody['product']['title'],
+                'image_count' => count($inventoryBody['product']['imageUrls']),
+                'image_urls'  => $inventoryBody['product']['imageUrls'],
+                'aspects'     => $inventoryBody['product']['aspects'],
             ],
-            'ebay_errors'  => $putOk ? [] : $this->parseEbayErrors($putResponse->body()),
+            'raw_preview' => mb_substr($putResponse->body(), 0, 800),
+            'ebay_errors' => $putOk ? [] : $this->parseEbayErrors($putResponse->body()),
         ];
 
         if (! $putOk) {
@@ -989,54 +1032,96 @@ class EbaySellingService
             return $report;
         }
 
-        // ── Step 4: GET inventory item (verify indexing) ──────────────────────
+        // ── Step E: GET inventory AFTER PUT (verify indexing) ─────────────────
         sleep(1);
-        $getEndpoint = $putEndpoint;
-        $getResponse = Http::withToken($token)->withHeaders($this->commonHeaders())->get($getEndpoint);
+        $postGetResponse = Http::withToken($token)->withHeaders($this->commonHeaders())->get($itemEndpoint);
 
-        $report['steps']['inventory_get'] = [
-            'status'      => $getResponse->ok() ? 'pass' : 'fail',
-            'endpoint'    => $getEndpoint,
-            'http_status' => $getResponse->status(),
-            'sku_found'   => $getResponse->ok(),
-            'ebay_errors' => $getResponse->ok() ? [] : $this->parseEbayErrors($getResponse->body()),
+        $report['steps']['inventory_get_after'] = [
+            'status'      => $postGetResponse->ok() ? 'pass' : 'fail',
+            'endpoint'    => $itemEndpoint,
+            'http_status' => $postGetResponse->status(),
+            'sku_found'   => $postGetResponse->ok(),
+            'raw_preview' => mb_substr($postGetResponse->body(), 0, 800),
+            'ebay_errors' => $postGetResponse->ok() ? [] : $this->parseEbayErrors($postGetResponse->body()),
         ];
 
-        if (! $getResponse->ok()) {
-            $report['result'] = 'failed_at_inventory_get';
-            $report['error']  = "GET inventory_item returned HTTP {$getResponse->status()} — SKU not yet indexed on eBay: " . $getResponse->body();
+        if (! $postGetResponse->ok()) {
+            $report['result'] = 'failed_at_inventory_get_after';
+            $report['error']  = "GET inventory_item returned HTTP {$postGetResponse->status()} — SKU not yet indexed on eBay: " . $postGetResponse->body();
             return $report;
         }
 
-        // ── Step 5: GET existing offers for this SKU ──────────────────────────
+        // ── Step F: GET existing offers for this SKU ──────────────────────────
         $offerCheckResponse = Http::withToken($token)->withHeaders($this->commonHeaders())
-            ->get("{$this->inventoryBaseUrl()}/offer", ['sku' => $product->sku]);
+            ->get($offersEndpoint, ['sku' => $product->sku]);
 
         $existingOffers = ($offerCheckResponse->ok()) ? ($offerCheckResponse->json('offers') ?? []) : [];
+        $offerBody      = $this->buildOfferBody($product);
 
-        $offerBody = $this->buildOfferBody($product);
         $report['steps']['offer_check'] = [
-            'status'          => 'pass',
-            'existing_count'  => count($existingOffers),
-            'existing_ids'    => array_column($existingOffers, 'offerId'),
-            'offer_body_will_send' => [
-                'sku'             => $offerBody['sku'],
-                'marketplaceId'   => $offerBody['marketplaceId'],
-                'format'          => $offerBody['format'],
-                'categoryId'      => $offerBody['categoryId'],
-                'price'           => $offerBody['pricingSummary']['price'],
-                'quantity'        => $offerBody['availableQuantity'],
-                'policies'        => $offerBody['listingPolicies'],
+            'status'               => 'info',
+            'endpoint'             => $offersEndpoint . '?sku=' . rawurlencode($product->sku),
+            'http_status'          => $offerCheckResponse->status(),
+            'existing_count'       => count($existingOffers),
+            'existing_ids'         => array_column($existingOffers, 'offerId'),
+            'raw_preview'          => mb_substr($offerCheckResponse->body(), 0, 800),
+            'offer_payload_will_send' => [
+                'sku'                 => $offerBody['sku'],
+                'marketplaceId'       => $offerBody['marketplaceId'],
+                'format'              => $offerBody['format'],
+                'categoryId'          => $offerBody['categoryId'],
+                'price'               => $offerBody['pricingSummary']['price'],
+                'quantity'            => $offerBody['availableQuantity'],
+                'fulfillmentPolicyId' => $offerBody['listingPolicies']['fulfillmentPolicyId'],
+                'paymentPolicyId'     => $offerBody['listingPolicies']['paymentPolicyId'],
+                'returnPolicyId'      => $offerBody['listingPolicies']['returnPolicyId'],
             ],
         ];
 
         $report['result'] = 'ready_to_publish';
 
+        // ── Step G: Offer create test (--offer flag) ──────────────────────────
+        // POSTs or PUTs the offer WITHOUT publishing. Leaves a draft on eBay.
+        if ($withOffer) {
+            if (! empty($existingOffers)) {
+                $offerId      = $existingOffers[0]['offerId'];
+                $offerTestR   = Http::withToken($token)->withHeaders($this->commonHeaders())
+                    ->put("{$this->inventoryBaseUrl()}/offer/{$offerId}", $offerBody);
+                $offerAction  = "PUT /offer/{$offerId}";
+            } else {
+                $offerTestR   = Http::withToken($token)->withHeaders($this->commonHeaders())
+                    ->post($offersEndpoint, $offerBody);
+                $offerAction  = 'POST /offer';
+                $offerId      = $offerTestR->json('offerId') ?? null;
+            }
+
+            $offerOk = $offerTestR->ok();
+
+            $report['steps']['offer_create_test'] = [
+                'status'          => $offerOk ? 'pass' : 'fail',
+                'action'          => $offerAction,
+                'endpoint'        => $offersEndpoint,
+                'http_status'     => $offerTestR->status(),
+                'offer_id'        => $offerOk ? ($offerId ?? $offerTestR->json('offerId')) : null,
+                'request_payload' => $report['steps']['offer_check']['offer_payload_will_send'],
+                'raw_body'        => $offerTestR->body(),
+                'ebay_errors'     => $offerOk ? [] : $this->parseEbayErrors($offerTestR->body()),
+            ];
+
+            if (! $offerOk) {
+                $report['result'] = 'failed_at_offer_create';
+                $report['error']  = "Offer create/update HTTP {$offerTestR->status()}: " . $offerTestR->body();
+                if (! $withPublish) {
+                    return $report;
+                }
+            }
+        }
+
         if (! $withPublish) {
             return $report;
         }
 
-        // ── Step 6: Publish (only with --publish flag) ────────────────────────
+        // ── Step H: Publish (--publish flag) ─────────────────────────────────
         try {
             $offerId   = $this->upsertOffer($product, $token);
             $listingId = $this->publishOffer($offerId, $token);
@@ -1049,8 +1134,8 @@ class EbaySellingService
             $report['result'] = 'published';
         } catch (\Throwable $e) {
             $report['steps']['publish'] = [
-                'status' => 'fail',
-                'error'  => $e->getMessage(),
+                'status'      => 'fail',
+                'error'       => $e->getMessage(),
                 'ebay_errors' => $this->parseEbayErrors(
                     substr($e->getMessage(), (int) strrpos($e->getMessage(), ': {') + 2)
                 ),
