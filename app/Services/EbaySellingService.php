@@ -267,6 +267,10 @@ class EbaySellingService
         // the newly PUT inventory item. Verify the item is reachable before proceeding.
         $this->waitForInventoryItem($sku, $token);
 
+        // eBay error 25002 (Item.Country) occurs when no merchant location is linked
+        // to the offer. Ensure the configured location exists (auto-creates if missing).
+        $this->ensureMerchantLocation($token);
+
         $offerId   = $this->upsertOffer($product, $token);
         $listingId = $this->publishOffer($offerId, $token);
 
@@ -597,12 +601,13 @@ class EbaySellingService
     private function buildOfferBody(Product $product): array
     {
         return [
-            'sku'               => $product->sku,
-            'marketplaceId'     => config('services.ebay_sell.marketplace_id', 'EBAY_DE'),
-            'format'            => 'FIXED_PRICE',
-            'availableQuantity' => max(0, (int) $product->stock),
-            'categoryId'        => config('services.ebay_sell.category_id', '11755'),
-            'listingPolicies'   => [
+            'sku'                 => $product->sku,
+            'merchantLocationKey' => config('services.ebay_sell.merchant_location_key', 'OKELCOR-MAIN'),
+            'marketplaceId'       => config('services.ebay_sell.marketplace_id', 'EBAY_DE'),
+            'format'              => 'FIXED_PRICE',
+            'availableQuantity'   => max(0, (int) $product->stock),
+            'categoryId'          => config('services.ebay_sell.category_id', '11755'),
+            'listingPolicies'     => [
                 'fulfillmentPolicyId' => config('services.ebay_sell.fulfillment_policy_id'),
                 'paymentPolicyId'     => config('services.ebay_sell.payment_policy_id'),
                 'returnPolicyId'      => config('services.ebay_sell.return_policy_id'),
@@ -872,6 +877,93 @@ class EbaySellingService
         return $map[$marketplaceId] ?? 'de-DE';
     }
 
+    private function marketplaceCountry(): string
+    {
+        $map = [
+            'EBAY_DE' => 'DE', 'EBAY_AT' => 'AT', 'EBAY_CH' => 'CH',
+            'EBAY_GB' => 'GB', 'EBAY_AU' => 'AU', 'EBAY_FR' => 'FR',
+            'EBAY_IT' => 'IT', 'EBAY_ES' => 'ES', 'EBAY_NL' => 'NL',
+            'EBAY_BE' => 'BE', 'EBAY_PL' => 'PL', 'EBAY_US' => 'US',
+            'EBAY_CA' => 'CA',
+        ];
+
+        return $map[config('services.ebay_sell.marketplace_id', 'EBAY_DE')] ?? 'DE';
+    }
+
+    // -------------------------------------------------------------------------
+    // Ensure a merchant location exists on eBay for the configured location key.
+    //
+    // eBay error 25002 (Item.Country missing) occurs when an offer is published
+    // without a merchantLocationKey, because eBay cannot determine the item's
+    // country of origin. A merchant location record provides the country.
+    //
+    // Auto-creates the location on first call if it does not exist.
+    // Caches the existence check for 24 hours to avoid a GET on every listing.
+    // -------------------------------------------------------------------------
+
+    private function ensureMerchantLocation(string $token): void
+    {
+        $key      = config('services.ebay_sell.merchant_location_key', 'OKELCOR-MAIN');
+        $cacheKey = 'ebay_merchant_location_' . $key;
+
+        if (Cache::get($cacheKey)) {
+            return;
+        }
+
+        $endpoint = "{$this->inventoryBaseUrl()}/location/" . rawurlencode($key);
+        $response = Http::withToken($token)->withHeaders($this->commonHeaders())->get($endpoint);
+
+        if ($response->ok()) {
+            Cache::put($cacheKey, true, now()->addHours(24));
+            Log::info('eBay: merchant location verified.', [
+                'api_family'   => 'Sell API (REST)',
+                'location_key' => $key,
+                'token_source' => $this->tokenSource,
+            ]);
+            return;
+        }
+
+        // Location does not exist — create it using configured seller address
+        $country = $this->marketplaceCountry();
+        $create  = Http::withToken($token)
+            ->withHeaders($this->commonHeaders())
+            ->post($endpoint, [
+                'location' => [
+                    'address' => array_filter([
+                        'city'       => config('services.ebay_sell.seller_location', 'Germany'),
+                        'country'    => $country,
+                        'postalCode' => config('services.ebay_sell.seller_postal_code'),
+                    ]),
+                ],
+                'name'                   => 'Okelcor Main Location',
+                'merchantLocationStatus' => 'ENABLED',
+                'locationTypes'          => ['WAREHOUSE'],
+            ]);
+
+        if (! $create->successful()) {
+            $this->logEbayApiError(
+                'create_merchant_location',
+                $endpoint,
+                $create->status(),
+                $create->body()
+            );
+
+            throw new \RuntimeException(
+                "eBay merchant location create failed (key: {$key}): " . $create->body()
+            );
+        }
+
+        Cache::put($cacheKey, true, now()->addHours(24));
+
+        Log::info('eBay: merchant location created.', [
+            'api_family'   => 'Sell API (REST)',
+            'location_key' => $key,
+            'country'      => $country,
+            'postal_code'  => config('services.ebay_sell.seller_postal_code'),
+            'token_source' => $this->tokenSource,
+        ]);
+    }
+
     // -------------------------------------------------------------------------
     // Verify inventory item is indexed on eBay before creating/updating an offer.
     //
@@ -964,14 +1056,15 @@ class EbaySellingService
                 'all_image_urls' => $this->imageUrls($product),
             ],
             'config' => [
-                'marketplace_id'        => config('services.ebay_sell.marketplace_id', 'EBAY_DE'),
-                'category_id'           => config('services.ebay_sell.category_id'),
-                'fulfillment_policy_id' => config('services.ebay_sell.fulfillment_policy_id'),
-                'payment_policy_id'     => config('services.ebay_sell.payment_policy_id'),
-                'return_policy_id'      => config('services.ebay_sell.return_policy_id'),
-                'environment'           => config('services.ebay.environment', 'sandbox'),
-                'seller_postal_code'    => config('services.ebay_sell.seller_postal_code'),
-                'seller_location'       => config('services.ebay_sell.seller_location', 'Germany'),
+                'marketplace_id'         => config('services.ebay_sell.marketplace_id', 'EBAY_DE'),
+                'category_id'            => config('services.ebay_sell.category_id'),
+                'fulfillment_policy_id'  => config('services.ebay_sell.fulfillment_policy_id'),
+                'payment_policy_id'      => config('services.ebay_sell.payment_policy_id'),
+                'return_policy_id'       => config('services.ebay_sell.return_policy_id'),
+                'environment'            => config('services.ebay.environment', 'sandbox'),
+                'seller_postal_code'     => config('services.ebay_sell.seller_postal_code'),
+                'seller_location'        => config('services.ebay_sell.seller_location', 'Germany'),
+                'merchant_location_key'  => config('services.ebay_sell.merchant_location_key', 'OKELCOR-MAIN'),
             ],
             'steps'  => [],
             'result' => null,
@@ -1011,6 +1104,60 @@ class EbaySellingService
             $report['result'] = 'failed_at_token';
             $report['error']  = $e->getMessage();
             return $report;
+        }
+
+        // ── Step B2: Merchant location check/create ───────────────────────────
+        $locationKey      = config('services.ebay_sell.merchant_location_key', 'OKELCOR-MAIN');
+        $locationEndpoint = "{$this->inventoryBaseUrl()}/location/" . rawurlencode($locationKey);
+        $locationGet      = Http::withToken($token)->withHeaders($this->commonHeaders())->get($locationEndpoint);
+
+        if ($locationGet->ok()) {
+            $report['steps']['merchant_location'] = [
+                'status'      => 'pass',
+                'key'         => $locationKey,
+                'endpoint'    => $locationEndpoint,
+                'http_status' => $locationGet->status(),
+                'action'      => 'exists',
+                'raw_preview' => mb_substr($locationGet->body(), 0, 400),
+            ];
+        } else {
+            // Attempt to create it
+            $country    = $this->marketplaceCountry();
+            $locationCreate = Http::withToken($token)
+                ->withHeaders($this->commonHeaders())
+                ->post($locationEndpoint, [
+                    'location' => [
+                        'address' => array_filter([
+                            'city'       => config('services.ebay_sell.seller_location', 'Germany'),
+                            'country'    => $country,
+                            'postalCode' => config('services.ebay_sell.seller_postal_code'),
+                        ]),
+                    ],
+                    'name'                   => 'Okelcor Main Location',
+                    'merchantLocationStatus' => 'ENABLED',
+                    'locationTypes'          => ['WAREHOUSE'],
+                ]);
+
+            $createOk = $locationCreate->successful();
+
+            $report['steps']['merchant_location'] = [
+                'status'      => $createOk ? 'pass' : 'fail',
+                'key'         => $locationKey,
+                'endpoint'    => $locationEndpoint,
+                'http_status' => $locationCreate->status(),
+                'action'      => 'created',
+                'country'     => $country,
+                'raw_preview' => mb_substr($locationCreate->body(), 0, 400),
+                'ebay_errors' => $createOk ? [] : $this->parseEbayErrors($locationCreate->body()),
+            ];
+
+            if (! $createOk) {
+                $report['result'] = 'failed_at_merchant_location';
+                $report['error']  = "Merchant location create failed (key: {$locationKey}): " . $locationCreate->body();
+                return $report;
+            }
+
+            Cache::put('ebay_merchant_location_' . $locationKey, true, now()->addHours(24));
         }
 
         // ── Step C: GET inventory BEFORE PUT ──────────────────────────────────

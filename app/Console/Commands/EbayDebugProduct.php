@@ -61,9 +61,10 @@ class EbayDebugProduct extends Command
                 ['fulfillment_id', $report['config']['fulfillment_policy_id'] ?? 'NOT SET'],
                 ['payment_id',    $report['config']['payment_policy_id']      ?? 'NOT SET'],
                 ['return_id',     $report['config']['return_policy_id']       ?? 'NOT SET'],
-                ['seller_zip',    $report['config']['seller_postal_code']     ?? 'NOT SET'],
-                ['seller_loc',    $report['config']['seller_location']],
-                ['environment',   $report['config']['environment']],
+                ['seller_zip',        $report['config']['seller_postal_code']    ?? 'NOT SET'],
+                ['seller_loc',        $report['config']['seller_location']],
+                ['location_key',      $report['config']['merchant_location_key']  ?? 'OKELCOR-MAIN'],
+                ['environment',       $report['config']['environment']],
             ]);
 
             if (! empty($report['product']['all_image_urls'])) {
@@ -101,6 +102,32 @@ class EbayDebugProduct extends Command
             $this->error('  ERROR: ' . ($tok['error'] ?? 'unknown'));
             $this->printFinalResult($report);
             return self::FAILURE;
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // B2. Merchant location
+        // ─────────────────────────────────────────────────────────────────────
+        $this->section('B2. Merchant location (provides Item.Country for EBAY_DE)');
+        $loc = $report['steps']['merchant_location'] ?? null;
+
+        if ($loc === null) {
+            $this->warn('  (merchant location step missing — redeploy and re-run)');
+        } else {
+            $this->statusLine('merchant_location', $loc['status']);
+            $this->line("  Key      : {$loc['key']}");
+            $this->line("  Endpoint : {$loc['endpoint']}");
+            $this->line("  HTTP     : {$loc['http_status']}");
+            $this->line("  Action   : {$loc['action']}");
+            if (isset($loc['country'])) {
+                $this->line("  Country  : {$loc['country']}");
+            }
+            $this->printRawPreview($loc['raw_preview'] ?? '');
+            $this->printEbayErrors($loc['ebay_errors'] ?? []);
+
+            if ($loc['status'] === 'fail') {
+                $this->printFinalResult($report);
+                return self::FAILURE;
+            }
         }
 
         // ─────────────────────────────────────────────────────────────────────
