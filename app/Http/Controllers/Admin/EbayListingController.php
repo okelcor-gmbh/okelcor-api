@@ -430,12 +430,13 @@ class EbayListingController extends Controller
             ]);
 
             $this->writeLog([
-                'product_id'    => $product->id,
-                'admin_user_id' => $adminId,
-                'sku'           => $product->sku,
-                'action'        => 'publish_failed',
-                'status'        => 'error',
-                'error_message' => $safe,
+                'product_id'      => $product->id,
+                'admin_user_id'   => $adminId,
+                'sku'             => $product->sku,
+                'action'          => 'publish_failed',
+                'status'          => 'error',
+                'error_message'   => $safe,
+                'payload_summary' => empty($ebayErrors) ? null : ['ebay_errors' => $ebayErrors],
             ]);
 
             return response()->json([
@@ -482,12 +483,13 @@ class EbayListingController extends Controller
             $ebayErrors = $this->extractEbayErrors($e);
 
             $this->writeLog([
-                'product_id'    => $product->id,
-                'admin_user_id' => $adminId,
-                'sku'           => $product->sku,
-                'action'        => 'remove_failed',
-                'status'        => 'error',
-                'error_message' => $safe,
+                'product_id'      => $product->id,
+                'admin_user_id'   => $adminId,
+                'sku'             => $product->sku,
+                'action'          => 'remove_failed',
+                'status'          => 'error',
+                'error_message'   => $safe,
+                'payload_summary' => empty($ebayErrors) ? null : ['ebay_errors' => $ebayErrors],
             ]);
 
             return response()->json([
@@ -575,13 +577,14 @@ class EbayListingController extends Controller
             ]);
 
             $this->writeLog([
-                'product_id'    => $product->id,
-                'admin_user_id' => $adminId,
-                'sku'           => $product->sku,
-                'action'        => 'update_failed',
-                'ebay_item_id'  => $product->ebay_item_id,
-                'status'        => 'error',
-                'error_message' => $safe,
+                'product_id'      => $product->id,
+                'admin_user_id'   => $adminId,
+                'sku'             => $product->sku,
+                'action'          => 'update_failed',
+                'ebay_item_id'    => $product->ebay_item_id,
+                'status'          => 'error',
+                'error_message'   => $safe,
+                'payload_summary' => empty($ebayErrors) ? null : ['ebay_errors' => $ebayErrors],
             ]);
 
             return response()->json([
@@ -958,31 +961,31 @@ class EbayListingController extends Controller
         // ─────────────────────────────────────────────────────────────────────────
 
         if (str_contains($msg, 'inventory item upsert failed')) {
-            return 'eBay rejected the product data (inventory item). Check the product SKU, title length, and image URLs.';
+            return $this->withEbayDetail($e, 'eBay rejected the product data (inventory item). Check SKU, title length, and image URLs.');
         }
 
         if (str_contains($msg, 'offer create failed') || str_contains($msg, 'offer update failed')) {
-            return 'eBay rejected the listing offer. Check that category ID and listing policy IDs are valid for this marketplace.';
+            return $this->withEbayDetail($e, 'eBay rejected the listing offer. Check category ID and listing policy IDs.');
         }
 
         if (str_contains($msg, 'offer update (syncFull) failed')) {
-            return 'eBay offer update failed during sync. Check that category ID and policy IDs are valid for this marketplace.';
+            return $this->withEbayDetail($e, 'eBay offer update failed during sync. Check category ID and policy IDs.');
         }
 
         if (str_contains($msg, 'offer publish failed')) {
-            return 'eBay could not publish the listing. The offer may be missing required fields or the category may be restricted.';
+            return $this->withEbayDetail($e, 'eBay could not publish the listing. The offer may be missing required fields or the category may be restricted.');
         }
 
         if (str_contains($msg, 'syncInventory failed')) {
-            return 'eBay stock update failed. The listing may have ended or been removed on eBay.';
+            return $this->withEbayDetail($e, 'eBay stock update failed. The listing may have ended or been removed on eBay.');
         }
 
         if (str_contains($msg, 'connection test failed')) {
-            return 'eBay connection test failed. Verify credentials are correct and the seller account is still connected.';
+            return $this->withEbayDetail($e, 'eBay connection test failed. Verify credentials are correct and the seller account is still connected.');
         }
 
         if (str_contains($msg, 'getListingStatus failed')) {
-            return 'eBay status check failed. The listing may no longer exist on eBay.';
+            return $this->withEbayDetail($e, 'eBay status check failed. The listing may no longer exist on eBay.');
         }
 
         // Surface sanitised eBay API errors (already safe — originate from our service)
@@ -991,5 +994,34 @@ class EbayListingController extends Controller
         }
 
         return 'eBay operation failed. Check the eBay logs for details.';
+    }
+
+    /**
+     * Append the actual eBay error message/errorId to a base string.
+     * This surfaces the raw eBay rejection reason so operators know exactly
+     * what to fix — instead of seeing a generic "check your config" message.
+     */
+    private function withEbayDetail(\Throwable $e, string $base): string
+    {
+        $errors = $this->extractEbayErrors($e);
+
+        if (empty($errors)) {
+            return $base;
+        }
+
+        $parts = [];
+        foreach ($errors as $err) {
+            $text = $err['longMessage'] ?? $err['message'] ?? null;
+            if ($text) {
+                $id     = isset($err['errorId']) ? " [errorId {$err['errorId']}]" : '';
+                $parts[] = $text . $id;
+            }
+        }
+
+        if (empty($parts)) {
+            return $base;
+        }
+
+        return $base . ' eBay said: "' . implode(' | ', $parts) . '".';
     }
 }
