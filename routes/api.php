@@ -50,6 +50,7 @@ use App\Http\Controllers\Admin\AdminTradeDocumentController;
 use App\Http\Controllers\Admin\AdminLogisticsController;
 use App\Http\Controllers\Admin\AdminTwoFactorController;
 use App\Http\Controllers\Admin\AdminLoginTwoFactorController;
+use App\Http\Controllers\Admin\SystemHealthController;
 use App\Http\Controllers\EuDeclarationController;
 use App\Http\Controllers\TradeDocumentController;
 use Illuminate\Support\Facades\Route;
@@ -473,6 +474,10 @@ Route::prefix('v1')->group(function () {
             Route::get('security/events', [SecurityController::class, 'events']);
             Route::get('security/login-history', [SecurityController::class, 'loginHistory']);
             Route::get('security/2fa-status', [SecurityController::class, 'twoFactorStatus']);
+
+            // System health monitor
+            Route::get('system/health', [SystemHealthController::class, 'index']);
+            Route::get('system/errors', [SystemHealthController::class, 'errors']);
         });
 
         // Security management — security.manage (super_admin only)

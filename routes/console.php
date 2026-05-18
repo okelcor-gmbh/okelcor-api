@@ -13,3 +13,9 @@ Schedule::command('backup:okelcor')
     ->withoutOverlapping()
     ->onOneServer()
     ->appendOutputTo(storage_path('logs/backup-schedule.log'));
+
+Schedule::command('system:health --snapshot')
+    ->hourly()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/health-schedule.log'));

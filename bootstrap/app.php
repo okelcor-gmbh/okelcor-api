@@ -3,6 +3,8 @@
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -36,5 +38,37 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        // Log all unhandled exceptions with structured context (request-id, route, user)
+        $exceptions->report(function (\Throwable $e) {
+            // Skip validation / auth exceptions — already handled with HTTP 4xx
+            if (
+                $e instanceof \Illuminate\Validation\ValidationException ||
+                $e instanceof \Illuminate\Auth\AuthenticationException ||
+                $e instanceof \Illuminate\Auth\Access\AuthorizationException ||
+                $e instanceof \Symfony\Component\HttpKernel\Exception\NotFoundHttpException ||
+                $e instanceof \Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException
+            ) {
+                return false; // suppress — not worth a CRITICAL log entry
+            }
+
+            /** @var Request|null $request */
+            $request = request();
+
+            $user    = $request?->user();
+            $userId  = $user?->id ?? 'guest';
+            $route   = $request?->route()?->getName()
+                    ?? $request?->path()
+                    ?? 'unknown';
+
+            Log::critical('[unhandled_exception] ' . $e->getMessage(), [
+                'exception'  => get_class($e),
+                'file'       => $e->getFile() . ':' . $e->getLine(),
+                'route'      => $route,
+                'method'     => $request?->method() ?? 'CLI',
+                'url'        => $request?->fullUrl() ?? 'CLI',
+                'ip'         => $request?->ip() ?? '127.0.0.1',
+                'user_id'    => $userId,
+                'request_id' => $request?->header('X-Request-Id') ?? uniqid('req_'),
+            ]);
+        });
     })->create();
