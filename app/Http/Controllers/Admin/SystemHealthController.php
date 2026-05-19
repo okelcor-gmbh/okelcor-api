@@ -245,20 +245,33 @@ class SystemHealthController extends Controller
                         'severity' => 'high',
                         'message'  => 'No backup archives found in storage/app/backups',
                         'fix_hint' => 'Run: php artisan backup:okelcor — then confirm cron is active',
+                        'data'     => null,
                     ];
                 }
 
                 usort($files, fn ($a, $b) => filemtime($b) - filemtime($a));
-                $latest   = $files[0];
-                $ageHours = round((time() - filemtime($latest)) / 3600, 1);
-                $sizeMb   = round(filesize($latest) / 1048576, 2);
-                $tooOld   = $ageHours > 26;
+                $latest    = $files[0];
+                $mtime     = filemtime($latest);
+                $ageHours  = round((time() - $mtime) / 3600, 1);
+                $sizeMb    = round(filesize($latest) / 1048576, 2);
+                $tooOld    = $ageHours > 26;
+                $filename  = basename($latest);
+                $isFull    = str_contains($filename, '-full-');
+                $createdAt = Carbon::createFromTimestamp($mtime)->toIso8601String();
 
                 return [
                     'status'   => $tooOld ? 'warning' : 'pass',
                     'severity' => 'high',
-                    'message'  => basename($latest) . " | {$sizeMb} MB | {$ageHours}h ago",
+                    'message'  => "{$filename} | {$sizeMb} MB | {$ageHours}h ago",
                     'fix_hint' => $tooOld ? 'Backup is over 26h old — verify cron (* * * * * php artisan schedule:run) is active' : null,
+                    'data'     => [
+                        'filename'      => $filename,
+                        'size_mb'       => $sizeMb,
+                        'age_hours'     => $ageHours,
+                        'created_at'    => $createdAt,
+                        'type'          => $isFull ? 'full' : 'daily',
+                        'archive_count' => count($files),
+                    ],
                 ];
             }),
             $this->check('backup_scheduler', 'Backup Scheduler Registered', function () {
