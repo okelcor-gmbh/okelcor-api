@@ -27,8 +27,8 @@ if ($_logoPath && file_exists($_logoPath)) {
     }
 }
 
-// ── QR code (inline SVG via BaconQrCode) ──────────────────────────────
-$_qrSvg = null;
+// ── QR code (base64 SVG data URI — DomPDF img pipeline, more reliable than inline SVG) ──
+$_qrSrc = null;
 if (config('company.qr_enabled', true)) {
     $_docNum = isset($document) && $document
         ? $document->number
@@ -41,11 +41,9 @@ if (config('company.qr_enabled', true)) {
             new \BaconQrCode\Renderer\Image\SvgImageBackEnd()
         );
         $_svgRaw = (new \BaconQrCode\Writer($_renderer))->writeString($_qrText);
-        // Strip XML declaration for safe inline embedding
-        $_qrSvg = preg_replace('/^<\?xml[^?]*\?>\s*/i', '', $_svgRaw);
-        $_qrSvg = preg_replace('/<!DOCTYPE[^>]*>\s*/i', '', $_qrSvg);
+        $_qrSrc = 'data:image/svg+xml;base64,' . base64_encode($_svgRaw);
     } catch (\Throwable $_e) {
-        $_qrSvg = null;
+        $_qrSrc = null;
     }
 }
 @endphp
@@ -62,7 +60,7 @@ if (config('company.qr_enabled', true)) {
         </td>
 
         {{-- Date / Customer No / Contact (centre-right) --}}
-        <td style="vertical-align:top;text-align:right;padding-right:{{ $_qrSvg ? '14px' : '0' }};">
+        <td style="vertical-align:top;text-align:right;padding-right:{{ $_qrSrc ? '14px' : '0' }};">
             <div class="hdr-meta-lbl">DATE</div>
             <div class="hdr-meta-val">{{ $_hdrDate }}</div>
             <div class="hdr-meta-lbl">YOUR CUSTOMER NO.</div>
@@ -71,10 +69,10 @@ if (config('company.qr_enabled', true)) {
             <div class="hdr-meta-val" style="margin-bottom:0;">{{ config('company.contact', 'Okelcor Support') }}</div>
         </td>
 
-        {{-- QR code (far right) --}}
-        @if ($_qrSvg)
+        {{-- QR code (far right, embedded as base64 data URI for reliable DomPDF rendering) --}}
+        @if ($_qrSrc)
         <td style="vertical-align:top;text-align:right;width:80px;">
-            {!! $_qrSvg !!}
+            <img src="{{ $_qrSrc }}" width="72" height="72" alt="">
         </td>
         @endif
     </tr>
