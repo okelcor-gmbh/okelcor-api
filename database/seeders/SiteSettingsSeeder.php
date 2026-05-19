@@ -12,7 +12,7 @@ class SiteSettingsSeeder extends Seeder
         $settings = [
             // company
             ['key' => 'company_name',            'value' => 'Okelcor GmbH',                   'type' => 'string',  'group' => 'company'],
-            ['key' => 'company_email',            'value' => 'info@okelcor.de',                'type' => 'string',  'group' => 'company'],
+            ['key' => 'company_email',            'value' => 'info@okelcor.com',               'type' => 'string',  'group' => 'company'],
             ['key' => 'company_phone',            'value' => '+49 (0) 89 / 545 583 60',        'type' => 'string',  'group' => 'company'],
             ['key' => 'company_fax',              'value' => '',                               'type' => 'string',  'group' => 'company'],
             ['key' => 'company_address',          'value' => '',                               'type' => 'string',  'group' => 'company'],
@@ -23,9 +23,9 @@ class SiteSettingsSeeder extends Seeder
             ['key' => 'free_shipping_threshold',  'value' => '0',                              'type' => 'string',  'group' => 'shop'],
 
             // email
-            ['key' => 'contact_email',            'value' => 'info@okelcor.de',                'type' => 'string',  'group' => 'email'],
-            ['key' => 'quote_email',              'value' => 'quotes@okelcor.de',              'type' => 'string',  'group' => 'email'],
-            ['key' => 'from_email',               'value' => 'no-reply@okelcor.de',            'type' => 'string',  'group' => 'email'],
+            ['key' => 'contact_email',            'value' => 'info@okelcor.com',               'type' => 'string',  'group' => 'email'],
+            ['key' => 'quote_email',              'value' => 'quotes@okelcor.com',             'type' => 'string',  'group' => 'email'],
+            ['key' => 'from_email',               'value' => 'no-reply@okelcor.com',           'type' => 'string',  'group' => 'email'],
             ['key' => 'quote_response_time',      'value' => '24 hours',                       'type' => 'string',  'group' => 'email'],
 
             // site

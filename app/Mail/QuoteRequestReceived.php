@@ -30,7 +30,7 @@ class QuoteRequestReceived extends Mailable
 
     public function content(): Content
     {
-        $adminUrl = rtrim(config('app.url', 'https://api.okelcor.de'), '/');
+        $adminUrl = rtrim(config('app.url', 'https://api.okelcor.com'), '/');
 
         return new Content(
             view: 'emails.quote-request-received',
