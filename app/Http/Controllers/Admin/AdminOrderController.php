@@ -75,7 +75,7 @@ class AdminOrderController extends Controller
     public function update(Request $request, int $id): JsonResponse
     {
         $request->validate([
-            'status'             => ['required', Rule::in(['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled'])],
+            'status'             => ['required', Rule::in(['pending', 'confirmed', 'awaiting_proforma', 'processing', 'shipped', 'delivered', 'cancelled'])],
             'carrier'            => ['sometimes', 'nullable', 'string', 'max:100'],
             'carrier_type'       => ['sometimes', 'nullable', Rule::in(['sea', 'air', 'dhl', 'road', 'bus'])],
             'tracking_number'    => ['sometimes', 'nullable', 'string', 'max:100'],
@@ -145,7 +145,7 @@ class AdminOrderController extends Controller
     public function updateStatus(Request $request, int $id): JsonResponse
     {
         $request->validate([
-            'status'             => ['required', Rule::in(['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled'])],
+            'status'             => ['required', Rule::in(['pending', 'confirmed', 'awaiting_proforma', 'processing', 'shipped', 'delivered', 'cancelled'])],
             'carrier'            => ['sometimes', 'nullable', 'string', 'max:100'],
             'carrier_type'       => ['sometimes', 'nullable', Rule::in(['sea', 'air', 'dhl', 'road', 'bus'])],
             'tracking_number'    => ['sometimes', 'nullable', 'string', 'max:100'],

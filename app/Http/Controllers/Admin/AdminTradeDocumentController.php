@@ -21,6 +21,47 @@ class AdminTradeDocumentController extends Controller
     public function __construct(private TradeDocumentService $service) {}
 
     /**
+     * POST /api/v1/admin/orders/{id}/trade-documents/order-confirmation
+     *
+     * Generate (or return existing) order confirmation for an order.
+     * Idempotent — calling multiple times returns the same issued document.
+     */
+    public function generateOrderConfirmation(Request $request, int $id): JsonResponse
+    {
+        $order = Order::with('items')->findOrFail($id);
+        $admin = $request->user();
+
+        $document = $this->service->generateOrderConfirmationForOrder($order, $admin);
+
+        if ($document->wasRecentlyCreated) {
+            try {
+                OrderLog::create([
+                    'order_id'         => $order->id,
+                    'order_ref'        => $order->ref,
+                    'admin_user_id'    => $admin?->id,
+                    'admin_user_email' => $admin?->email,
+                    'action'           => 'document_generated',
+                    'new_value'        => $document->number,
+                    'notes'            => 'Order confirmation generated.',
+                    'ip_address'       => $request->ip(),
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('OrderLog write failed (order confirmation generation)', [
+                    'order_ref' => $order->ref,
+                    'error'     => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return response()->json([
+            'data'    => $this->formatDocument($document),
+            'message' => $document->wasRecentlyCreated
+                ? 'Order confirmation generated.'
+                : 'Order confirmation already exists for this order.',
+        ], $document->wasRecentlyCreated ? 201 : 200);
+    }
+
+    /**
      * POST /api/v1/admin/orders/{id}/trade-documents/proforma
      *
      * Generate (or return existing) proforma invoice for an order.
@@ -422,11 +463,11 @@ class AdminTradeDocumentController extends Controller
             'reason' => ['required', 'string', 'min:5', 'max:1000'],
         ]);
 
-        $supersedable = ['proforma', 'commercial_invoice', 'packing_list', 'delivery_note'];
+        $supersedable = ['order_confirmation', 'proforma', 'commercial_invoice', 'packing_list', 'delivery_note'];
 
         if (! in_array($document->type, $supersedable, true)) {
             return response()->json([
-                'message' => 'Only generated documents (proforma, commercial invoice, packing list, delivery note) can be superseded.',
+                'message' => 'Only generated documents (order confirmation, proforma, commercial invoice, packing list, delivery note) can be superseded.',
             ], 422);
         }
 

@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\Storage;
 class TradeDocumentService
 {
     private const PREFIXES = [
+        'order_confirmation' => 'AB',
         'proforma'           => 'PI',
         'commercial_invoice' => 'CI',
         'packing_list'       => 'PL',
@@ -28,6 +29,66 @@ class TradeDocumentService
     public function generateNumber(string $type): string
     {
         return DB::transaction(fn () => $this->sequentialNumber($type));
+    }
+
+    /**
+     * Idempotent — returns an existing issued order confirmation if one already
+     * exists for this order. Otherwise generates number, renders PDF, persists record.
+     *
+     * Generated automatically when a quote (AN-) is converted to an order.
+     * The AB number follows the sequence AB-YYYY-XXXX.
+     */
+    public function generateOrderConfirmationForOrder(Order $order, ?AdminUser $admin = null): TradeDocument
+    {
+        $existing = TradeDocument::where('order_id', $order->id)
+            ->where('type', 'order_confirmation')
+            ->where('status', 'issued')
+            ->first();
+
+        if ($existing) {
+            return $existing;
+        }
+
+        $order->loadMissing('items');
+        $quote = QuoteRequest::where('order_id', $order->id)->first();
+
+        $document = DB::transaction(function () use ($order, $admin) {
+            return TradeDocument::create([
+                'order_id'  => $order->id,
+                'order_ref' => $order->ref,
+                'type'      => 'order_confirmation',
+                'number'    => $this->sequentialNumber('order_confirmation'),
+                'status'    => 'issued',
+                'issued_by' => $admin?->id,
+                'issued_at' => now(),
+            ]);
+        });
+
+        try {
+            $pdfContent = Pdf::loadView('pdf.order-confirmation', [
+                'document' => $document,
+                'order'    => $order,
+                'quote'    => $quote,
+            ])->output();
+
+            $pdfPath = 'trade-documents/order-confirmation/' . $document->number . '.pdf';
+            Storage::disk('local')->put($pdfPath, $pdfContent);
+            $document->update(['pdf_path' => $pdfPath]);
+        } catch (\Throwable $e) {
+            Log::warning('Order confirmation PDF generation failed', [
+                'document_id' => $document->id,
+                'number'      => $document->number,
+                'order_ref'   => $order->ref,
+                'error'       => $e->getMessage(),
+            ]);
+        }
+
+        Log::info('Order confirmation generated', [
+            'number'    => $document->number,
+            'order_ref' => $order->ref,
+        ]);
+
+        return $document;
     }
 
     /**

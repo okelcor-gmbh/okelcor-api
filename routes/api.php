@@ -408,6 +408,7 @@ Route::prefix('v1')->group(function () {
         // Trade documents — trade_documents.manage
         // -----------------------------------------------------------------
         Route::middleware('permission:trade_documents.manage')->group(function () {
+            Route::post('orders/{id}/trade-documents/order-confirmation', [AdminTradeDocumentController::class, 'generateOrderConfirmation']);
             Route::post('orders/{id}/trade-documents/proforma', [AdminTradeDocumentController::class, 'generateProforma']);
             Route::post('orders/{id}/generate-commercial-invoice', [AdminTradeDocumentController::class, 'generateCommercialInvoice']);
             Route::post('orders/{id}/generate-packing-list', [AdminTradeDocumentController::class, 'generatePackingList']);

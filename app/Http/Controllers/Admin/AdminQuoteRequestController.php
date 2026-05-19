@@ -196,7 +196,7 @@ class AdminQuoteRequestController extends Controller
                 'discount_label' => $discountLabel,
                 'promo_code'     => $promoCode,
                 'total'          => 0,  // updated below
-                'status'         => 'confirmed',
+                'status'         => $paymentMethod === 'bank_transfer' ? 'awaiting_proforma' : 'confirmed',
                 'payment_status' => 'pending',
                 'mode'           => 'manual',
                 'vat_number'     => $quote->vat_number,
@@ -247,12 +247,12 @@ class AdminQuoteRequestController extends Controller
         // Load items once — used by both Stripe session and email
         $order->load('items');
 
-        // Auto-generate proforma for bank transfer orders
+        // Auto-generate order confirmation for bank transfer orders
         if ($paymentMethod === 'bank_transfer') {
             try {
-                app(TradeDocumentService::class)->generateProformaForOrder($order, $request->user());
+                app(TradeDocumentService::class)->generateOrderConfirmationForOrder($order, $request->user());
             } catch (\Throwable $e) {
-                Log::warning('Proforma auto-generation failed after quote conversion', [
+                Log::warning('Order confirmation auto-generation failed after quote conversion', [
                     'order_ref' => $order->ref,
                     'error'     => $e->getMessage(),
                 ]);

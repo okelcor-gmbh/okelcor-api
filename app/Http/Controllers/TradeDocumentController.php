@@ -29,7 +29,7 @@ class TradeDocumentController extends Controller
 
         $documents = TradeDocument::where('order_id', $order->id)
             ->where('status', 'issued')
-            ->whereIn('type', ['proforma', 'commercial_invoice', 'packing_list', 'delivery_note', 'shipment_document'])
+            ->whereIn('type', ['order_confirmation', 'proforma', 'commercial_invoice', 'packing_list', 'delivery_note', 'shipment_document'])
             ->orderByDesc('issued_at')
             ->get();
 
