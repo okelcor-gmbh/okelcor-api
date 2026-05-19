@@ -11,7 +11,7 @@ class AdminUserSeeder extends Seeder
     public function run(): void
     {
         AdminUser::updateOrCreate(
-            ['email' => 'admin@okelcor.de'],
+            ['email' => 'admin@okelcor.com'],
             [
                 'name'     => 'Okelcor Admin',
                 'password' => Hash::make('password123'),
@@ -20,7 +20,7 @@ class AdminUserSeeder extends Seeder
         );
 
         AdminUser::updateOrCreate(
-            ['email' => 'editor@okelcor.de'],
+            ['email' => 'editor@okelcor.com'],
             [
                 'name'     => 'Content Editor',
                 'password' => Hash::make('password123'),
