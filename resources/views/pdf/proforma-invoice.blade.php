@@ -5,368 +5,98 @@
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
     <title>Proforma Invoice {{ $document->number }}</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-
-        body {
-            font-family: Arial, Helvetica, sans-serif;
-            font-size: 12px;
-            color: #171a20;
-            background: #ffffff;
-        }
-
-        .page { padding: 40px 48px; }
-
-        /* Header */
-        .header-table {
-            width: 100%;
-            border-bottom: 3px solid #f4511e;
-            padding-bottom: 20px;
-            margin-bottom: 16px;
-        }
-        .header-table td { vertical-align: top; }
-        .brand {
-            font-size: 22px;
-            font-weight: 700;
-            letter-spacing: 3px;
-            text-transform: uppercase;
-            color: #171a20;
-        }
-        .brand-sub { font-size: 11px; color: #5c5e62; margin-top: 3px; }
-        .doc-label {
-            font-size: 20px;
-            font-weight: 700;
-            color: #171a20;
-            text-align: right;
-        }
-        .doc-number { font-size: 13px; color: #5c5e62; text-align: right; margin-top: 4px; }
-
-        /* Proforma notice */
-        .proforma-notice {
-            background: #fff8e1;
-            border-left: 4px solid #f4511e;
-            padding: 8px 14px;
-            margin-bottom: 20px;
-            font-size: 11px;
-            color: #5c5e62;
-            line-height: 1.5;
-        }
-        .proforma-notice strong { color: #f4511e; }
-
-        /* Meta */
-        .meta-table { width: 100%; margin-bottom: 24px; }
-        .meta-table td { vertical-align: top; width: 50%; }
-        .section-title {
-            font-size: 10px;
-            font-weight: 700;
-            letter-spacing: 1px;
-            text-transform: uppercase;
-            color: #9e9e9e;
-            margin-bottom: 6px;
-        }
-        .meta-value { font-size: 12px; color: #171a20; line-height: 1.7; }
-        .meta-value strong { font-weight: 700; }
-
-        /* Details side table */
-        .detail-inner { margin-left: auto; border-collapse: collapse; }
-        .detail-inner td { padding: 2px 0 2px 0; font-size: 11px; }
-        .detail-inner .lbl { color: #5c5e62; padding-right: 12px; }
-        .detail-inner .val { font-weight: 700; color: #171a20; }
-
-        /* Terms block */
-        .terms-block {
-            background: #fafafa;
-            border: 1px solid #e0e0e0;
-            padding: 12px 14px;
-            margin-bottom: 20px;
-            font-size: 11px;
-            line-height: 1.7;
-        }
-        .terms-block .section-title { margin-bottom: 4px; }
-
-        /* Items table */
-        .items-table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
-        .items-table thead tr { background-color: #f5f5f5; }
-        .items-table th {
-            padding: 9px 12px;
-            font-size: 10px;
-            font-weight: 700;
-            letter-spacing: 0.5px;
-            text-transform: uppercase;
-            color: #5c5e62;
-            text-align: left;
-            border-bottom: 1px solid #dddddd;
-        }
-        .items-table th.right { text-align: right; }
-        .items-table td {
-            padding: 10px 12px;
-            font-size: 12px;
-            color: #171a20;
-            border-bottom: 1px solid #eeeeee;
-            vertical-align: top;
-        }
-        .items-table td.right { text-align: right; }
-        .item-sub { font-size: 11px; color: #5c5e62; margin-top: 2px; }
-
-        /* Totals */
-        .totals-table { width: 100%; border-collapse: collapse; margin-bottom: 28px; }
-        .totals-table td { padding: 6px 12px; font-size: 12px; }
-        .totals-table .lbl { color: #5c5e62; text-align: right; width: 75%; }
-        .totals-table .amt { color: #171a20; text-align: right; font-weight: 700; }
-        .totals-table .total-row td {
-            border-top: 2px solid #dddddd;
-            padding-top: 10px;
-            font-size: 14px;
-        }
-
-        /* Bank transfer block */
-        .bank-block {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 28px;
-            border: 1px solid #e0e0e0;
-            background-color: #fafafa;
-        }
-        .bank-block td { padding: 14px 16px; }
-        .bank-inner { width: 100%; border-collapse: collapse; }
-        .bank-inner td { padding: 3px 0; font-size: 11px; }
-        .bank-inner .lbl { color: #5c5e62; width: 35%; padding-right: 12px; }
-        .bank-inner .val { font-weight: 700; color: #171a20; }
-
-        /* Footer */
-        .footer {
-            border-top: 1px solid #eeeeee;
-            padding-top: 14px;
-            font-size: 10px;
-            color: #9e9e9e;
-            line-height: 1.7;
-        }
+        @include('pdf.partials._styles')
     </style>
 </head>
 <body>
 <div class="page">
 
-    <!-- Header -->
-    <table class="header-table">
-        <tr>
-            <td>
-                <div class="brand">Okelcor</div>
-                <div class="brand-sub">support@okelcor.com &mdash; okelcor.com</div>
-            </td>
-            <td>
-                <div class="doc-label">Proforma Invoice</div>
-                <div class="doc-number">{{ $document->number }}</div>
-            </td>
-        </tr>
-    </table>
+    @php
+    $incoterm = strtoupper((string) ($quote?->incoterm ?? ''));
+    $incotermLabel = match($incoterm) {
+        'FOB' => 'FOB Germany (Incoterms 2020)',
+        'CIF' => 'CIF (Incoterms 2020)',
+        'EXW' => 'EXW (Incoterms 2020) — Ex Works',
+        'DAP' => 'DAP (Incoterms 2020) — Delivered at Place',
+        'DDP' => 'DDP (Incoterms 2020) — Delivered Duty Paid',
+        default => $incoterm
+            ? $incoterm . ' (Incoterms 2020)'
+            : config('payment.bank_transfer.delivery_term', 'FOB Germany'),
+    };
+    @endphp
 
-    <!-- Proforma notice -->
-    <div class="proforma-notice">
-        <strong>PROFORMA — NOT A TAX INVOICE.</strong>
-        This document is issued for quotation and payment purposes only.
-        A final tax invoice (INV-) will be issued after payment is confirmed.
-    </div>
+    @include('pdf.partials._header')
+    @include('pdf.partials._address')
 
-    <!-- Bill to / Document details -->
-    <table class="meta-table">
-        <tr>
-            <td>
-                <!-- Seller -->
-                <div class="section-title">Seller / Consignor</div>
-                <div class="meta-value" style="margin-bottom:14px;">
-                    <strong>Okelcor GmbH</strong><br>
-                    support@okelcor.com<br>
-                    okelcor.com
-                </div>
+    <div style="height:30px;"></div>
 
-                <!-- Buyer -->
-                <div class="section-title">Buyer / Consignee</div>
-                <div class="meta-value">
-                    <strong>{{ $order->customer_name }}</strong><br>
-                    {{ $order->customer_email }}<br>
-                    @if ($order->customer_phone){{ $order->customer_phone }}<br>@endif
-                    {{ $order->address }}<br>
-                    {{ $order->city }}@if ($order->postal_code), {{ $order->postal_code }}@endif<br>
-                    {{ $order->country }}
-                    @if ($order->vat_number)
-                    <br><span style="color:#5c5e62;">VAT No.: </span><strong>{{ $order->vat_number }}</strong>
-                    @endif
-                </div>
-            </td>
-            <td style="text-align: right;">
-                <div class="section-title">Document Details</div>
-                <table class="detail-inner">
-                    <tr>
-                        <td class="lbl">Proforma number</td>
-                        <td class="val">{{ $document->number }}</td>
-                    </tr>
-                    <tr>
-                        <td class="lbl">Date issued</td>
-                        <td class="val">{{ $document->issued_at?->format('d M Y') }}</td>
-                    </tr>
-                    <tr>
-                        <td class="lbl">Order reference</td>
-                        <td class="val">{{ $order->ref }}</td>
-                    </tr>
-                    <tr>
-                        <td class="lbl">Payment method</td>
-                        <td class="val">{{ $order->payment_method === 'bank_transfer' ? 'Bank Transfer' : 'Online Payment' }}</td>
-                    </tr>
-                    @if ($quote?->incoterm)
-                    @php
-                        $incotermDisplay = match(strtoupper($quote->incoterm)) {
-                            'FOB'    => 'Incoterms 2020: FOB Germany',
-                            'CIF'    => 'Incoterms 2020: CIF destination port — freight and insurance included to destination port.',
-                            default  => 'Incoterms 2020: ' . strtoupper($quote->incoterm),
-                        };
-                    @endphp
-                    <tr>
-                        <td class="lbl">Delivery / Shipping Terms</td>
-                        <td class="val">{{ $incotermDisplay }}</td>
-                    </tr>
-                    @else
-                    <tr>
-                        <td class="lbl">Delivery / Shipping Terms</td>
-                        <td class="val">{{ config('payment.bank_transfer.delivery_term') }}</td>
-                    </tr>
-                    @endif
-                </table>
-            </td>
-        </tr>
-    </table>
+    {{-- Document title --}}
+    <div class="doc-title">Proforma Invoice {{ $document->number }}</div>
 
-    <!-- Payment terms (bank transfer) -->
-    @if ($order->payment_method === 'bank_transfer')
-    <div class="terms-block">
-        <div class="section-title">Payment Terms</div>
-        {{ config('payment.bank_transfer.terms', '50% against order confirmation and balance against bill of lading.') }}
-    </div>
-    @endif
+    <p class="intro-p">Dear customer,</p>
+    <p class="intro-p" style="margin-bottom:16px;">
+        Please find below the proforma invoice for order {{ $order->ref }}:
+    </p>
 
-    <!-- Items -->
+    {{-- Items --}}
     <table class="items-table">
         <thead>
             <tr>
-                <th>Product</th>
-                <th class="right" style="width:50px;">Qty</th>
-                <th class="right" style="width:90px;">Unit price</th>
-                <th class="right" style="width:90px;">Amount</th>
+                <th style="width:26px;">Item</th>
+                <th>Description</th>
+                <th class="r" style="width:80px;">Quantity</th>
+                <th class="r" style="width:90px;">Unit price</th>
+                <th class="r" style="width:100px;">Total price</th>
             </tr>
         </thead>
         <tbody>
-            @foreach ($order->items as $item)
+            @foreach ($order->items as $i => $item)
             <tr>
+                <td style="color:#666;">{{ $i + 1 }}.</td>
                 <td>
-                    {{ $item->brand }} — {{ $item->name }}
+                    <strong>{{ $item->brand }}</strong> &mdash; {{ $item->name }}
                     @if ($item->size)
-                    <div class="item-sub">{{ $item->size }}</div>
+                    <div style="font-size:10px;font-weight:700;margin-top:2px;">{{ $item->size }}</div>
                     @endif
                     @if ($item->sku)
                     <div class="item-sub">SKU: {{ $item->sku }}</div>
                     @endif
                 </td>
-                <td class="right">{{ $item->quantity }}</td>
-                <td class="right">&euro;{{ number_format((float) $item->unit_price, 2) }}</td>
-                <td class="right">&euro;{{ number_format((float) $item->line_total, 2) }}</td>
+                <td class="r">
+                    <div class="qty-num">{{ number_format($item->quantity, 2, '.', ',') }}</div>
+                    <div class="qty-unit">piece</div>
+                </td>
+                <td class="r">{{ number_format((float) $item->unit_price, 2) }} EUR</td>
+                <td class="r">
+                    {{ number_format((float) $item->line_total, 2) }} EUR<br>
+                    <span class="price-tax">(Tax {{ number_format((float) ($order->tax_rate ?? 0), 0) }}%)</span>
+                </td>
             </tr>
             @endforeach
         </tbody>
     </table>
 
-    <!-- Totals -->
-    <table class="totals-table">
-        <tr>
-            <td class="lbl">Subtotal (net)</td>
-            <td class="amt">&euro;{{ number_format((float) $order->subtotal, 2) }}</td>
-        </tr>
-        @if ((float) $order->delivery_cost > 0)
-        <tr>
-            <td class="lbl">Delivery</td>
-            <td class="amt">&euro;{{ number_format((float) $order->delivery_cost, 2) }}</td>
-        </tr>
-        @endif
-        @if ((float) ($order->discount_amount ?? 0) > 0)
-        <tr>
-            <td class="lbl">{{ $order->discount_label ?? 'Discount' }}</td>
-            <td class="amt" style="color:#2e7d32;">&minus;&euro;{{ number_format((float) $order->discount_amount, 2) }}</td>
-        </tr>
-        @endif
-        @if ($order->tax_treatment !== null)
-        <tr>
-            @if ((float) $order->tax_amount > 0)
-            <td class="lbl">VAT ({{ number_format((float) $order->tax_rate, 0) }}%)</td>
-            <td class="amt">&euro;{{ number_format((float) $order->tax_amount, 2) }}</td>
-            @elseif ($order->is_reverse_charge)
-            <td class="lbl">VAT &mdash; reverse charge (0%)</td>
-            <td class="amt">&euro;0.00</td>
-            @else
-            <td class="lbl">VAT &mdash; exempt (0%)</td>
-            <td class="amt">&euro;0.00</td>
-            @endif
-        </tr>
-        @endif
-        <tr class="total-row">
-            <td class="lbl">Total</td>
-            <td class="amt">&euro;{{ number_format((float) $order->total, 2) }}</td>
-        </tr>
-    </table>
+    {{-- Totals --}}
+    @include('pdf.partials._totals')
 
-    @if ($order->is_reverse_charge)
-    <p style="font-size:11px;color:#5c5e62;margin-bottom:20px;line-height:1.5;">
-        Reverse charge &mdash; VAT liability transfers to the recipient.
+    {{-- Delivery & payment terms --}}
+    <p class="terms-p">Delivery Terms: {{ $incotermLabel }}</p>
+    <p class="terms-p">
+        <strong>Terms:</strong>
+        {{ config('payment.bank_transfer.terms', '50% against order confirmation and balance against bill of lading.') }}
+        Please make payment to the bank account below.
     </p>
-    @elseif ($order->tax_treatment === 'exempt')
-    <p style="font-size:11px;color:#5c5e62;margin-bottom:20px;line-height:1.5;">
-        Export outside the EU &mdash; VAT exempt.
+
+    {{-- Bank (always show on proforma — it IS the payment instruction) --}}
+    @include('pdf.partials._bank')
+
+    <p class="terms-p" style="font-size:10px;color:#555;margin-top:10px;font-style:italic;">
+        This document is a proforma invoice only and does not constitute a final tax invoice.
+        A final invoice will be issued upon confirmation of payment.
     </p>
-    @endif
 
-    <!-- Bank transfer payment details -->
-    @if ($order->payment_method === 'bank_transfer')
-    <table class="bank-block">
-        <tr>
-            <td>
-                <p style="margin:0 0 10px 0;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#9e9e9e;">
-                    Bank Transfer Details
-                </p>
-                <table class="bank-inner">
-                    <tr>
-                        <td class="lbl">Account Name</td>
-                        <td class="val">{{ config('payment.bank_transfer.account_name') }}</td>
-                    </tr>
-                    <tr>
-                        <td class="lbl">IBAN</td>
-                        <td class="val">{{ config('payment.bank_transfer.iban') }}</td>
-                    </tr>
-                    <tr>
-                        <td class="lbl">BIC / SWIFT</td>
-                        <td class="val">{{ config('payment.bank_transfer.swift_bic') }}</td>
-                    </tr>
-                    <tr>
-                        <td class="lbl">Bank</td>
-                        <td class="val">{{ config('payment.bank_transfer.bank_name') }}, {{ config('payment.bank_transfer.bank_address') }}</td>
-                    </tr>
-                    <tr>
-                        <td class="lbl" style="padding-top:6px;">Payment Reference</td>
-                        <td class="val" style="padding-top:6px;">{{ $order->ref }}</td>
-                    </tr>
-                    <tr>
-                        <td colspan="2" style="padding-top:6px;font-size:11px;color:#5c5e62;line-height:1.5;">
-                            {{ config('payment.bank_transfer.sepa_note') }}<br>
-                            {{ config('payment.bank_transfer.international_note') }}
-                        </td>
-                    </tr>
-                </table>
-            </td>
-        </tr>
-    </table>
-    @endif
-
-    <!-- Footer -->
-    <div class="footer">
-        <p><strong>This is a proforma invoice only and does not constitute a tax invoice or a demand for payment.</strong></p>
-        <p style="margin-top:4px;">A final tax invoice will be issued upon confirmation of payment. Please quote the order reference <strong>{{ $order->ref }}</strong> in your bank transfer.</p>
-        <p style="margin-top:8px;">Okelcor &mdash; support@okelcor.com &mdash; okelcor.com</p>
-    </div>
+    {{-- Footer --}}
+    @include('pdf.partials._footer')
 
 </div>
 </body>
