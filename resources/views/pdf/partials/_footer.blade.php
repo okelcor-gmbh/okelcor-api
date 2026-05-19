@@ -1,3 +1,13 @@
+{{-- Dynamic page number via DomPDF page_script (enable_php: true required) --}}
+<script type="text/php">
+    if (isset($pdf)) {
+        $pdf->page_script(function ($pageNumber, $pageCount, $canvas, $fontMetrics) {
+            $font = $fontMetrics->getFont('Helvetica', 'normal');
+            $canvas->text(535, 808, "$pageNumber | $pageCount", $font, 8, [0, 0, 0]);
+        });
+    }
+</script>
+
 <table class="company-footer">
     <tr>
         <td style="width:26%;">

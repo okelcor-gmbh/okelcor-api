@@ -1,18 +1,68 @@
 @php
-// Supports both trade documents ($document) and final invoices ($invoice)
+// ── Date ──────────────────────────────────────────────────────────────
 $_hdrDate = isset($document) && $document
     ? ($document->issued_at?->format('M j, Y') ?? now()->format('M j, Y'))
     : (isset($invoice) ? $invoice->issued_at->format('M j, Y') : now()->format('M j, Y'));
 
-$_quoteOrNull    = $quote ?? null;
-$_hdrCustomerNo  = str_pad($_quoteOrNull?->id ?? $order->id ?? 0, 4, '0', STR_PAD_LEFT);
+$_quoteOrNull   = $quote ?? null;
+$_hdrCustomerNo = str_pad($_quoteOrNull?->id ?? $order->id ?? 0, 4, '0', STR_PAD_LEFT);
+
+// ── Logo (AVIF → PNG base64 via GD, fallback to CSS wordmark) ─────────
+$_logoSrc = null;
+$_logoFile = config('company.logo_path', 'okelcor-logo.avif');
+$_logoPath = public_path($_logoFile);
+if ($_logoPath && file_exists($_logoPath)) {
+    $_ext = strtolower(pathinfo($_logoPath, PATHINFO_EXTENSION));
+    if ($_ext === 'avif' && function_exists('imagecreatefromavif')) {
+        $_img = @imagecreatefromavif($_logoPath);
+        if ($_img) {
+            ob_start();
+            imagepng($_img);
+            $_logoSrc = 'data:image/png;base64,' . base64_encode(ob_get_clean());
+            imagedestroy($_img);
+        }
+    } elseif (in_array($_ext, ['png', 'jpg', 'jpeg', 'gif', 'webp'])) {
+        $_mime = $_ext === 'jpg' ? 'jpeg' : $_ext;
+        $_logoSrc = 'data:image/' . $_mime . ';base64,' . base64_encode(file_get_contents($_logoPath));
+    }
+}
+
+// ── QR code (inline SVG via BaconQrCode) ──────────────────────────────
+$_qrSvg = null;
+if (config('company.qr_enabled', true)) {
+    $_docNum = isset($document) && $document
+        ? $document->number
+        : (isset($invoice) ? $invoice->invoice_number : '');
+    $_qrText = 'OKELCOR | ' . $_docNum . ' | Order ' . ($order->ref ?? '') . ' | okelcor.com';
+
+    try {
+        $_renderer = new \BaconQrCode\Renderer\ImageRenderer(
+            new \BaconQrCode\Renderer\RendererStyle\RendererStyle(72),
+            new \BaconQrCode\Renderer\Image\SvgImageBackEnd()
+        );
+        $_svgRaw = (new \BaconQrCode\Writer($_renderer))->writeString($_qrText);
+        // Strip XML declaration for safe inline embedding
+        $_qrSvg = preg_replace('/^<\?xml[^?]*\?>\s*/i', '', $_svgRaw);
+        $_qrSvg = preg_replace('/<!DOCTYPE[^>]*>\s*/i', '', $_qrSvg);
+    } catch (\Throwable $_e) {
+        $_qrSvg = null;
+    }
+}
 @endphp
+
 <table style="width:100%;border-collapse:collapse;margin-bottom:20px;">
     <tr>
-        <td style="vertical-align:top;">
+        {{-- Logo (left) --}}
+        <td style="vertical-align:middle;width:40%;">
+            @if ($_logoSrc)
+            <img src="{{ $_logoSrc }}" style="height:38px;max-width:220px;" alt="Okelcor">
+            @else
             <div class="ok-logo">OKELCOR</div>
+            @endif
         </td>
-        <td style="vertical-align:top;text-align:right;">
+
+        {{-- Date / Customer No / Contact (centre-right) --}}
+        <td style="vertical-align:top;text-align:right;padding-right:{{ $_qrSvg ? '14px' : '0' }};">
             <div class="hdr-meta-lbl">DATE</div>
             <div class="hdr-meta-val">{{ $_hdrDate }}</div>
             <div class="hdr-meta-lbl">YOUR CUSTOMER NO.</div>
@@ -20,5 +70,12 @@ $_hdrCustomerNo  = str_pad($_quoteOrNull?->id ?? $order->id ?? 0, 4, '0', STR_PA
             <div class="hdr-meta-lbl">YOUR CONTACT</div>
             <div class="hdr-meta-val" style="margin-bottom:0;">{{ config('company.contact', 'Okelcor Support') }}</div>
         </td>
+
+        {{-- QR code (far right) --}}
+        @if ($_qrSvg)
+        <td style="vertical-align:top;text-align:right;width:80px;">
+            {!! $_qrSvg !!}
+        </td>
+        @endif
     </tr>
 </table>

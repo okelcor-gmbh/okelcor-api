@@ -16,6 +16,10 @@ return [
     'ceo'           => 'Solomon Okello',
     'contact'       => 'Okelcor Support',
 
+    // PDF document branding
+    'logo_path'  => env('DOCUMENT_LOGO_PATH', 'okelcor-logo.avif'),  // relative to public_path()
+    'qr_enabled' => env('DOCUMENT_QR_ENABLED', true),
+
     // Registration bank shown in the document footer (different from customer payment account)
     'footer_bank_name' => 'BANKING CIRCLE S.A- GERMAN BRANCH',
     'footer_bank_iban' => 'DE32202208000027782722',
