@@ -9,6 +9,7 @@ use ZipArchive;
 class BackupOkelcor extends Command
 {
     protected $signature = 'backup:okelcor
+                            {--full  : Include product images (for monthly / off-server archiving)}
                             {--force : Run even when BACKUP_ENABLED=false}';
 
     protected $description = 'Create a compressed database + file backup of the Okelcor application.';
@@ -20,8 +21,10 @@ class BackupOkelcor extends Command
             return self::SUCCESS;
         }
 
-        $timestamp  = now()->format('Y-m-d-Hi');
-        $backupName = "okelcor-backup-{$timestamp}.zip";
+        $isFull    = $this->option('full') || config('backup.include_product_images', false);
+        $timestamp = now()->format('Y-m-d-Hi');
+        $prefix    = $isFull ? 'okelcor-backup-full' : 'okelcor-backup';
+        $backupName = "{$prefix}-{$timestamp}.zip";
         $backupsDir = storage_path('app/backups');
         $backupPath = $backupsDir . DIRECTORY_SEPARATOR . $backupName;
         $tmpDir     = sys_get_temp_dir() . DIRECTORY_SEPARATOR . "okelcor_backup_{$timestamp}";
@@ -30,9 +33,43 @@ class BackupOkelcor extends Command
             mkdir($backupsDir, 0755, true);
         }
 
-        Log::info('[Backup] Started', ['file' => $backupName]);
-        $this->info("Backup started: {$backupName}");
+        // Build path list — product images only on full runs
+        $paths = config('backup.paths', []);
+        if ($isFull) {
+            $productPath = config('backup.product_images_path', 'storage/app/public/products');
+            if ($productPath && ! in_array($productPath, $paths, true)) {
+                $paths[] = $productPath;
+            }
+        }
 
+        $typeLabel = $isFull ? 'FULL (with product images)' : 'daily';
+        Log::info('[Backup] Started', ['file' => $backupName, 'type' => $typeLabel]);
+        $this->info("Backup started [{$typeLabel}]: {$backupName}");
+
+        // ── Pre-flight: delete stale .part files left by aborted runs ────────
+        $partsDeleted = $this->purgeStalePartials($backupsDir);
+        if ($partsDeleted > 0) {
+            $this->line("  Removed {$partsDeleted} stale .part file(s) from previous failed run(s).");
+        }
+
+        // ── Pre-flight: prune BEFORE creating to reclaim space first ──────────
+        $pruned = $this->pruneOldBackups($backupsDir);
+        if ($pruned > 0) {
+            $this->line("  Pruned {$pruned} old backup(s) before creating new archive.");
+        }
+
+        // ── Pre-flight: disk space check ──────────────────────────────────────
+        try {
+            $this->checkDiskSpace($backupsDir, $paths);
+        } catch (\RuntimeException $e) {
+            $this->error($e->getMessage());
+            Log::error('[Backup] Aborted — insufficient disk space', ['error' => $e->getMessage()]);
+            return self::FAILURE;
+        }
+
+        // Write to a .part file while in progress; rename to .zip only on success.
+        // Any crash leaves a .part file that purgeStalePartials() cleans next run.
+        $partPath = $backupPath . '.part';
         $tmpFiles = [];
 
         try {
@@ -47,15 +84,15 @@ class BackupOkelcor extends Command
             $dumpMb = round(filesize($dumpFile) / 1048576, 2);
             $this->line("  <fg=green>✓</> Database dumped ({$dumpMb} MB)");
 
-            // ── 2. Build ZIP ─────────────────────────────────────────────────
+            // ── 2. Build ZIP (written to .part until complete) ───────────────
             $zip = new ZipArchive();
-            if ($zip->open($backupPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
-                throw new \RuntimeException("Cannot create ZIP archive: {$backupPath}");
+            if ($zip->open($partPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+                throw new \RuntimeException("Cannot create ZIP archive: {$partPath}");
             }
 
             $zip->addFile($dumpFile, 'database.sql');
 
-            foreach (config('backup.paths', []) as $relativePath) {
+            foreach ($paths as $relativePath) {
                 $absolutePath = base_path($relativePath);
 
                 if (! is_dir($absolutePath)) {
@@ -69,13 +106,16 @@ class BackupOkelcor extends Command
 
             $zip->close();
 
-            // ── 3. Retention ─────────────────────────────────────────────────
-            $pruned = $this->applyRetention($backupsDir, $backupPath);
+            // Atomic rename: .part → .zip only after successful close
+            if (! rename($partPath, $backupPath)) {
+                throw new \RuntimeException("Failed to finalise archive: could not rename .part to .zip");
+            }
 
             $sizeMb = round(filesize($backupPath) / 1048576, 2);
 
             Log::info('[Backup] Completed', [
                 'file'    => $backupName,
+                'type'    => $typeLabel,
                 'size_mb' => $sizeMb,
                 'pruned'  => $pruned,
             ]);
@@ -85,20 +125,21 @@ class BackupOkelcor extends Command
             $this->line("  File:    {$backupName}");
             $this->line("  Size:    {$sizeMb} MB");
             $this->line("  Path:    {$backupPath}");
-            if ($pruned > 0) {
-                $this->line("  Pruned:  {$pruned} old backup(s) removed");
-            }
 
             return self::SUCCESS;
 
         } catch (\Throwable $e) {
-            // Clean up partial archive so a corrupted file is never left behind
+            // Clean up the in-progress .part file on failure
+            if (file_exists($partPath)) {
+                @unlink($partPath);
+            }
             if (file_exists($backupPath)) {
                 @unlink($backupPath);
             }
 
             Log::error('[Backup] Failed', [
                 'file'  => $backupName,
+                'type'  => $typeLabel,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
@@ -107,7 +148,6 @@ class BackupOkelcor extends Command
             return self::FAILURE;
 
         } finally {
-            // Always clean temp files
             foreach ($tmpFiles as $f) {
                 @unlink($f);
             }
@@ -115,6 +155,105 @@ class BackupOkelcor extends Command
                 @rmdir($tmpDir);
             }
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Disk space
+    // -------------------------------------------------------------------------
+
+    private function checkDiskSpace(string $backupsDir, array $paths): void
+    {
+        $freeBytes = disk_free_space($backupsDir);
+        if ($freeBytes === false) {
+            return; // can't determine — proceed and let ZipArchive fail naturally
+        }
+
+        $estimatedBytes = 0;
+        foreach ($paths as $relativePath) {
+            $absolutePath = base_path($relativePath);
+            if (is_dir($absolutePath)) {
+                $estimatedBytes += $this->dirSizeBytes($absolutePath);
+            }
+        }
+
+        $freeMb      = round($freeBytes / 1048576, 1);
+        $estimatedMb = round($estimatedBytes / 1048576, 1);
+
+        if ($freeBytes < $estimatedBytes) {
+            throw new \RuntimeException(
+                "Insufficient disk space: {$freeMb} MB free, ~{$estimatedMb} MB estimated for this backup. " .
+                "Reduce BACKUP_RETENTION_DAYS or run backup:okelcor --full off-server."
+            );
+        }
+
+        if ($freeBytes < $estimatedBytes * 1.5) {
+            $this->warn("  ⚠ Disk space is tight: {$freeMb} MB free, ~{$estimatedMb} MB estimated. Proceeding.");
+        }
+    }
+
+    private function dirSizeBytes(string $dir): int
+    {
+        try {
+            $size = 0;
+            $iter = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS)
+            );
+            foreach ($iter as $file) {
+                if ($file->isFile()) {
+                    $size += $file->getSize();
+                }
+            }
+            return $size;
+        } catch (\Throwable) {
+            return 0;
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Retention — runs BEFORE the new archive is created
+    // -------------------------------------------------------------------------
+
+    private function pruneOldBackups(string $backupsDir): int
+    {
+        $retentionDays = (int) config('backup.retention_days', 2);
+        $cutoff        = now()->subDays($retentionDays)->timestamp;
+        $pruned        = 0;
+
+        $files = glob($backupsDir . DIRECTORY_SEPARATOR . 'okelcor-backup-*.zip') ?: [];
+
+        foreach ($files as $file) {
+            if (filemtime($file) < $cutoff) {
+                if (@unlink($file)) {
+                    $pruned++;
+                    Log::info('[Backup] Pruned', ['file' => basename($file)]);
+                }
+            }
+        }
+
+        return $pruned;
+    }
+
+    // -------------------------------------------------------------------------
+    // Stale partial cleanup
+    // -------------------------------------------------------------------------
+
+    private function purgeStalePartials(string $backupsDir): int
+    {
+        $cutoff  = time() - 3600; // older than 1 hour
+        $removed = 0;
+
+        $parts = glob($backupsDir . DIRECTORY_SEPARATOR . 'okelcor-backup-*.zip.part') ?: [];
+
+        foreach ($parts as $part) {
+            if (filemtime($part) < $cutoff) {
+                if (@unlink($part)) {
+                    $removed++;
+                    Log::warning('[Backup] Removed stale partial file', ['file' => basename($part)]);
+                }
+            }
+        }
+
+        return $removed;
     }
 
     // -------------------------------------------------------------------------
@@ -206,35 +345,6 @@ class BackupOkelcor extends Command
 
             $zip->addFile($file->getRealPath(), $entryName);
         }
-    }
-
-    // -------------------------------------------------------------------------
-    // Retention
-    // -------------------------------------------------------------------------
-
-    private function applyRetention(string $backupsDir, string $justCreated): int
-    {
-        $retentionDays = (int) config('backup.retention_days', 14);
-        $cutoff        = now()->subDays($retentionDays)->timestamp;
-        $pruned        = 0;
-
-        $files = glob($backupsDir . DIRECTORY_SEPARATOR . 'okelcor-backup-*.zip') ?: [];
-
-        foreach ($files as $file) {
-            // Never delete the archive we just created
-            if (realpath($file) === realpath($justCreated)) {
-                continue;
-            }
-
-            if (filemtime($file) < $cutoff) {
-                if (@unlink($file)) {
-                    $pruned++;
-                    Log::info('[Backup] Pruned', ['file' => basename($file)]);
-                }
-            }
-        }
-
-        return $pruned;
     }
 
     // -------------------------------------------------------------------------

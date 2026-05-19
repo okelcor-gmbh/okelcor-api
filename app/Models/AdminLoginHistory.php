@@ -8,6 +8,8 @@ use Illuminate\Http\Request;
 
 class AdminLoginHistory extends Model
 {
+    protected $table = 'admin_login_histories';
+
     public $timestamps = false;
 
     protected $fillable = [

@@ -20,10 +20,16 @@ class BackupStatus extends Command
         $this->line(str_repeat('─', 56));
 
         // Config summary
-        $enabled   = config('backup.enabled') ? '<fg=green>yes</>' : '<fg=yellow>no (BACKUP_ENABLED=false)</>';
-        $retention = config('backup.retention_days', 14);
-        $this->line("Backup enabled:     {$enabled}");
-        $this->line("Retention policy:   keep last {$retention} days");
+        $enabled        = config('backup.enabled') ? '<fg=green>yes</>' : '<fg=yellow>no (BACKUP_ENABLED=false)</>';
+        $retention      = config('backup.retention_days', 2);
+        $includeImages  = config('backup.include_product_images', false);
+        $imageLabel     = $includeImages
+            ? '<fg=yellow>yes (BACKUP_INCLUDE_PRODUCT_IMAGES=true — high disk usage)</>'
+            : '<fg=green>no — excluded from daily (use --full for manual run)</>';
+
+        $this->line("Backup enabled:        {$enabled}");
+        $this->line("Retention policy:      keep last {$retention} days");
+        $this->line("Product images:        {$imageLabel}");
         $this->newLine();
 
         if (! is_dir($backupsDir)) {
@@ -35,10 +41,22 @@ class BackupStatus extends Command
         }
 
         $files = glob($backupsDir . DIRECTORY_SEPARATOR . 'okelcor-backup-*.zip') ?: [];
+        $parts = glob($backupsDir . DIRECTORY_SEPARATOR . 'okelcor-backup-*.zip.part') ?: [];
+        $stalePartCount = count(array_filter($parts, fn ($f) => filemtime($f) < time() - 3600));
+
+        // Backup directory total size (all files, including .part)
+        $dirTotalBytes = 0;
+        foreach (array_merge($files, $parts) as $f) {
+            $dirTotalBytes += filesize($f) ?: 0;
+        }
+        $dirTotalMb = round($dirTotalBytes / 1048576, 2);
 
         if (empty($files)) {
             $this->warn('No backup archives found in: ' . $backupsDir);
             $this->line('  Run: php artisan backup:okelcor');
+            if ($stalePartCount > 0) {
+                $this->warn("  {$stalePartCount} stale .part file(s) found — will be cleaned on next run.");
+            }
             $this->newLine();
             return self::SUCCESS;
         }
@@ -52,36 +70,55 @@ class BackupStatus extends Command
         $count     = count($files);
         $freeBytes = disk_free_space($backupsDir);
         $freeMb    = $freeBytes !== false ? round($freeBytes / 1048576, 2) : null;
+        $isFull    = str_contains(basename($latest), '-full-');
 
         $this->line('Last backup');
         $this->line("  Time:   {$lastTime->toDateTimeString()} ({$lastTime->diffForHumans()})");
         $this->line("  File:   " . basename($latest));
         $this->line("  Size:   {$sizeMb} MB");
+        $this->line("  Type:   " . ($isFull ? 'full (product images included)' : 'daily (product images excluded)'));
         $this->line("  Path:   {$latest}");
         $this->newLine();
 
-        $this->line("Stored backups:     {$count}");
+        $this->line("Stored backups:        {$count}");
 
-        if ($freeMb !== null) {
-            $freeLabel = $freeMb < 100
-                ? "<fg=yellow>{$freeMb} MB (low)</>‌"
-                : "{$freeMb} MB";
-            $this->line("Free disk space:    {$freeLabel}");
+        $dirLabel = $dirTotalMb > 2000
+            ? "<fg=yellow>{$dirTotalMb} MB (backup directory is large)</>"
+            : "{$dirTotalMb} MB";
+        $this->line("Backup directory size: {$dirLabel}");
+
+        if ($stalePartCount > 0) {
+            $this->line("Stale .part files:     <fg=yellow>{$stalePartCount} (will be cleaned on next backup run)</>");
+        } else {
+            $this->line("Stale .part files:     <fg=green>none</>");
         }
 
+        if ($freeMb !== null) {
+            $freeLabel = $freeMb < 500
+                ? "<fg=yellow>{$freeMb} MB (low — daily backup may fail)</>"
+                : "{$freeMb} MB";
+            $this->line("Free disk space:       {$freeLabel}");
+        }
+
+        $this->newLine();
+        $this->line('<fg=cyan>Tip:</> Monthly full backup (includes product images):');
+        $this->line('  php artisan backup:okelcor --full');
+        $this->line('  Then download the archive off-server and delete it locally.');
         $this->newLine();
 
         // Full listing table
         $rows = array_map(function (string $f): array {
             $mtime = filemtime($f);
+            $type  = str_contains(basename($f), '-full-') ? 'full' : 'daily';
             return [
                 basename($f),
                 round(filesize($f) / 1048576, 2) . ' MB',
+                $type,
                 Carbon::createFromTimestamp($mtime)->toDateTimeString(),
             ];
         }, $files);
 
-        $this->table(['Filename', 'Size', 'Created At'], $rows);
+        $this->table(['Filename', 'Size', 'Type', 'Created At'], $rows);
 
         return self::SUCCESS;
     }

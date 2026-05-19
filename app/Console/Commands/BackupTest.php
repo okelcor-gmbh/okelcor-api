@@ -80,33 +80,65 @@ class BackupTest extends Command
             $failures++;
         }
 
-        // ── 7. Storage paths ──────────────────────────────────────────────────
+        // ── 7. Daily backup paths + estimated size ────────────────────────────
         $this->newLine();
-        $this->line('Storage paths:');
+        $this->line('Daily backup paths (product images excluded):');
 
-        foreach (config('backup.paths', []) as $relativePath) {
+        $dailyPaths      = config('backup.paths', []);
+        $estimatedBytes  = 0;
+
+        foreach ($dailyPaths as $relativePath) {
             $absolutePath = base_path($relativePath);
 
             if (is_dir($absolutePath)) {
-                $sizeMb = $this->dirSizeMb($absolutePath);
-                $label  = $sizeMb !== null ? " ({$sizeMb} MB)" : '';
-                $this->line("  <fg=green>✓</> Exists{$label}: {$relativePath}");
+                $bytes  = $this->dirSizeBytes($absolutePath);
+                $sizeMb = round($bytes / 1048576, 2);
+                $estimatedBytes += $bytes;
+                $this->line("  <fg=green>✓</> {$sizeMb} MB  {$relativePath}");
             } else {
                 $this->line("  <fg=yellow>⚠</> Not found (will be skipped): {$relativePath}");
             }
         }
 
-        // ── 8. Disk space warning ─────────────────────────────────────────────
+        $estimatedMb = round($estimatedBytes / 1048576, 2);
+        $this->line("  ─────────────────────────────────────────────");
+        $this->line("  Estimated daily archive size: ~{$estimatedMb} MB (+ database dump)");
+
+        // Product images (excluded from daily — informational only)
+        $productPath     = config('backup.product_images_path', 'storage/app/public/products');
+        $absoluteProduct = base_path($productPath);
+        if (is_dir($absoluteProduct)) {
+            $productMb = round($this->dirSizeBytes($absoluteProduct) / 1048576, 2);
+            $this->line("  <fg=yellow>⚠</> Product images excluded from daily: {$productMb} MB  ({$productPath})");
+            $this->line("      Including them would make every backup ~{$productMb} MB larger.");
+            $this->line("      Full backup is monthly / manual / off-server only:");
+            $this->line("        php artisan backup:okelcor --full");
+            $this->line("        # Download archive, then delete it locally before next daily run.");
+        }
+
+        // ── 8. Disk space vs estimated size ───────────────────────────────────
         $this->newLine();
         $freeBytes = disk_free_space(storage_path('app'));
 
         if ($freeBytes !== false) {
             $freeMb = round($freeBytes / 1048576, 2);
 
-            if ($freeMb < 100) {
+            if ($freeBytes < $estimatedBytes) {
+                $this->error(
+                    "✗ Insufficient disk space: {$freeMb} MB free, ~{$estimatedMb} MB estimated for daily backup. " .
+                    "Reduce BACKUP_RETENTION_DAYS or free disk space before running."
+                );
+                $failures++;
+            } elseif ($freeBytes < $estimatedBytes * 1.5) {
+                $this->warn(
+                    "⚠ Disk space is tight: {$freeMb} MB free, ~{$estimatedMb} MB estimated. " .
+                    "Backup may succeed but consider reducing retention (current: " .
+                    config('backup.retention_days', 2) . " days)."
+                );
+            } elseif ($freeMb < 100) {
                 $this->warn("⚠ Low disk space: {$freeMb} MB free — ensure enough space for archive creation.");
             } else {
-                $this->line("<fg=green>✓</> Disk space: {$freeMb} MB free");
+                $this->line("<fg=green>✓</> Disk space: {$freeMb} MB free (~{$estimatedMb} MB estimated for daily backup)");
             }
         }
 
@@ -154,7 +186,7 @@ class BackupTest extends Command
         return null;
     }
 
-    private function dirSizeMb(string $dir): ?float
+    private function dirSizeBytes(string $dir): int
     {
         try {
             $size = 0;
@@ -166,9 +198,9 @@ class BackupTest extends Command
                     $size += $file->getSize();
                 }
             }
-            return round($size / 1048576, 2);
+            return $size;
         } catch (\Throwable) {
-            return null;
+            return 0;
         }
     }
 }
