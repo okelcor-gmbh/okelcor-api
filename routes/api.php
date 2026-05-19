@@ -53,6 +53,7 @@ use App\Http\Controllers\Admin\AdminLoginTwoFactorController;
 use App\Http\Controllers\Admin\SystemHealthController;
 use App\Http\Controllers\EuDeclarationController;
 use App\Http\Controllers\TradeDocumentController;
+use App\Http\Controllers\DocumentVerificationController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
@@ -159,6 +160,11 @@ Route::prefix('v1')->group(function () {
     // VAT validation — rate limited: 10/min
     Route::middleware('throttle:vat')->group(function () {
         Route::post('vat/validate', [VatController::class, 'validate']);
+    });
+
+    // Document verification — public, rate limited: 30/min
+    Route::middleware('throttle:search')->group(function () {
+        Route::get('documents/verify/{number}', [DocumentVerificationController::class, 'verify']);
     });
 
     // Payments — rate limited: 20/min
@@ -418,6 +424,7 @@ Route::prefix('v1')->group(function () {
             Route::post('orders/{orderId}/trade-documents/{documentId}/supersede', [AdminTradeDocumentController::class, 'supersede']);
             Route::get('trade-documents/{id}/download', [AdminTradeDocumentController::class, 'download']);
             Route::post('trade-documents/{id}/send-email', [AdminTradeDocumentController::class, 'sendEmail']);
+            Route::post('trade-documents/{id}/void', [AdminTradeDocumentController::class, 'void']);
             Route::delete('trade-documents/{id}', [AdminTradeDocumentController::class, 'destroy']);
         });
 

@@ -409,8 +409,8 @@ class AdminTradeDocumentController extends Controller
             ], 500);
         }
 
-        // Stamp sent_at
-        $document->update(['sent_at' => now()]);
+        // Advance lifecycle: issued → sent
+        $document->update(['status' => 'sent', 'sent_at' => now()]);
 
         // Audit log — wrapped so it never blocks the 200 response
         try {
@@ -471,9 +471,9 @@ class AdminTradeDocumentController extends Controller
             ], 422);
         }
 
-        if ($document->status !== 'issued') {
+        if (! in_array($document->status, ['issued', 'sent'], true)) {
             return response()->json([
-                'message' => "Document is already '{$document->status}' and cannot be superseded again.",
+                'message' => "Document is already '{$document->status}' and cannot be superseded.",
             ], 422);
         }
 
@@ -509,6 +509,64 @@ class AdminTradeDocumentController extends Controller
         return response()->json([
             'data'    => $this->formatDocument($document->refresh()),
             'message' => "Document {$document->number} marked as superseded. You can now regenerate a corrected document.",
+        ]);
+    }
+
+    /**
+     * POST /api/v1/admin/trade-documents/{id}/void
+     *
+     * Mark a generated document as void (cancelled, invalid, not superseded by another).
+     * Only issued/sent generated documents may be voided.
+     */
+    public function void(Request $request, int $id): JsonResponse
+    {
+        $document = TradeDocument::findOrFail($id);
+        $admin    = $request->user();
+
+        $request->validate([
+            'reason' => ['required', 'string', 'min:5', 'max:1000'],
+        ]);
+
+        $voidable = ['order_confirmation', 'proforma', 'commercial_invoice', 'packing_list', 'delivery_note'];
+
+        if (! in_array($document->type, $voidable, true)) {
+            return response()->json([
+                'message' => 'Only generated documents can be voided.',
+            ], 422);
+        }
+
+        if (! in_array($document->status, ['issued', 'sent'], true)) {
+            return response()->json([
+                'message' => "Document is already '{$document->status}' and cannot be voided.",
+            ], 422);
+        }
+
+        $document->update(['status' => 'void']);
+
+        try {
+            OrderLog::create([
+                'order_id'         => $document->order_id,
+                'order_ref'        => $document->order_ref,
+                'admin_user_id'    => $admin?->id,
+                'admin_user_email' => $admin?->email,
+                'action'           => 'document_voided',
+                'old_value'        => $document->number,
+                'new_value'        => 'void',
+                'notes'            => 'Document voided: ' . ($document->number ?? $document->type)
+                    . '. Reason: ' . $request->input('reason'),
+                'ip_address'       => $request->ip(),
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('OrderLog write failed (document void)', [
+                'order_ref'   => $document->order_ref,
+                'document_id' => $document->id,
+                'error'       => $e->getMessage(),
+            ]);
+        }
+
+        return response()->json([
+            'data'    => $this->formatDocument($document->refresh()),
+            'message' => "Document {$document->number} has been voided.",
         ]);
     }
 

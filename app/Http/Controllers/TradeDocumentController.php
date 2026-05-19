@@ -14,8 +14,8 @@ class TradeDocumentController extends Controller
     /**
      * GET /api/v1/auth/orders/{ref}/trade-documents
      *
-     * List issued trade documents for a customer's order.
-     * Only status=issued documents are exposed; uploads are excluded.
+     * List valid trade documents for a customer's order.
+     * Only status=issued|sent documents are exposed (superseded/void/draft are excluded).
      */
     public function index(Request $request, string $ref): JsonResponse
     {
@@ -28,7 +28,7 @@ class TradeDocumentController extends Controller
         }
 
         $documents = TradeDocument::where('order_id', $order->id)
-            ->where('status', 'issued')
+            ->whereIn('status', ['issued', 'sent'])
             ->whereIn('type', ['order_confirmation', 'proforma', 'commercial_invoice', 'packing_list', 'delivery_note', 'shipment_document'])
             ->orderByDesc('issued_at')
             ->get();
@@ -70,7 +70,7 @@ class TradeDocumentController extends Controller
             return response()->json(['message' => 'Document not found.'], 404);
         }
 
-        if ($document->status !== 'issued') {
+        if (! in_array($document->status, ['issued', 'sent'], true)) {
             return response()->json(['message' => 'This document is not available for download.'], 404);
         }
 

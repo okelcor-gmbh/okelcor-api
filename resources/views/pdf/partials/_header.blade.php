@@ -33,7 +33,7 @@ if (config('company.qr_enabled', true)) {
     $_docNum = isset($document) && $document
         ? $document->number
         : (isset($invoice) ? $invoice->invoice_number : '');
-    $_qrText = 'OKELCOR | ' . $_docNum . ' | Order ' . ($order->ref ?? '') . ' | okelcor.com';
+    $_qrText = 'https://www.okelcor.com/documents/verify/' . $_docNum;
 
     try {
         $_renderer = new \BaconQrCode\Renderer\ImageRenderer(
