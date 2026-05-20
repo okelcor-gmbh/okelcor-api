@@ -46,6 +46,7 @@ use App\Http\Controllers\Admin\AdminFetEngineController;
 use App\Http\Controllers\Admin\AdminPromotionController;
 use App\Http\Controllers\Admin\AdminDashboardController;
 use App\Http\Controllers\Admin\AdminEuDeclarationController;
+use App\Http\Controllers\Admin\AdminOrderFinancialsController;
 use App\Http\Controllers\Admin\AdminTradeDocumentController;
 use App\Http\Controllers\Admin\AdminLogisticsController;
 use App\Http\Controllers\Admin\AdminTwoFactorController;
@@ -363,9 +364,16 @@ Route::prefix('v1')->group(function () {
             Route::put('orders/{id}', [AdminOrderController::class, 'update']);
             Route::patch('orders/{id}/status', [AdminOrderController::class, 'updateStatus']);
             Route::patch('orders/{id}/financials', [AdminOrderController::class, 'patchFinancials']);
+            Route::post('orders/{id}/financials/revision-request', [AdminOrderFinancialsController::class, 'requestRevision']);
             Route::post('orders/{id}/shipment-events', [AdminOrderShipmentEventController::class, 'store']);
             Route::put('orders/{id}/shipment-events/{event}', [AdminOrderShipmentEventController::class, 'update']);
             Route::delete('orders/{id}/shipment-events/{event}', [AdminOrderShipmentEventController::class, 'destroy']);
+        });
+
+        // Financial revision approval — orders.approve_financial_revision (super_admin, admin)
+        Route::middleware('permission:orders.approve_financial_revision')->group(function () {
+            Route::post('orders/{id}/financials/approve-revision', [AdminOrderFinancialsController::class, 'approveRevision']);
+            Route::post('orders/{id}/financials/reject-revision', [AdminOrderFinancialsController::class, 'rejectRevision']);
         });
 
         // Delete — orders.delete (super_admin only)

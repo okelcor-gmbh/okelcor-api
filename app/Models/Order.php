@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
@@ -43,6 +44,14 @@ class Order extends Model
         'tracking_status',
         'estimated_delivery',
         'eta',
+        'financials_locked_at',
+        'financials_locked_by',
+        'financials_lock_reason',
+        'financials_revision_required',
+        'financials_revision_reason',
+        'financials_revision_requested_by',
+        'financials_revision_requested_at',
+        'financials_revision_changes',
     ];
 
     protected $hidden = [
@@ -50,33 +59,42 @@ class Order extends Model
     ];
 
     protected $casts = [
-        'subtotal'          => 'decimal:2',
-        'delivery_cost'     => 'decimal:2',
-        'discount_amount'   => 'decimal:2',
-        'total'             => 'decimal:2',
-        'tax_rate'          => 'decimal:2',
-        'tax_amount'        => 'decimal:2',
-        'is_reverse_charge' => 'boolean',
+        'subtotal'                          => 'decimal:2',
+        'delivery_cost'                     => 'decimal:2',
+        'discount_amount'                   => 'decimal:2',
+        'total'                             => 'decimal:2',
+        'tax_rate'                          => 'decimal:2',
+        'tax_amount'                        => 'decimal:2',
+        'is_reverse_charge'                 => 'boolean',
+        'financials_locked_at'              => 'datetime',
+        'financials_revision_required'      => 'boolean',
+        'financials_revision_requested_at'  => 'datetime',
+        'financials_revision_changes'       => 'array',
     ];
 
-    public function items()
+    public function isFinancialsLocked(): bool
+    {
+        return $this->financials_locked_at !== null;
+    }
+
+    public function items(): HasMany
     {
         return $this->hasMany(OrderItem::class);
     }
 
-    public function logs()
+    public function logs(): HasMany
     {
         return $this->hasMany(OrderLog::class)->orderBy('created_at');
     }
 
-    public function shipmentEvents()
+    public function shipmentEvents(): HasMany
     {
         return $this->hasMany(OrderShipmentEvent::class)
             ->orderBy('event_date')
             ->orderBy('created_at');
     }
 
-    public function quoteRequest()
+    public function quoteRequest(): HasOne
     {
         return $this->hasOne(QuoteRequest::class);
     }
@@ -89,5 +107,15 @@ class Order extends Model
     public function tradeDocuments(): HasMany
     {
         return $this->hasMany(TradeDocument::class)->orderByDesc('created_at');
+    }
+
+    public function financialsLockedBy(): BelongsTo
+    {
+        return $this->belongsTo(AdminUser::class, 'financials_locked_by');
+    }
+
+    public function financialsRevisionRequestedBy(): BelongsTo
+    {
+        return $this->belongsTo(AdminUser::class, 'financials_revision_requested_by');
     }
 }

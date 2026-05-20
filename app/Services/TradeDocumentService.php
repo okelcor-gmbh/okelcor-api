@@ -83,6 +83,9 @@ class TradeDocumentService
             ]);
         }
 
+        // Lock financials — prevents direct fee/price edits once AB is issued
+        $this->lockOrderFinancials($order, $admin, 'Order Confirmation issued');
+
         Log::info('Order confirmation generated', [
             'number'    => $document->number,
             'order_ref' => $order->ref,
@@ -144,6 +147,9 @@ class TradeDocumentService
                 'error'       => $e->getMessage(),
             ]);
         }
+
+        // Strengthen lock — proforma is a stronger financial commitment than AB
+        $this->lockOrderFinancials($order, $admin, 'Proforma Invoice issued');
 
         Log::info('Proforma invoice generated', [
             'number'    => $document->number,
@@ -345,6 +351,28 @@ class TradeDocumentService
     }
 
     // -------------------------------------------------------------------------
+
+    /**
+     * Lock or strengthen the financial lock on an order.
+     * Always updates the reason (PI overwrites AB reason). Preserves original
+     * locked_at timestamp so audit trail shows when the first lock occurred.
+     */
+    private function lockOrderFinancials(Order $order, ?AdminUser $admin, string $reason): void
+    {
+        try {
+            $order->update([
+                'financials_locked_at'   => $order->financials_locked_at ?? now(),
+                'financials_locked_by'   => $admin?->id,
+                'financials_lock_reason' => $reason,
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('Failed to lock order financials', [
+                'order_ref' => $order->ref,
+                'reason'    => $reason,
+                'error'     => $e->getMessage(),
+            ]);
+        }
+    }
 
     /** Must be called inside an active DB transaction. */
     private function sequentialNumber(string $type): string

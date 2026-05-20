@@ -37,7 +37,8 @@ class AdminPermissions
         'orders.update'           => ['super_admin', 'admin', 'order_manager'],
         'orders.delete'           => ['super_admin'],
         'orders.import'           => ['super_admin', 'admin', 'order_manager'],
-        'orders.export'           => ['super_admin', 'admin', 'order_manager', 'sales_manager'],
+        'orders.export'                     => ['super_admin', 'admin', 'order_manager', 'sales_manager'],
+        'orders.approve_financial_revision' => ['super_admin', 'admin'],
 
         // ── Payments ──────────────────────────────────────────────────────
         'payments.mark_paid'      => ['super_admin', 'admin', 'order_manager'],

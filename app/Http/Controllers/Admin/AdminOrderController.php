@@ -282,7 +282,16 @@ class AdminOrderController extends Controller
             'reason'       => ['required', 'string', 'min:5', 'max:1000'],
         ]);
 
-        $order          = Order::findOrFail($id);
+        $order = Order::findOrFail($id);
+
+        if ($order->isFinancialsLocked()) {
+            return response()->json([
+                'message'           => 'Order financials are locked because a commercial document has been issued. Use the revision request workflow.',
+                'code'              => 'financials_locked',
+                'requires_supersede' => true,
+            ], 423);
+        }
+
         $oldDeliveryCost = (float) $order->delivery_cost;
         $oldTotal        = (float) $order->total;
         $newDeliveryCost = (float) $request->input('delivery_fee');
@@ -446,6 +455,15 @@ class AdminOrderController extends Controller
                     'created_at'       => $l->created_at?->toIso8601String(),
                 ])->values()
                 : [],
+
+            // Financial lock
+            'financials_locked'                    => $o->isFinancialsLocked(),
+            'financials_locked_at'                 => $o->financials_locked_at?->toIso8601String(),
+            'financials_lock_reason'               => $o->financials_lock_reason,
+            'financials_revision_required'         => (bool) $o->financials_revision_required,
+            'financials_revision_reason'           => $o->financials_revision_reason,
+            'financials_revision_requested_at'     => $o->financials_revision_requested_at?->toIso8601String(),
+            'financials_revision_changes'          => $o->financials_revision_changes,
 
             // EU entry certificate
             'declaration_required'  => $o->is_reverse_charge === true,
