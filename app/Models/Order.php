@@ -52,6 +52,13 @@ class Order extends Model
         'financials_revision_requested_by',
         'financials_revision_requested_at',
         'financials_revision_changes',
+        'customer_acceptance_status',
+        'customer_accepted_at',
+        'customer_accepted_ip',
+        'customer_accepted_user_agent',
+        'customer_acceptance_note',
+        'acceptance_token',
+        'acceptance_token_expires_at',
     ];
 
     protected $hidden = [
@@ -70,6 +77,8 @@ class Order extends Model
         'financials_revision_required'      => 'boolean',
         'financials_revision_requested_at'  => 'datetime',
         'financials_revision_changes'       => 'array',
+        'customer_accepted_at'              => 'datetime',
+        'acceptance_token_expires_at'       => 'datetime',
     ];
 
     public function isFinancialsLocked(): bool

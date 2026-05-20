@@ -486,12 +486,14 @@ class CustomerAuthController extends Controller
                 'quantity'        => $q->quantity,
                 'notes'           => $q->notes,
                 // Linked order — all null until admin converts the quote
+                'customer_acceptance_status' => $q->customer_acceptance_status ?? 'pending',
                 'order_id'        => $q->order_id,
                 'order_ref'       => $q->order?->ref,
                 'order_total'     => $q->order ? (float) $q->order->total : null,
                 'payment_method'  => $q->order?->payment_method,
                 'payment_status'  => $q->order?->payment_status,
                 'order_status'    => $q->order?->status,
+                'order_acceptance_status' => $q->order?->customer_acceptance_status ?? null,
             ]);
 
         return response()->json(['data' => $quotes]);
@@ -557,10 +559,15 @@ class CustomerAuthController extends Controller
                 'attachment_url'       => $quote->attachment_path
                     ? url(Storage::url($quote->attachment_path))
                     : null,
+                // Customer acceptance status on the proposal itself
+                'customer_acceptance_status' => $quote->customer_acceptance_status ?? 'pending',
+                'customer_accepted_at'       => $quote->customer_accepted_at?->toIso8601String(),
+
                 // Linked order — all null until admin converts the quote
                 'order_id'             => $quote->order_id,
                 'order_ref'            => $order?->ref,
                 'order_status'         => $order?->status,
+                'order_acceptance_status' => $order?->customer_acceptance_status ?? null,
                 'payment_method'       => $order?->payment_method,
                 'payment_status'       => $order?->payment_status,
                 'subtotal'             => $order ? (float) $order->subtotal : null,

@@ -72,6 +72,33 @@ class AdminTradeDocumentController extends Controller
         $order = Order::with('items')->findOrFail($id);
         $admin = $request->user();
 
+        // Gate: require customer acceptance unless super_admin overrides explicitly
+        if ($order->customer_acceptance_status !== 'accepted') {
+            $isOverride = $request->boolean('override_acceptance') && $admin?->role === 'super_admin';
+
+            if (! $isOverride) {
+                try {
+                    OrderLog::create([
+                        'order_id'         => $order->id,
+                        'order_ref'        => $order->ref,
+                        'admin_user_id'    => $admin?->id,
+                        'admin_user_email' => $admin?->email,
+                        'action'           => 'proforma_generation_blocked_no_acceptance',
+                        'notes'            => 'Proforma blocked: customer_acceptance_status=' . $order->customer_acceptance_status,
+                        'ip_address'       => $request->ip(),
+                    ]);
+                } catch (\Throwable $e) {
+                    Log::warning('OrderLog write failed (proforma blocked)', ['order_ref' => $order->ref]);
+                }
+
+                return response()->json([
+                    'message'  => 'Customer acceptance is required before generating a proforma invoice.',
+                    'code'     => 'customer_acceptance_required',
+                    'status'   => $order->customer_acceptance_status,
+                ], 409);
+            }
+        }
+
         $document = $this->service->generateProformaForOrder($order, $admin);
 
         if ($document->wasRecentlyCreated) {
@@ -509,6 +536,58 @@ class AdminTradeDocumentController extends Controller
         return response()->json([
             'data'    => $this->formatDocument($document->refresh()),
             'message' => "Document {$document->number} marked as superseded. You can now regenerate a corrected document.",
+        ]);
+    }
+
+    /**
+     * POST /api/v1/admin/orders/{id}/generate-acceptance-link
+     *
+     * Generate a secure 64-char token and return a frontend URL the customer can use
+     * to accept/reject the order confirmation without needing an account.
+     * Token expires in 7 days. Calling again rotates the token.
+     */
+    public function generateAcceptanceLink(Request $request, int $id): JsonResponse
+    {
+        $order = Order::findOrFail($id);
+
+        if ($order->customer_acceptance_status === 'accepted') {
+            return response()->json([
+                'message' => 'Customer has already accepted this order confirmation.',
+            ], 409);
+        }
+
+        $token   = bin2hex(random_bytes(32)); // 64 hex chars
+        $expires = now()->addDays(7);
+
+        $order->update([
+            'acceptance_token'            => $token,
+            'acceptance_token_expires_at' => $expires,
+        ]);
+
+        $frontendUrl = rtrim(config('app.frontend_url', 'https://okelcor.com'), '/');
+        $acceptUrl   = $frontendUrl . '/orders/' . $order->ref . '/accept-confirmation?token=' . $token;
+
+        try {
+            OrderLog::create([
+                'order_id'         => $order->id,
+                'order_ref'        => $order->ref,
+                'admin_user_id'    => $request->user()?->id,
+                'admin_user_email' => $request->user()?->email,
+                'action'           => 'acceptance_link_generated',
+                'notes'            => 'Acceptance link generated. Expires: ' . $expires->toDateString(),
+                'ip_address'       => $request->ip(),
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('OrderLog write failed (acceptance link generation)', ['order_ref' => $order->ref]);
+        }
+
+        return response()->json([
+            'data' => [
+                'accept_url'  => $acceptUrl,
+                'expires_at'  => $expires->toIso8601String(),
+                'order_ref'   => $order->ref,
+            ],
+            'message' => 'Acceptance link generated. Share this with the customer to collect their response.',
         ]);
     }
 

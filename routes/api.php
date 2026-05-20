@@ -55,6 +55,7 @@ use App\Http\Controllers\Admin\SystemHealthController;
 use App\Http\Controllers\EuDeclarationController;
 use App\Http\Controllers\TradeDocumentController;
 use App\Http\Controllers\DocumentVerificationController;
+use App\Http\Controllers\CustomerQuoteAcceptanceController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
@@ -93,6 +94,11 @@ Route::prefix('v1')->group(function () {
         Route::get('quotes', [CustomerAuthController::class, 'quotes']);
         Route::get('quotes/{ref}', [CustomerAuthController::class, 'quoteDetail']);
         Route::get('invoices', [CustomerAuthController::class, 'invoices']);
+
+        // Quote / Order Confirmation acceptance (authenticated customer)
+        Route::post('quotes/{id}/accept', [CustomerQuoteAcceptanceController::class, 'acceptQuote']);
+        Route::post('quotes/{id}/reject', [CustomerQuoteAcceptanceController::class, 'rejectQuote']);
+        Route::post('orders/{ref}/accept-order-confirmation', [CustomerQuoteAcceptanceController::class, 'acceptOrderConfirmation']);
 
         // Addresses
         Route::get('addresses', [CustomerAddressController::class, 'index']);
@@ -166,6 +172,11 @@ Route::prefix('v1')->group(function () {
     // Document verification — public, rate limited: 30/min
     Route::middleware('throttle:search')->group(function () {
         Route::get('documents/verify/{number}', [DocumentVerificationController::class, 'verify']);
+    });
+
+    // Order confirmation acceptance via secure token (non-account customers) — rate limited
+    Route::middleware('throttle:auth')->group(function () {
+        Route::post('orders/{ref}/accept-confirmation', [CustomerQuoteAcceptanceController::class, 'acceptConfirmationByToken']);
     });
 
     // Payments — rate limited: 20/min
@@ -434,6 +445,7 @@ Route::prefix('v1')->group(function () {
             Route::post('trade-documents/{id}/send-email', [AdminTradeDocumentController::class, 'sendEmail']);
             Route::post('trade-documents/{id}/void', [AdminTradeDocumentController::class, 'void']);
             Route::delete('trade-documents/{id}', [AdminTradeDocumentController::class, 'destroy']);
+            Route::post('orders/{id}/generate-acceptance-link', [AdminTradeDocumentController::class, 'generateAcceptanceLink']);
         });
 
         // -----------------------------------------------------------------

@@ -47,10 +47,16 @@ class QuoteRequest extends Model
         'delivery_address',
         'delivery_city',
         'delivery_postal_code',
+        'customer_acceptance_status',
+        'customer_accepted_at',
+        'customer_accepted_ip',
+        'customer_accepted_user_agent',
+        'customer_acceptance_note',
     ];
 
     protected $casts = [
-        'tyre_items' => 'array',
+        'tyre_items'           => 'array',
+        'customer_accepted_at' => 'datetime',
     ];
 
     protected $hidden = [

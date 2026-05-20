@@ -456,6 +456,11 @@ class AdminOrderController extends Controller
                 ])->values()
                 : [],
 
+            // Customer acceptance
+            'customer_acceptance_status'           => $o->customer_acceptance_status ?? 'pending',
+            'customer_accepted_at'                 => $o->customer_accepted_at?->toIso8601String(),
+            'customer_acceptance_note'             => $o->customer_acceptance_note,
+
             // Financial lock
             'financials_locked'                    => $o->isFinancialsLocked(),
             'financials_locked_at'                 => $o->financials_locked_at?->toIso8601String(),
