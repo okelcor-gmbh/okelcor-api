@@ -7,6 +7,7 @@ use App\Models\Invoice;
 use App\Models\Order;
 use App\Models\QuoteRequest;
 use App\Models\TradeDocument;
+use App\Services\PaymentMilestoneEmailService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -151,7 +152,7 @@ class TradeDocumentService
         // Strengthen lock — proforma is a stronger financial commitment than AB
         $this->lockOrderFinancials($order, $admin, 'Proforma Invoice issued');
 
-        // Set payment milestones on first PI generation
+        // Set payment milestones on first PI generation, then notify customer
         $this->setDepositMilestones($order);
 
         Log::info('Proforma invoice generated', [
@@ -380,6 +381,7 @@ class TradeDocumentService
     /**
      * Calculate and persist deposit/balance amounts when proforma is first issued.
      * No-op if milestones are already set (idempotent).
+     * Sends deposit_requested customer email after advancing the stage.
      */
     private function setDepositMilestones(Order $order): void
     {
@@ -398,6 +400,9 @@ class TradeDocumentService
                 'deposit_amount' => $depositAmount,
                 'balance_amount' => $balanceAmount,
             ]);
+
+            // Notify customer that a deposit is now due
+            app(PaymentMilestoneEmailService::class)->send($order, 'deposit_requested');
         } catch (\Throwable $e) {
             Log::warning('Failed to set payment milestones on proforma generation', [
                 'order_ref' => $order->ref,

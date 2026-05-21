@@ -70,6 +70,11 @@ class Order extends Model
         'shipment_released_at',
         'shipment_released_by',
         'shipment_release_note',
+        'deposit_requested_email_sent_at',
+        'deposit_paid_email_sent_at',
+        'balance_due_email_sent_at',
+        'balance_paid_email_sent_at',
+        'shipment_released_email_sent_at',
     ];
 
     protected $hidden = [
@@ -95,7 +100,12 @@ class Order extends Model
         'deposit_paid_at'                   => 'datetime',
         'balance_amount'                    => 'decimal:2',
         'balance_paid_at'                   => 'datetime',
-        'shipment_released_at'              => 'datetime',
+        'shipment_released_at'                  => 'datetime',
+        'deposit_requested_email_sent_at'       => 'datetime',
+        'deposit_paid_email_sent_at'            => 'datetime',
+        'balance_due_email_sent_at'             => 'datetime',
+        'balance_paid_email_sent_at'            => 'datetime',
+        'shipment_released_email_sent_at'       => 'datetime',
     ];
 
     public function isFinancialsLocked(): bool

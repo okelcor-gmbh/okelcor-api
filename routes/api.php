@@ -402,10 +402,11 @@ Route::prefix('v1')->group(function () {
         // Payment milestones — payments.mark_paid (super_admin, admin, order_manager)
         // -----------------------------------------------------------------
         Route::middleware('permission:payments.mark_paid')->prefix('orders/{id}/payment-milestones')->group(function () {
-            Route::post('deposit-paid',       [AdminOrderPaymentMilestoneController::class, 'markDepositPaid']);
-            Route::post('balance-due',        [AdminOrderPaymentMilestoneController::class, 'markBalanceDue']);
-            Route::post('balance-paid',       [AdminOrderPaymentMilestoneController::class, 'markBalancePaid']);
-            Route::post('release-shipment',   [AdminOrderPaymentMilestoneController::class, 'releaseShipment']);
+            Route::post('deposit-paid',     [AdminOrderPaymentMilestoneController::class, 'markDepositPaid']);
+            Route::post('balance-due',      [AdminOrderPaymentMilestoneController::class, 'markBalanceDue']);
+            Route::post('balance-paid',     [AdminOrderPaymentMilestoneController::class, 'markBalancePaid']);
+            Route::post('release-shipment', [AdminOrderPaymentMilestoneController::class, 'releaseShipment']);
+            Route::post('resend-email',     [AdminOrderPaymentMilestoneController::class, 'resendEmail']);
         });
 
         // -----------------------------------------------------------------

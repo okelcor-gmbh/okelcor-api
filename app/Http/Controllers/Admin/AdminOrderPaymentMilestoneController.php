@@ -5,12 +5,15 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Models\OrderLog;
+use App\Services\PaymentMilestoneEmailService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
 class AdminOrderPaymentMilestoneController extends Controller
 {
+    public function __construct(private PaymentMilestoneEmailService $emailService) {}
+
     /**
      * POST /api/v1/admin/orders/{id}/payment-milestones/deposit-paid
      *
@@ -50,9 +53,13 @@ class AdminOrderPaymentMilestoneController extends Controller
             ])),
         ]);
 
+        $emailSent = $this->emailService->send($order, 'deposit_paid');
+
         return response()->json([
-            'data'    => $this->formatMilestones($order),
-            'message' => 'Deposit confirmed. Commercial invoice and packing list can now be generated.',
+            'data'         => $this->formatMilestones($order),
+            'message'      => 'Deposit confirmed. Commercial invoice and packing list can now be generated.',
+            'email_sent'   => $emailSent,
+            'email_warning' => $emailSent ? null : 'Customer notification email could not be sent.',
         ]);
     }
 
@@ -85,9 +92,13 @@ class AdminOrderPaymentMilestoneController extends Controller
             'notes'     => $request->filled('notes') ? $request->notes : 'Balance marked as due.',
         ]);
 
+        $emailSent = $this->emailService->send($order, 'balance_due');
+
         return response()->json([
-            'data'    => $this->formatMilestones($order),
-            'message' => 'Balance marked as due.',
+            'data'          => $this->formatMilestones($order),
+            'message'       => 'Balance marked as due.',
+            'email_sent'    => $emailSent,
+            'email_warning' => $emailSent ? null : 'Customer notification email could not be sent.',
         ]);
     }
 
@@ -130,9 +141,13 @@ class AdminOrderPaymentMilestoneController extends Controller
             ])),
         ]);
 
+        $emailSent = $this->emailService->send($order, 'balance_paid');
+
         return response()->json([
-            'data'    => $this->formatMilestones($order),
-            'message' => 'Balance payment confirmed. Shipment can now be released.',
+            'data'          => $this->formatMilestones($order),
+            'message'       => 'Balance payment confirmed. Shipment can now be released.',
+            'email_sent'    => $emailSent,
+            'email_warning' => $emailSent ? null : 'Customer notification email could not be sent.',
         ]);
     }
 
@@ -172,9 +187,58 @@ class AdminOrderPaymentMilestoneController extends Controller
                 : 'Shipment released.',
         ]);
 
+        $emailSent = $this->emailService->send($order, 'shipment_released');
+
         return response()->json([
-            'data'    => $this->formatMilestones($order),
-            'message' => 'Shipment released. Delivery note can now be generated.',
+            'data'          => $this->formatMilestones($order),
+            'message'       => 'Shipment released. Delivery note can now be generated.',
+            'email_sent'    => $emailSent,
+            'email_warning' => $emailSent ? null : 'Customer notification email could not be sent.',
+        ]);
+    }
+
+    /**
+     * POST /api/v1/admin/orders/{id}/payment-milestones/resend-email
+     *
+     * Resend a specific milestone notification email regardless of whether it
+     * was previously sent. Always overwrites the sent_at timestamp on success.
+     *
+     * Body: { "stage": "deposit_requested" }
+     */
+    public function resendEmail(Request $request, int $id): JsonResponse
+    {
+        $validStages = ['deposit_requested', 'deposit_paid', 'balance_due', 'balance_paid', 'shipment_released'];
+
+        $request->validate([
+            'stage' => ['required', 'string', 'in:' . implode(',', $validStages)],
+        ]);
+
+        $order = Order::findOrFail($id);
+        $stage = $request->input('stage');
+
+        if (! $order->customer_email) {
+            return response()->json([
+                'message' => 'This order has no customer email address.',
+            ], 422);
+        }
+
+        $sent = $this->emailService->send($order, $stage, isResend: true);
+
+        if (! $sent) {
+            return response()->json([
+                'message' => "Failed to send {$stage} email. Check application logs.",
+                'code'    => 'email_send_failed',
+            ], 500);
+        }
+
+        $sentAtColumn = PaymentMilestoneEmailService::sentAtColumn($stage);
+
+        return response()->json([
+            'data'    => [
+                'stage'   => $stage,
+                'sent_at' => $order->fresh()->{$sentAtColumn}?->toIso8601String(),
+            ],
+            'message' => "Notification email for stage '{$stage}' resent to {$order->customer_email}.",
         ]);
     }
 
@@ -183,16 +247,21 @@ class AdminOrderPaymentMilestoneController extends Controller
     private function formatMilestones(Order $order): array
     {
         return [
-            'id'                    => $order->id,
-            'order_ref'             => $order->ref,
-            'payment_stage'         => $order->payment_stage,
-            'deposit_percent'       => (float) $order->deposit_percent,
-            'deposit_amount'        => $order->deposit_amount !== null ? (float) $order->deposit_amount : null,
-            'deposit_paid_at'       => $order->deposit_paid_at?->toIso8601String(),
-            'balance_amount'        => $order->balance_amount !== null ? (float) $order->balance_amount : null,
-            'balance_paid_at'       => $order->balance_paid_at?->toIso8601String(),
-            'shipment_released_at'  => $order->shipment_released_at?->toIso8601String(),
-            'shipment_release_note' => $order->shipment_release_note,
+            'id'                                   => $order->id,
+            'order_ref'                            => $order->ref,
+            'payment_stage'                        => $order->payment_stage,
+            'deposit_percent'                      => (float) $order->deposit_percent,
+            'deposit_amount'                       => $order->deposit_amount !== null ? (float) $order->deposit_amount : null,
+            'deposit_paid_at'                      => $order->deposit_paid_at?->toIso8601String(),
+            'balance_amount'                       => $order->balance_amount !== null ? (float) $order->balance_amount : null,
+            'balance_paid_at'                      => $order->balance_paid_at?->toIso8601String(),
+            'shipment_released_at'                 => $order->shipment_released_at?->toIso8601String(),
+            'shipment_release_note'                => $order->shipment_release_note,
+            'deposit_requested_email_sent_at'      => $order->deposit_requested_email_sent_at?->toIso8601String(),
+            'deposit_paid_email_sent_at'           => $order->deposit_paid_email_sent_at?->toIso8601String(),
+            'balance_due_email_sent_at'            => $order->balance_due_email_sent_at?->toIso8601String(),
+            'balance_paid_email_sent_at'           => $order->balance_paid_email_sent_at?->toIso8601String(),
+            'shipment_released_email_sent_at'      => $order->shipment_released_email_sent_at?->toIso8601String(),
         ];
     }
 
