@@ -118,6 +118,11 @@ class EbaySellingService
      */
     private function callRefreshGrant(string $refreshToken, ?EbayToken $record): string
     {
+        // Use the scopes that were originally authorized (stored on the token record).
+        // Requesting scopes beyond what was originally granted causes eBay to reject the refresh.
+        // New connections (via auth-url) get the full SCOPES list; existing tokens keep their own.
+        $scopes = ($record && ! empty($record->scopes)) ? $record->scopes : self::SCOPES;
+
         $response = Http::asForm()
             ->withBasicAuth(
                 config('services.ebay_sell.client_id'),
@@ -126,7 +131,7 @@ class EbaySellingService
             ->post($this->oauthUrl(), [
                 'grant_type'    => 'refresh_token',
                 'refresh_token' => $refreshToken,
-                'scope'         => implode(' ', self::SCOPES),
+                'scope'         => implode(' ', $scopes),
             ]);
 
         if (! $response->ok()) {
