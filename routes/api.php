@@ -47,6 +47,7 @@ use App\Http\Controllers\Admin\AdminPromotionController;
 use App\Http\Controllers\Admin\AdminDashboardController;
 use App\Http\Controllers\Admin\AdminEuDeclarationController;
 use App\Http\Controllers\Admin\AdminOrderFinancialsController;
+use App\Http\Controllers\Admin\AdminOrderPaymentMilestoneController;
 use App\Http\Controllers\Admin\AdminTradeDocumentController;
 use App\Http\Controllers\Admin\AdminLogisticsController;
 use App\Http\Controllers\Admin\AdminTwoFactorController;
@@ -395,6 +396,16 @@ Route::prefix('v1')->group(function () {
         // Mark paid — payments.mark_paid (super_admin, admin, order_manager)
         Route::middleware('permission:payments.mark_paid')->group(function () {
             Route::post('orders/{id}/mark-paid', [AdminOrderController::class, 'markPaid']);
+        });
+
+        // -----------------------------------------------------------------
+        // Payment milestones — payments.mark_paid (super_admin, admin, order_manager)
+        // -----------------------------------------------------------------
+        Route::middleware('permission:payments.mark_paid')->prefix('orders/{id}/payment-milestones')->group(function () {
+            Route::post('deposit-paid',       [AdminOrderPaymentMilestoneController::class, 'markDepositPaid']);
+            Route::post('balance-due',        [AdminOrderPaymentMilestoneController::class, 'markBalanceDue']);
+            Route::post('balance-paid',       [AdminOrderPaymentMilestoneController::class, 'markBalancePaid']);
+            Route::post('release-shipment',   [AdminOrderPaymentMilestoneController::class, 'releaseShipment']);
         });
 
         // -----------------------------------------------------------------

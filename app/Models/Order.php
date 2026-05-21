@@ -59,6 +59,17 @@ class Order extends Model
         'customer_acceptance_note',
         'acceptance_token',
         'acceptance_token_expires_at',
+        'payment_stage',
+        'deposit_percent',
+        'deposit_amount',
+        'deposit_paid_at',
+        'deposit_confirmed_by',
+        'balance_amount',
+        'balance_paid_at',
+        'balance_confirmed_by',
+        'shipment_released_at',
+        'shipment_released_by',
+        'shipment_release_note',
     ];
 
     protected $hidden = [
@@ -79,6 +90,12 @@ class Order extends Model
         'financials_revision_changes'       => 'array',
         'customer_accepted_at'              => 'datetime',
         'acceptance_token_expires_at'       => 'datetime',
+        'deposit_percent'                   => 'decimal:2',
+        'deposit_amount'                    => 'decimal:2',
+        'deposit_paid_at'                   => 'datetime',
+        'balance_amount'                    => 'decimal:2',
+        'balance_paid_at'                   => 'datetime',
+        'shipment_released_at'              => 'datetime',
     ];
 
     public function isFinancialsLocked(): bool
@@ -126,5 +143,20 @@ class Order extends Model
     public function financialsRevisionRequestedBy(): BelongsTo
     {
         return $this->belongsTo(AdminUser::class, 'financials_revision_requested_by');
+    }
+
+    public function depositConfirmedBy(): BelongsTo
+    {
+        return $this->belongsTo(AdminUser::class, 'deposit_confirmed_by');
+    }
+
+    public function balanceConfirmedBy(): BelongsTo
+    {
+        return $this->belongsTo(AdminUser::class, 'balance_confirmed_by');
+    }
+
+    public function shipmentReleasedBy(): BelongsTo
+    {
+        return $this->belongsTo(AdminUser::class, 'shipment_released_by');
     }
 }

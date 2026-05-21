@@ -470,6 +470,16 @@ class AdminOrderController extends Controller
             'financials_revision_requested_at'     => $o->financials_revision_requested_at?->toIso8601String(),
             'financials_revision_changes'          => $o->financials_revision_changes,
 
+            // Payment milestones
+            'payment_stage'         => $o->payment_stage ?? 'pending_proforma',
+            'deposit_percent'       => (float) ($o->deposit_percent ?? 50),
+            'deposit_amount'        => $o->deposit_amount !== null ? (float) $o->deposit_amount : null,
+            'deposit_paid_at'       => $o->deposit_paid_at?->toIso8601String(),
+            'balance_amount'        => $o->balance_amount !== null ? (float) $o->balance_amount : null,
+            'balance_paid_at'       => $o->balance_paid_at?->toIso8601String(),
+            'shipment_released_at'  => $o->shipment_released_at?->toIso8601String(),
+            'shipment_release_note' => $o->shipment_release_note,
+
             // EU entry certificate
             'declaration_required'  => $o->is_reverse_charge === true,
             'declaration_status'    => $o->relationLoaded('euDeclaration') ? $o->euDeclaration?->status : null,

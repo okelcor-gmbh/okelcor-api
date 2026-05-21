@@ -140,6 +140,17 @@ class AdminTradeDocumentController extends Controller
         $order = Order::with(['items', 'shipmentEvents'])->findOrFail($id);
         $admin = $request->user();
 
+        $depositStages = ['deposit_paid', 'balance_due', 'balance_paid', 'shipment_released'];
+        if (! in_array($order->payment_stage, $depositStages, true)) {
+            $this->logDocumentBlocked($request, $order, 'packing_list', $order->payment_stage);
+            return response()->json([
+                'message'       => 'Packing list can only be generated after the deposit has been confirmed.',
+                'code'          => 'document_generation_blocked_payment_stage',
+                'payment_stage' => $order->payment_stage,
+                'required'      => 'deposit_paid',
+            ], 409);
+        }
+
         try {
             $document = $this->service->generatePackingListForOrder($order, $admin);
         } catch (\Throwable $e) {
@@ -192,6 +203,16 @@ class AdminTradeDocumentController extends Controller
     {
         $order = Order::with(['items', 'shipmentEvents'])->findOrFail($id);
         $admin = $request->user();
+
+        if ($order->payment_stage !== 'shipment_released') {
+            $this->logDocumentBlocked($request, $order, 'delivery_note', $order->payment_stage);
+            return response()->json([
+                'message'       => 'Delivery note can only be generated after the shipment has been released.',
+                'code'          => 'document_generation_blocked_payment_stage',
+                'payment_stage' => $order->payment_stage,
+                'required'      => 'shipment_released',
+            ], 409);
+        }
 
         try {
             $document = $this->service->generateDeliveryNoteForOrder($order, $admin);
@@ -246,6 +267,17 @@ class AdminTradeDocumentController extends Controller
         $order = Order::with(['items', 'shipmentEvents'])->findOrFail($id);
         $admin = $request->user();
 
+        $depositStages = ['deposit_paid', 'balance_due', 'balance_paid', 'shipment_released'];
+        if (! in_array($order->payment_stage, $depositStages, true)) {
+            $this->logDocumentBlocked($request, $order, 'commercial_invoice', $order->payment_stage);
+            return response()->json([
+                'message'       => 'Commercial invoice can only be generated after the deposit has been confirmed.',
+                'code'          => 'document_generation_blocked_payment_stage',
+                'payment_stage' => $order->payment_stage,
+                'required'      => 'deposit_paid',
+            ], 409);
+        }
+
         try {
             $document = $this->service->generateCommercialInvoiceForOrder($order, $admin);
         } catch (\Throwable $e) {
@@ -297,6 +329,17 @@ class AdminTradeDocumentController extends Controller
     {
         $order = Order::findOrFail($id);
         $admin = $request->user();
+
+        $depositStages = ['deposit_paid', 'balance_due', 'balance_paid', 'shipment_released'];
+        if (! in_array($order->payment_stage, $depositStages, true)) {
+            $this->logDocumentBlocked($request, $order, 'shipment_document_upload', $order->payment_stage);
+            return response()->json([
+                'message'       => 'Shipment documents can only be uploaded after the deposit has been confirmed.',
+                'code'          => 'document_generation_blocked_payment_stage',
+                'payment_stage' => $order->payment_stage,
+                'required'      => 'deposit_paid',
+            ], 409);
+        }
 
         // Accept both field names — frontend may send document_label or type_label
         if (!$request->has('type_label') && $request->has('document_label')) {
@@ -749,6 +792,27 @@ class AdminTradeDocumentController extends Controller
     }
 
     // -------------------------------------------------------------------------
+
+    private function logDocumentBlocked(Request $request, Order $order, string $docType, string $currentStage): void
+    {
+        try {
+            $admin = $request->user();
+            OrderLog::create([
+                'order_id'         => $order->id,
+                'order_ref'        => $order->ref,
+                'admin_user_id'    => $admin?->id,
+                'admin_user_email' => $admin?->email,
+                'action'           => 'document_generation_blocked_payment_stage',
+                'notes'            => "Blocked: {$docType} — payment_stage={$currentStage}",
+                'ip_address'       => $request->ip(),
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('OrderLog write failed (document generation blocked)', [
+                'order_ref' => $order->ref,
+                'doc_type'  => $docType,
+            ]);
+        }
+    }
 
     private function formatDocument(TradeDocument $d): array
     {

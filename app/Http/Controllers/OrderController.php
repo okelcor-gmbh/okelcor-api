@@ -96,6 +96,13 @@ class OrderController extends Controller
                     'created_at'   => $e->created_at?->toIso8601String(),
                 ])->values()
                 : [],
+            // Payment milestones — customer-visible progress
+            'payment_stage'        => $o->payment_stage ?? 'pending_proforma',
+            'deposit_amount'       => $o->deposit_amount !== null ? (float) $o->deposit_amount : null,
+            'deposit_paid_at'      => $o->deposit_paid_at?->toIso8601String(),
+            'balance_amount'       => $o->balance_amount !== null ? (float) $o->balance_amount : null,
+            'balance_paid_at'      => $o->balance_paid_at?->toIso8601String(),
+
             // EU entry certificate — customer-visible status + download availability
             'declaration_required'           => $o->is_reverse_charge === true,
             'declaration_status'             => $o->relationLoaded('euDeclaration') ? $o->euDeclaration?->status : null,

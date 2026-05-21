@@ -151,6 +151,9 @@ class TradeDocumentService
         // Strengthen lock — proforma is a stronger financial commitment than AB
         $this->lockOrderFinancials($order, $admin, 'Proforma Invoice issued');
 
+        // Set payment milestones on first PI generation
+        $this->setDepositMilestones($order);
+
         Log::info('Proforma invoice generated', [
             'number'    => $document->number,
             'order_ref' => $order->ref,
@@ -369,6 +372,35 @@ class TradeDocumentService
             Log::warning('Failed to lock order financials', [
                 'order_ref' => $order->ref,
                 'reason'    => $reason,
+                'error'     => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Calculate and persist deposit/balance amounts when proforma is first issued.
+     * No-op if milestones are already set (idempotent).
+     */
+    private function setDepositMilestones(Order $order): void
+    {
+        if ($order->payment_stage !== 'pending_proforma') {
+            return;
+        }
+
+        try {
+            $depositPercent = (float) ($order->deposit_percent ?? 50);
+            $total          = (float) $order->total;
+            $depositAmount  = round($total * $depositPercent / 100, 2);
+            $balanceAmount  = round($total - $depositAmount, 2);
+
+            $order->update([
+                'payment_stage'  => 'deposit_requested',
+                'deposit_amount' => $depositAmount,
+                'balance_amount' => $balanceAmount,
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('Failed to set payment milestones on proforma generation', [
+                'order_ref' => $order->ref,
                 'error'     => $e->getMessage(),
             ]);
         }
