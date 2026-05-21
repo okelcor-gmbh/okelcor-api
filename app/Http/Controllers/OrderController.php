@@ -116,11 +116,11 @@ class OrderController extends Controller
                 'subtotal'     => (float) $i->line_total,
             ])->values(),
 
-            // Trade documents — issued documents visible to the customer
+            // Trade documents — issued/sent documents visible to the customer
             'trade_documents' => $o->relationLoaded('tradeDocuments')
                 ? $o->tradeDocuments
-                    ->filter(fn ($d) => $d->status === 'issued'
-                        && in_array($d->type, ['proforma', 'commercial_invoice', 'packing_list', 'delivery_note', 'shipment_document'], true))
+                    ->filter(fn ($d) => in_array($d->status, ['issued', 'sent'], true)
+                        && in_array($d->type, ['order_confirmation', 'proforma', 'commercial_invoice', 'packing_list', 'delivery_note', 'shipment_document'], true))
                     ->map(fn ($d) => [
                         'id'                => $d->id,
                         'type'              => $d->type,
