@@ -386,6 +386,7 @@ class AdminOrderController extends Controller
         return [
             'id'             => $o->id,
             'order_ref'      => $o->ref,
+            'source'         => $o->source ?? 'website',
             'customer_name'  => $o->customer_name,
             'customer_email' => $o->customer_email,
             'total'          => (float) $o->total,
@@ -484,6 +485,16 @@ class AdminOrderController extends Controller
             'balance_due_email_sent_at'            => $o->balance_due_email_sent_at?->toIso8601String(),
             'balance_paid_email_sent_at'           => $o->balance_paid_email_sent_at?->toIso8601String(),
             'shipment_released_email_sent_at'      => $o->shipment_released_email_sent_at?->toIso8601String(),
+
+            // eBay order metadata (only populated when source = 'ebay')
+            'source'                               => $o->source ?? 'website',
+            'ebay_order_id'                        => $o->ebay_order_id,
+            'ebay_buyer_username'                  => $o->ebay_buyer_username,
+            'ebay_order_status'                    => $o->ebay_order_status,
+            'ebay_payment_status'                  => $o->ebay_payment_status,
+            'ebay_fulfillment_status'              => $o->ebay_fulfillment_status,
+            'ebay_last_synced_at'                  => $o->ebay_last_synced_at?->toIso8601String(),
+            'ebay_raw_summary'                     => $o->source === 'ebay' ? $o->ebay_raw_summary : null,
 
             // EU entry certificate
             'declaration_required'  => $o->is_reverse_charge === true,

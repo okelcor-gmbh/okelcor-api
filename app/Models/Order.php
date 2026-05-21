@@ -11,6 +11,14 @@ class Order extends Model
 {
     protected $fillable = [
         'ref',
+        'source',
+        'ebay_order_id',
+        'ebay_order_status',
+        'ebay_payment_status',
+        'ebay_fulfillment_status',
+        'ebay_buyer_username',
+        'ebay_last_synced_at',
+        'ebay_raw_summary',
         'customer_name',
         'customer_email',
         'customer_phone',
@@ -106,6 +114,8 @@ class Order extends Model
         'balance_due_email_sent_at'             => 'datetime',
         'balance_paid_email_sent_at'            => 'datetime',
         'shipment_released_email_sent_at'       => 'datetime',
+        'ebay_last_synced_at'                   => 'datetime',
+        'ebay_raw_summary'                      => 'array',
     ];
 
     public function isFinancialsLocked(): bool

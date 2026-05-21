@@ -18,6 +18,8 @@ class EbaySellingService
         'https://api.ebay.com/oauth/api_scope/sell.inventory',
         'https://api.ebay.com/oauth/api_scope/sell.inventory.readonly',
         'https://api.ebay.com/oauth/api_scope/sell.account.readonly',
+        'https://api.ebay.com/oauth/api_scope/sell.fulfillment',
+        'https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly',
     ];
 
     // -------------------------------------------------------------------------
@@ -55,6 +57,13 @@ class EbaySellingService
         return $this->isSandbox()
             ? 'https://api.sandbox.ebay.com/sell/account/v1'
             : 'https://api.ebay.com/sell/account/v1';
+    }
+
+    private function fulfillmentBaseUrl(): string
+    {
+        return $this->isSandbox()
+            ? 'https://api.sandbox.ebay.com/sell/fulfillment/v1'
+            : 'https://api.ebay.com/sell/fulfillment/v1';
     }
 
     private function cacheKey(): string
@@ -511,6 +520,95 @@ class EbaySellingService
         }
 
         return ['message' => 'eBay connection is working. Token is valid and the API is reachable.'];
+    }
+
+    // -------------------------------------------------------------------------
+    // Sell Fulfillment API — order fetching
+    //
+    // Requires sell.fulfillment or sell.fulfillment.readonly scope.
+    // If the stored token was issued before EB-5, reconnect via auth-url
+    // to include the new scopes.
+    // -------------------------------------------------------------------------
+
+    /**
+     * Fetch all orders from the Sell Fulfillment API.
+     * Automatically paginates through all pages (eBay max: 200/page).
+     *
+     * @param  \Carbon\Carbon|null  $modifiedSince  Filter by lastmodifieddate
+     * @return array                                Flat array of eBay order objects
+     */
+    public function fetchOrders(?\Carbon\Carbon $modifiedSince = null): array
+    {
+        $token   = $this->getAccessToken();
+        $baseUrl = $this->fulfillmentBaseUrl() . '/order';
+        $all     = [];
+        $offset  = 0;
+        $limit   = 200;
+
+        $params = ['limit' => $limit];
+        if ($modifiedSince) {
+            $params['filter'] = 'lastmodifieddate:[' . $modifiedSince->utc()->toIso8601ZuluString() . '..]';
+        }
+
+        do {
+            $params['offset'] = $offset;
+
+            $response = Http::withToken($token)
+                ->withHeaders($this->commonHeaders())
+                ->get($baseUrl, $params);
+
+            if (! $response->ok()) {
+                $this->handleFulfillmentApiError('fetch_orders', $baseUrl, $response);
+            }
+
+            $data   = $response->json();
+            $page   = $data['orders'] ?? [];
+            $total  = (int) ($data['total'] ?? 0);
+            $all    = array_merge($all, $page);
+            $offset += $limit;
+        } while ($offset < $total && ! empty($page));
+
+        return $all;
+    }
+
+    /**
+     * Fetch a single eBay order by its orderId.
+     */
+    public function fetchOrder(string $ebayOrderId): array
+    {
+        $token    = $this->getAccessToken();
+        $encoded  = rawurlencode($ebayOrderId);
+        $endpoint = $this->fulfillmentBaseUrl() . "/order/{$encoded}";
+
+        $response = Http::withToken($token)
+            ->withHeaders($this->commonHeaders())
+            ->get($endpoint);
+
+        if (! $response->ok()) {
+            $this->handleFulfillmentApiError('fetch_order', $endpoint, $response, ['ebay_order_id' => $ebayOrderId]);
+        }
+
+        return $response->json();
+    }
+
+    private function handleFulfillmentApiError(
+        string $operation,
+        string $endpoint,
+        \Illuminate\Http\Client\Response $response,
+        array $context = []
+    ): never {
+        $this->logEbayApiError($operation, $endpoint, $response->status(), $response->body(), $context);
+
+        if ($response->status() === 403) {
+            throw new \RuntimeException(
+                'eBay Fulfillment API access denied. The connected seller account may not have fulfillment scope. ' .
+                'Reconnect via GET /api/v1/admin/ebay/auth-url to reauthorise with updated permissions.'
+            );
+        }
+
+        throw new \RuntimeException(
+            "eBay {$operation} failed (HTTP {$response->status()}): " . $response->body()
+        );
     }
 
     // -------------------------------------------------------------------------

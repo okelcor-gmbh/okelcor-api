@@ -39,6 +39,7 @@ use App\Http\Controllers\Admin\SupplierController;
 use App\Http\Controllers\Admin\AdminCustomerController;
 use App\Http\Controllers\Admin\CustomerImportController;
 use App\Http\Controllers\Admin\EbayListingController;
+use App\Http\Controllers\Admin\EbayOrderController;
 use App\Http\Controllers\Admin\SecurityController;
 use App\Http\Controllers\FetEngineController;
 use App\Http\Controllers\PromotionController;
@@ -542,6 +543,12 @@ Route::prefix('v1')->group(function () {
             Route::patch('products/{id}/ebay/update', [EbayListingController::class, 'updateProduct']);
             Route::delete('products/{id}/ebay/remove', [EbayListingController::class, 'removeListing']);
             Route::post('products/{id}/ebay/refresh-status', [EbayListingController::class, 'refreshStatus']);
+
+            // eBay order sync (Sell Fulfillment API)
+            Route::get('ebay/orders', [EbayOrderController::class, 'index']);
+            Route::post('ebay/orders/sync', [EbayOrderController::class, 'sync']);
+            Route::post('ebay/orders/{ebayOrderId}/sync', [EbayOrderController::class, 'syncOne']);
+            Route::get('ebay/order-sync-logs', [EbayOrderController::class, 'logs']);
         });
     });
 });

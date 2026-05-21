@@ -19,3 +19,9 @@ Schedule::command('system:health --snapshot')
     ->withoutOverlapping()
     ->onOneServer()
     ->appendOutputTo(storage_path('logs/health-schedule.log'));
+
+Schedule::command('ebay:sync-orders --days=30')
+    ->hourly()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/ebay-order-sync.log'));
