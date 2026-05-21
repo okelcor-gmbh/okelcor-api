@@ -160,6 +160,32 @@ class AdminArticleController extends Controller
     }
 
     /**
+     * Upload the OG / social-share image (distinct from the article cover).
+     * Stores to articles/og/ and saves the relative path to articles.og_image.
+     */
+    public function uploadOgImage(Request $request, int $id): JsonResponse
+    {
+        $request->validate([
+            'image' => ['required', 'file', 'mimes:jpeg,png,webp', 'max:5120'],
+        ]);
+
+        $article = Article::findOrFail($id);
+
+        if ($article->og_image) {
+            Storage::disk('public')->delete($article->og_image);
+        }
+
+        $file     = $request->file('image');
+        $filename = Str::uuid() . '.' . ($file->guessExtension() ?? 'bin');
+        $path     = $file->storeAs('articles/og', $filename, 'public');
+
+        $article->update(['og_image' => $path]);
+        $article->load('translations');
+
+        return response()->json(['data' => $this->formatArticle($article)]);
+    }
+
+    /**
      * Upload an image embedded inside the article body (rich editor inline image).
      * Returns the public URL for the editor to inject as an <img src="...">.
      */

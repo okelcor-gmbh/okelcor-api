@@ -314,6 +314,7 @@ Route::prefix('v1')->group(function () {
             Route::put('articles/{article}', [AdminArticleController::class, 'update']);
             Route::delete('articles/{article}', [AdminArticleController::class, 'destroy']);
             Route::post('articles/{id}/image', [AdminArticleController::class, 'uploadImage']);
+            Route::post('articles/{id}/og-image', [AdminArticleController::class, 'uploadOgImage']);
             Route::post('articles/{id}/body-image', [AdminArticleController::class, 'uploadBodyImage']);
 
             // Categories (fixed set — no create/delete)
