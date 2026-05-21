@@ -8,9 +8,11 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class Article extends Model
 {
     use SoftDeletes;
+
     protected $fillable = [
         'slug',
         'image',
+        'og_image',
         'published_at',
         'is_published',
         'sort_order',

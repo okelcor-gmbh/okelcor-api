@@ -7,6 +7,7 @@ use App\Http\Requests\Admin\StoreArticleRequest;
 use App\Http\Requests\Admin\UpdateArticleRequest;
 use App\Models\Article;
 use App\Models\ArticleTranslation;
+use App\Services\ArticleHtmlSanitizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -14,6 +15,8 @@ use Illuminate\Support\Str;
 
 class AdminArticleController extends Controller
 {
+    public function __construct(private ArticleHtmlSanitizer $sanitizer) {}
+
     public function index(Request $request): JsonResponse
     {
         $perPage = (int) $request->input('per_page', 20);
@@ -42,6 +45,7 @@ class AdminArticleController extends Controller
         $article = Article::create([
             'slug'         => $validated['slug'],
             'image'        => $validated['image'] ?? null,
+            'og_image'     => $validated['og_image'] ?? null,
             'published_at' => $validated['published_at'] ?? null,
             'is_published' => $validated['is_published'] ?? false,
             'sort_order'   => $validated['sort_order'] ?? 0,
@@ -69,6 +73,7 @@ class AdminArticleController extends Controller
         $article->update(array_filter([
             'slug'         => $validated['slug'] ?? null,
             'image'        => array_key_exists('image', $validated) ? $validated['image'] : $article->image,
+            'og_image'     => array_key_exists('og_image', $validated) ? $validated['og_image'] : $article->og_image,
             'published_at' => $validated['published_at'] ?? null,
             'is_published' => $validated['is_published'] ?? $article->is_published,
             'sort_order'   => $validated['sort_order'] ?? $article->sort_order,
@@ -101,6 +106,9 @@ class AdminArticleController extends Controller
         ]);
     }
 
+    /**
+     * Upload the article cover image.
+     */
     public function uploadImage(Request $request, int $id): JsonResponse
     {
         $request->validate([
@@ -109,7 +117,6 @@ class AdminArticleController extends Controller
 
         $article = Article::findOrFail($id);
 
-        // Delete old image from storage if one exists
         if ($article->image) {
             Storage::disk('public')->delete($article->image);
         }
@@ -124,6 +131,34 @@ class AdminArticleController extends Controller
         return response()->json(['data' => $this->formatArticle($article)]);
     }
 
+    /**
+     * Upload an image embedded inside the article body (rich editor inline image).
+     * Returns the public URL for the editor to inject as an <img src="...">.
+     */
+    public function uploadBodyImage(Request $request, int $id): JsonResponse
+    {
+        $request->validate([
+            'image' => ['required', 'file', 'mimes:jpeg,png,webp', 'max:5120'],
+        ]);
+
+        Article::findOrFail($id); // 404 if article not found
+
+        $file     = $request->file('image');
+        $filename = Str::uuid() . '.' . ($file->guessExtension() ?? 'bin');
+        $path     = $file->storeAs('articles/body', $filename, 'public');
+        $url      = url(Storage::url($path));
+
+        return response()->json([
+            'data' => [
+                'url'  => $url,
+                'path' => $path,
+            ],
+            'message' => 'Image uploaded.',
+        ]);
+    }
+
+    // -------------------------------------------------------------------------
+
     private function syncTranslations(Article $article, array $translations): void
     {
         foreach ($translations as $locale => $t) {
@@ -131,23 +166,27 @@ class AdminArticleController extends Controller
                 continue;
             }
 
+            // Sanitize the rich HTML body before persisting
+            $rawBody       = $t['body'] ?? '';
+            $sanitizedBody = $this->sanitizer->sanitize($rawBody);
+
             ArticleTranslation::updateOrCreate(
                 ['article_id' => $article->id, 'locale' => $locale],
                 [
-                    'category'  => $t['category'],
-                    'title'     => $t['title'],
-                    'read_time' => $t['read_time'] ?? '',
-                    'summary'   => $t['summary'],
-                    'body'      => $t['body'],
+                    'category'         => $t['category'],
+                    'title'            => $t['title'],
+                    'read_time'        => $t['read_time'] ?? '',
+                    'summary'          => $t['summary'],
+                    'body'             => $sanitizedBody,
+                    'body_format'      => 'html',
+                    'meta_title'       => $t['meta_title'] ?? null,
+                    'meta_description' => $t['meta_description'] ?? null,
+                    'cover_alt'        => $t['cover_alt'] ?? null,
                 ]
             );
         }
     }
 
-    /**
-     * Compact list format for the admin index — includes top-level title/category
-     * from the EN translation so the admin table can display them directly.
-     */
     private function formatArticleList(Article $a): array
     {
         $en = $a->translations->firstWhere('locale', 'en');
@@ -166,19 +205,20 @@ class AdminArticleController extends Controller
         ];
     }
 
-    /**
-     * Full format for show/store/update — includes all translations.
-     */
     private function formatArticle(Article $a): array
     {
         $translations = [];
         foreach ($a->translations as $t) {
             $translations[$t->locale] = [
-                'category'  => $t->category,
-                'title'     => $t->title,
-                'read_time' => $t->read_time,
-                'summary'   => $t->summary,
-                'body'      => $t->body,
+                'category'         => $t->category,
+                'title'            => $t->title,
+                'read_time'        => $t->read_time,
+                'summary'          => $t->summary,
+                'body'             => $t->body_html,        // resolved HTML (handles legacy too)
+                'body_format'      => $t->body_format ?? 'json_array',
+                'meta_title'       => $t->meta_title,
+                'meta_description' => $t->meta_description,
+                'cover_alt'        => $t->cover_alt,
             ];
         }
 
@@ -188,6 +228,7 @@ class AdminArticleController extends Controller
             'id'           => $a->id,
             'slug'         => $a->slug,
             'image'        => $a->image ? url('storage/' . $a->image) : null,
+            'og_image'     => $a->og_image ? url('storage/' . $a->og_image) : null,
             'published_at' => $a->published_at?->toDateString(),
             'is_published' => (bool) $a->is_published,
             'sort_order'   => $a->sort_order,
