@@ -1,5 +1,55 @@
 # Session Handoff — Okelcor API
-Last updated: 2026-05-21 (session 25)
+Last updated: 2026-05-21 (session 26)
+
+---
+
+## Session 26 — Article Publish 500 Fix (Backend)
+
+**Symptom:** Content editor hit "Server Error" when publishing an article after the TipTap rich editor was wired up.
+
+**Root causes (all backend):**
+
+| # | Cause | Impact |
+|---|-------|--------|
+| 1 | `ArticleHtmlSanitizer` used a file-based HTMLPurifier definition cache (`Cache.SerializerPath`). On production (Namecheap), if `storage/app/htmlpurifier` is not writable, HTMLPurifier throws during initialization. | **Primary 500 cause** |
+| 2 | `ArticleHtmlSanitizer::sanitize()` had `throw $e` in its catch block — re-threw the raw exception with no wrapping. The controller's `syncTranslations()` had zero try/catch, so the exception became an unhandled 500. | **500 escalation** |
+| 3 | No structured logging in the controller — article_id, admin_id, route, and exception class were never logged, making the crash invisible in Laravel logs. | **Observability gap** |
+| 4 | `update()` used `array_filter(fn($v) => $v !== null)` on the payload — `published_at = null` (to unpublish/clear) was silently dropped and never written to the DB. | **Minor correctness bug** |
+
+**Files changed:**
+
+| File | Change |
+|------|--------|
+| `app/Services/ArticleHtmlSanitizer.php` | Replaced file-based cache with `Cache.DefinitionImpl = null` (no permissions needed); added `code[class]` to allowed list (TipTap code blocks); catch now wraps as `RuntimeException` with user-readable message instead of raw re-throw |
+| `app/Http/Controllers/Admin/AdminArticleController.php` | Added `use Log`; wrapped `syncTranslations()` in try/catch in both `store()` and `update()` — returns 422 JSON with message on failure, logs article_id/admin_id/route/exception; fixed `update()` to use `array_key_exists` per field instead of `array_filter(fn($v)=>$v!==null)` so `published_at=null` is honoured |
+
+**Error flow after fix:**
+```
+TipTap HTML → sanitize() → HTMLPurifier (no file cache, no permission error) → clean HTML saved
+If sanitizer fails → RuntimeException → controller catch → 422 JSON { message: "..." } → frontend shows it
+```
+
+**Deploy steps (no migration needed):**
+```bash
+cd /home/u978121777/domains/okelcor.com/public_html/okelcor-api
+git fetch origin
+git reset --hard origin/main
+composer install --no-dev
+/opt/alt/php83/usr/bin/php artisan config:clear
+/opt/alt/php83/usr/bin/php artisan config:cache
+/opt/alt/php83/usr/bin/php artisan route:cache
+```
+
+**Verify on production after deploy:**
+```bash
+# Check no file-cache related errors after an article save:
+tail -n 50 storage/logs/laravel.log | grep -i "purifier\|article"
+```
+
+**Frontend note (separate task):**
+- TipTap duplicate extension warnings (`link`, `underline`) are a frontend-only issue — StarterKit includes them, do not add them again explicitly.
+- The `/api/auth/customer/me` 401 on admin pages is a frontend routing issue — admin pages should not call the customer auth endpoint.
+- When the backend returns 422, read `response.data.message` and display it. The backend now always returns a clear string on article save failure.
 
 ---
 

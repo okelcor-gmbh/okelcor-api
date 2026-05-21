@@ -16,7 +16,9 @@ class ArticleHtmlSanitizer
 {
     /**
      * Sanitize rich-text HTML from the editor.
-     * Returns the sanitized string; throws if HTMLPurifier is unavailable.
+     *
+     * Returns the sanitized HTML string. On purifier failure, logs a warning and
+     * throws a RuntimeException so the controller can return a 422 instead of 500.
      */
     public function sanitize(string $html): string
     {
@@ -26,11 +28,18 @@ class ArticleHtmlSanitizer
 
         $config = \HTMLPurifier_Config::createDefault();
 
+        // ── Disable file-based definition cache ───────────────────────────────
+        // Avoids permission errors on production when the cache dir is not writable.
+        // HTMLPurifier rebuilds its definition per request (negligible cost for article saves).
+        $config->set('Cache.DefinitionImpl', null);
+
         // ── Allowed elements ──────────────────────────────────────────────────
+        // Covers all TipTap output: headings, inline marks, lists, blockquotes,
+        // tables, links, images, code blocks, and CTA div blocks.
         $config->set('HTML.Allowed',
             'h1,h2,h3,h4,h5,h6,' .
             'p,br,hr,' .
-            'strong,em,u,s,code,mark,sub,sup,' .
+            'strong,em,u,s,code[class],mark,sub,sup,' .
             'pre[class],' .
             'blockquote,q,' .
             'ul,ol,li,' .
@@ -43,50 +52,48 @@ class ArticleHtmlSanitizer
         );
 
         // ── Allowed URL schemes ───────────────────────────────────────────────
-        // Blocks javascript: and data: entirely.
+        // Blocks javascript: and data: URLs entirely.
         $config->set('URI.AllowedSchemes', ['http' => true, 'https' => true, 'mailto' => true]);
 
         // ── Link safety ───────────────────────────────────────────────────────
-        // External links: noopener noreferrer is automatically added.
         $config->set('HTML.TargetBlank', false);
         $config->set('HTML.TargetNoopener', true);
 
         // ── Allowed CSS in style attributes ───────────────────────────────────
-        // Only for th/td text alignment (TipTap table alignment uses inline style).
+        // Limited to table cell alignment used by TipTap's table extension.
         $config->set('CSS.AllowedProperties', ['text-align', 'vertical-align', 'width', 'min-width']);
 
         // ── Image safety ──────────────────────────────────────────────────────
-        // Reject images not served from this app (data: blocked by URI schemes above).
-        // External image hosts are blocked unless explicitly whitelisted below.
-        // Editors should use the body-image upload endpoint to embed images.
-        $config->set('URI.SafeIframeRegexp', null);
-        $config->set('HTML.SafeIframe', false);
-
-        // ── Internal whitelist for img src ────────────────────────────────────
-        // Allow images from the app domain only. The purifier's AttrTransform
-        // strips external src automatically when URI.AllowedSchemes is restricted
-        // to http/https but does not restrict domain. We handle domain restriction
-        // via a custom transform below.
+        // Restrict img[src] to the app domain so editors cannot embed arbitrary
+        // external images. Editors must use the body-image upload endpoint.
+        // Note: this does NOT block external a[href] hyperlinks — only embedded resources.
         $appDomain = parse_url(config('app.url'), PHP_URL_HOST) ?? '';
         if ($appDomain) {
             $config->set('URI.Host', $appDomain);
-            $config->set('URI.DisableResources', false);
             $config->set('URI.DisableExternalResources', true);
         }
 
-        // ── Cache directory ───────────────────────────────────────────────────
-        $cacheDir = storage_path('app/htmlpurifier');
-        if (! is_dir($cacheDir)) {
-            mkdir($cacheDir, 0755, true);
-        }
-        $config->set('Cache.SerializerPath', $cacheDir);
+        $config->set('HTML.SafeIframe', false);
 
         try {
             $purifier = new \HTMLPurifier($config);
-            return $purifier->purify($html);
+            $clean    = $purifier->purify($html);
+
+            // If purification returns empty but the input was not empty, it means
+            // all content was stripped (e.g. all tags disallowed). Return empty
+            // so the controller can decide whether to reject the body.
+            return $clean;
         } catch (\Throwable $e) {
-            Log::error('ArticleHtmlSanitizer: purification failed', ['error' => $e->getMessage()]);
-            throw $e;
+            Log::warning('ArticleHtmlSanitizer: HTMLPurifier failed', [
+                'error' => $e->getMessage(),
+            ]);
+            // Re-throw as a plain RuntimeException so the controller surfaces a
+            // 422 instead of an unhandled 500.
+            throw new \RuntimeException(
+                'Article body could not be sanitized. Please check the content and try again.',
+                0,
+                $e
+            );
         }
     }
 

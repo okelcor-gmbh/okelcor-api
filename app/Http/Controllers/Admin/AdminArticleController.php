@@ -10,6 +10,7 @@ use App\Models\ArticleTranslation;
 use App\Services\ArticleHtmlSanitizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -51,7 +52,18 @@ class AdminArticleController extends Controller
             'sort_order'   => $validated['sort_order'] ?? 0,
         ]);
 
-        $this->syncTranslations($article, $validated['translations']);
+        try {
+            $this->syncTranslations($article, $validated['translations']);
+        } catch (\Throwable $e) {
+            $article->forceDelete();
+            Log::error('Article create failed during translation sync', [
+                'admin_id'  => $request->user()?->id,
+                'route'     => $request->route()?->getName(),
+                'exception' => get_class($e),
+                'message'   => $e->getMessage(),
+            ]);
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
 
         $article->load('translations');
 
@@ -70,17 +82,33 @@ class AdminArticleController extends Controller
         $article   = Article::findOrFail($id);
         $validated = $request->validated();
 
-        $article->update(array_filter([
-            'slug'         => $validated['slug'] ?? null,
-            'image'        => array_key_exists('image', $validated) ? $validated['image'] : $article->image,
-            'og_image'     => array_key_exists('og_image', $validated) ? $validated['og_image'] : $article->og_image,
-            'published_at' => $validated['published_at'] ?? null,
-            'is_published' => $validated['is_published'] ?? $article->is_published,
-            'sort_order'   => $validated['sort_order'] ?? $article->sort_order,
-        ], fn ($v) => $v !== null));
+        // Build update payload using array_key_exists so explicitly-null fields
+        // (e.g. clearing published_at to unpublish) are honoured.
+        $updateData = [];
+        if (array_key_exists('slug', $validated))         $updateData['slug']         = $validated['slug'];
+        if (array_key_exists('image', $validated))        $updateData['image']        = $validated['image'];
+        if (array_key_exists('og_image', $validated))     $updateData['og_image']     = $validated['og_image'];
+        if (array_key_exists('published_at', $validated)) $updateData['published_at'] = $validated['published_at'];
+        if (array_key_exists('is_published', $validated)) $updateData['is_published'] = $validated['is_published'];
+        if (array_key_exists('sort_order', $validated))   $updateData['sort_order']   = $validated['sort_order'];
 
-        if (isset($validated['translations'])) {
-            $this->syncTranslations($article, $validated['translations']);
+        if (! empty($updateData)) {
+            $article->update($updateData);
+        }
+
+        if (array_key_exists('translations', $validated)) {
+            try {
+                $this->syncTranslations($article, $validated['translations']);
+            } catch (\Throwable $e) {
+                Log::error('Article update failed during translation sync', [
+                    'article_id' => $id,
+                    'admin_id'   => $request->user()?->id,
+                    'route'      => $request->route()?->getName(),
+                    'exception'  => get_class($e),
+                    'message'    => $e->getMessage(),
+                ]);
+                return response()->json(['message' => $e->getMessage()], 422);
+            }
         }
 
         $article->load('translations');
