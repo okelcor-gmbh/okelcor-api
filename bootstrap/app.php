@@ -38,13 +38,28 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        // Structured log for every 429 produced by throttle middleware.
+        // Registered first so it runs before the general reporter below.
+        $exceptions->report(function (\Illuminate\Http\Exceptions\ThrottleRequestsException $e) {
+            /** @var \Illuminate\Http\Request $request */
+            $request = request();
+            Log::warning('[rate_limit_exceeded]', [
+                'route'   => $request->route()?->getName() ?? $request->path(),
+                'method'  => $request->method(),
+                'ip'      => $request->ip(),
+                'user_id' => $request->user()?->id ?? null,
+            ]);
+            return false; // suppress — not an application error
+        });
+
         // Log all unhandled exceptions with structured context (request-id, route, user)
         $exceptions->report(function (\Throwable $e) {
-            // Skip validation / auth exceptions — already handled with HTTP 4xx
+            // Skip validation / auth / rate-limit exceptions — already handled with HTTP 4xx
             if (
                 $e instanceof \Illuminate\Validation\ValidationException ||
                 $e instanceof \Illuminate\Auth\AuthenticationException ||
                 $e instanceof \Illuminate\Auth\Access\AuthorizationException ||
+                $e instanceof \Illuminate\Http\Exceptions\ThrottleRequestsException ||
                 $e instanceof \Symfony\Component\HttpKernel\Exception\NotFoundHttpException ||
                 $e instanceof \Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException
             ) {

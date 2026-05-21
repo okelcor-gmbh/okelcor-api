@@ -70,6 +70,10 @@ Route::prefix('v1')->group(function () {
         Route::middleware('throttle:auth')->group(function () {
             Route::post('register', [CustomerAuthController::class, 'register']);
             Route::post('login', [CustomerAuthController::class, 'login']);
+        });
+
+        // Password reset (token submission) — 5 per 15 minutes per IP
+        Route::middleware('throttle:password-reset')->group(function () {
             Route::post('reset-password', [CustomerAuthController::class, 'resetPassword']);
         });
 
@@ -126,35 +130,38 @@ Route::prefix('v1')->group(function () {
     // Public — no auth required
     // -------------------------------------------------------------------------
 
-    // Products — temporarily public for payment gateway review
-    // TODO: restore auth.customer middleware after review is complete
-    Route::get('products/brands', [ProductController::class, 'brands']);
-    Route::get('products/specs', [ProductController::class, 'specs']);
-    Route::get('products', [ProductController::class, 'index']);
-    Route::get('products/{id}', [ProductController::class, 'show']);
+    // Public content reads — 120/min per IP (scraping / DDoS defence)
+    Route::middleware('throttle:api-public')->group(function () {
+        // Products — temporarily public for payment gateway review
+        // TODO: restore auth.customer middleware after review is complete
+        Route::get('products/brands', [ProductController::class, 'brands']);
+        Route::get('products/specs', [ProductController::class, 'specs']);
+        Route::get('products', [ProductController::class, 'index']);
+        Route::get('products/{id}', [ProductController::class, 'show']);
 
-    // Articles
-    Route::get('articles', [ArticleController::class, 'index']);
-    Route::get('articles/{slug}', [ArticleController::class, 'show']);
+        // Articles
+        Route::get('articles', [ArticleController::class, 'index']);
+        Route::get('articles/{slug}', [ArticleController::class, 'show']);
 
-    // Categories
-    Route::get('categories', [CategoryController::class, 'index']);
+        // Categories
+        Route::get('categories', [CategoryController::class, 'index']);
 
-    // Hero slides
-    Route::get('hero-slides', [HeroSlideController::class, 'index']);
+        // Hero slides
+        Route::get('hero-slides', [HeroSlideController::class, 'index']);
 
-    // Brands
-    Route::get('brands', [BrandController::class, 'index']);
+        // Brands
+        Route::get('brands', [BrandController::class, 'index']);
 
-    // FET engine compatibility
-    Route::get('fet/engines', [FetEngineController::class, 'index']);
+        // FET engine compatibility
+        Route::get('fet/engines', [FetEngineController::class, 'index']);
 
-    // Active promotion (shop banner)
-    Route::get('promotions/active', [PromotionController::class, 'active']);
+        // Active promotion (shop banner)
+        Route::get('promotions/active', [PromotionController::class, 'active']);
 
-    // Site settings (public read-only)
-    Route::get('settings/public', [SettingController::class, 'public']);
-    Route::get('settings', [SettingController::class, 'index']);
+        // Site settings (public read-only)
+        Route::get('settings/public', [SettingController::class, 'public']);
+        Route::get('settings', [SettingController::class, 'index']);
+    });
 
     // Container tracking — rate limited: 30/min (guards external DHL + ShipsGo calls)
     Route::middleware('throttle:tracking')->group(function () {
@@ -171,13 +178,13 @@ Route::prefix('v1')->group(function () {
         Route::post('vat/validate', [VatController::class, 'validate']);
     });
 
-    // Document verification — public, rate limited: 30/min
-    Route::middleware('throttle:search')->group(function () {
+    // Document verification — public, rate limited: 60/min
+    Route::middleware('throttle:public-doc-verify')->group(function () {
         Route::get('documents/verify/{number}', [DocumentVerificationController::class, 'verify']);
     });
 
-    // Order confirmation acceptance via secure token (non-account customers) — rate limited
-    Route::middleware('throttle:auth')->group(function () {
+    // Order confirmation acceptance via secure token (non-account customers) — 20/min per IP
+    Route::middleware('throttle:acceptance-links')->group(function () {
         Route::post('orders/{ref}/accept-confirmation', [CustomerQuoteAcceptanceController::class, 'acceptConfirmationByToken']);
     });
 
@@ -220,14 +227,20 @@ Route::prefix('v1')->group(function () {
     // -------------------------------------------------------------------------
     // Admin auth (no Sanctum guard — these issue the token)
     // -------------------------------------------------------------------------
-    Route::post('admin/login', [AuthController::class, 'login']);
-    Route::post('admin/login/2fa', AdminLoginTwoFactorController::class);
+    // Admin login — 5/min per IP+email (outer request guard; per-failure inline
+    // counter in AuthController provides complementary lockout behaviour)
+    Route::middleware('throttle:admin-login')->post('admin/login', [AuthController::class, 'login']);
 
-    // Mandatory 2FA setup flow — unauthenticated (no Sanctum token yet).
-    // Used by admins who have never enabled 2FA. They receive a temp_token at
-    // login and must complete setup here before a full session is issued.
-    Route::post('admin/2fa/setup/enable',  [AdminTwoFactorController::class, 'setupEnable']);
-    Route::post('admin/2fa/setup/confirm', [AdminTwoFactorController::class, 'setupConfirm']);
+    // Admin 2FA verification + mandatory setup — 10 per 5 min per IP
+    Route::middleware('throttle:admin-2fa')->group(function () {
+        Route::post('admin/login/2fa', AdminLoginTwoFactorController::class);
+
+        // Mandatory 2FA setup flow — unauthenticated (no Sanctum token yet).
+        // Used by admins who have never enabled 2FA. They receive a temp_token at
+        // login and must complete setup here before a full session is issued.
+        Route::post('admin/2fa/setup/enable',  [AdminTwoFactorController::class, 'setupEnable']);
+        Route::post('admin/2fa/setup/confirm', [AdminTwoFactorController::class, 'setupConfirm']);
+    });
 
     // -------------------------------------------------------------------------
     // eBay OAuth callback — PUBLIC (no Sanctum; eBay redirects browser here)
@@ -272,7 +285,7 @@ Route::prefix('v1')->group(function () {
         // Admin user management — admins.manage (super_admin only)
         // HARDENED: admin role can no longer manage other admin users
         // -----------------------------------------------------------------
-        Route::middleware('permission:admins.manage')->group(function () {
+        Route::middleware(['permission:admins.manage', 'throttle:admin-sensitive'])->group(function () {
             Route::get('users', [AdminUserController::class, 'index']);
             Route::post('users', [AdminUserController::class, 'store']);
             Route::get('users/{id}', [AdminUserController::class, 'show']);
@@ -286,7 +299,7 @@ Route::prefix('v1')->group(function () {
         // -----------------------------------------------------------------
 
         // Bulk import / destructive — products.import (super_admin, admin)
-        Route::middleware('permission:products.import')->group(function () {
+        Route::middleware(['permission:products.import', 'throttle:admin-sensitive'])->group(function () {
             Route::post('products/import', [ProductImportController::class, 'import']);
             Route::get('products/export', [ProductImportController::class, 'export']);
             Route::delete('products/all', [AdminProductController::class, 'destroyAll']);
@@ -313,9 +326,11 @@ Route::prefix('v1')->group(function () {
             Route::get('articles/{article}', [AdminArticleController::class, 'show']);
             Route::put('articles/{article}', [AdminArticleController::class, 'update']);
             Route::delete('articles/{article}', [AdminArticleController::class, 'destroy']);
-            Route::post('articles/{id}/image', [AdminArticleController::class, 'uploadImage']);
-            Route::post('articles/{id}/og-image', [AdminArticleController::class, 'uploadOgImage']);
-            Route::post('articles/{id}/body-image', [AdminArticleController::class, 'uploadBodyImage']);
+            Route::middleware('throttle:article-upload')->group(function () {
+                Route::post('articles/{id}/image', [AdminArticleController::class, 'uploadImage']);
+                Route::post('articles/{id}/og-image', [AdminArticleController::class, 'uploadOgImage']);
+                Route::post('articles/{id}/body-image', [AdminArticleController::class, 'uploadBodyImage']);
+            });
 
             // Categories (fixed set — no create/delete)
             Route::get('categories', [AdminCategoryController::class, 'index']);
@@ -524,7 +539,7 @@ Route::prefix('v1')->group(function () {
         });
 
         // Security management — security.manage (super_admin only)
-        Route::middleware('permission:security.manage')->group(function () {
+        Route::middleware(['permission:security.manage', 'throttle:admin-sensitive'])->group(function () {
             Route::post('security/send-2fa-notices', [SecurityController::class, 'sendTwoFactorNotices']);
         });
 
@@ -539,18 +554,20 @@ Route::prefix('v1')->group(function () {
             Route::get('ebay/policies', [EbayListingController::class, 'policies']);
             Route::post('ebay/disconnect', [EbayListingController::class, 'disconnect']);
             Route::get('ebay/listings', [EbayListingController::class, 'listings']);
-            Route::post('ebay/sync-all', [EbayListingController::class, 'syncAll']);
             Route::get('ebay/logs', [EbayListingController::class, 'logs']);
             Route::post('products/{id}/ebay/list', [EbayListingController::class, 'listProduct']);
             Route::patch('products/{id}/ebay/update', [EbayListingController::class, 'updateProduct']);
             Route::delete('products/{id}/ebay/remove', [EbayListingController::class, 'removeListing']);
             Route::post('products/{id}/ebay/refresh-status', [EbayListingController::class, 'refreshStatus']);
 
-            // eBay order sync (Sell Fulfillment API)
+            // eBay order sync (Sell Fulfillment API) — sync operations throttled separately
             Route::get('ebay/orders', [EbayOrderController::class, 'index']);
-            Route::post('ebay/orders/sync', [EbayOrderController::class, 'sync']);
-            Route::post('ebay/orders/{ebayOrderId}/sync', [EbayOrderController::class, 'syncOne']);
             Route::get('ebay/order-sync-logs', [EbayOrderController::class, 'logs']);
+            Route::middleware('throttle:ebay-sync')->group(function () {
+                Route::post('ebay/sync-all', [EbayListingController::class, 'syncAll']);
+                Route::post('ebay/orders/sync', [EbayOrderController::class, 'sync']);
+                Route::post('ebay/orders/{ebayOrderId}/sync', [EbayOrderController::class, 'syncOne']);
+            });
         });
     });
 });
