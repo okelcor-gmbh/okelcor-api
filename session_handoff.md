@@ -1,5 +1,223 @@
 # Session Handoff — Okelcor API
-Last updated: 2026-05-18 (session 24)
+Last updated: 2026-05-21 (session 25)
+
+---
+
+## Session 25 — EB-5 Completion, Token Fix, Rich Article Editor, Logistics Dashboard v2
+
+---
+
+### 25a — EB-5: eBay Order Status Sync (complete)
+
+**Goal:** Sync eBay seller orders into Okelcor via the Sell Fulfillment API (not Trading API). Import new eBay orders, update existing ones, never overwrite non-eBay orders.
+
+**New migrations:**
+| Migration | What it adds |
+|---|---|
+| `2026_05_21_000003_add_ebay_fields_to_orders` | `source`, `ebay_order_id` (unique), `ebay_order_status`, `ebay_payment_status`, `ebay_fulfillment_status`, `ebay_buyer_username`, `ebay_last_synced_at`, `ebay_raw_summary` (json) on orders |
+| `2026_05_21_000004_create_ebay_order_sync_logs_table` | `ebay_order_sync_logs` — append-only audit log (no `updated_at`) |
+
+**New files:**
+| File | Purpose |
+|---|---|
+| `app/Models/EbayOrderSyncLog.php` | Append-only model (`UPDATED_AT = null`) |
+| `app/Services/EbayOrderSyncService.php` | Core sync: `syncRecent()`, `syncOne()`, `importOrder()`, `updateOrder()`, status mapping, non-PII `buildPayloadSummary()` |
+| `app/Http/Controllers/Admin/EbayOrderController.php` | 4 admin endpoints: index, sync (bulk), syncOne, order-sync-logs |
+| `app/Console/Commands/SyncEbayOrders.php` | `ebay:sync-orders --days=30`; silently skips if no eBay token |
+
+**Changed files:**
+- `app/Services/EbaySellingService.php` — added `sell.fulfillment` + `sell.fulfillment.readonly` scopes, `fetchOrders()`, `fetchOrder()`, `fulfillmentBaseUrl()`, `handleFulfillmentApiError()`
+- `app/Models/Order.php` — 8 new eBay fillable fields + casts
+- `app/Http/Controllers/Admin/AdminOrderController.php` — `source` in list format; full eBay metadata block in detail format
+- `routes/api.php` — 4 new routes under `permission:ebay.manage`
+- `routes/console.php` — hourly `ebay:sync-orders` schedule
+
+**Admin endpoints (all: permission `ebay.manage`):**
+```
+GET  /api/v1/admin/ebay/orders                      List eBay-sourced orders
+POST /api/v1/admin/ebay/orders/sync                 Bulk sync (?days=30)
+POST /api/v1/admin/ebay/orders/{ebayOrderId}/sync   Single order sync
+GET  /api/v1/admin/ebay/order-sync-logs             Sync audit log
+```
+
+**Safety rules enforced in `updateOrder()`:**
+- Never downgrade `payment_status` from `paid`
+- Never downgrade `status` from `shipped` or `delivered`
+- Only match by `ebay_order_id` — website orders with no eBay ID are never touched
+
+**Status mapping:**
+| eBay `orderPaymentStatus` | Okelcor `payment_status` |
+|---|---|
+| PAID | paid |
+| FAILED | failed |
+| FULLY_REFUNDED | refunded |
+| PARTIALLY_REFUNDED | paid |
+| (default) | pending |
+
+| eBay `orderFulfillmentStatus` | Okelcor `status` |
+|---|---|
+| NOT_STARTED | confirmed |
+| IN_PROGRESS | processing |
+| FULFILLED | shipped |
+| CANCELLED | cancelled |
+
+---
+
+### 25b — Fix: eBay Token Refresh Scope Bug (complete)
+
+**Symptom:** Status and readiness pages showed "Token refresh failed — the seller account may need to be reconnected."
+
+**Root cause:** Adding `sell.fulfillment` and `sell.fulfillment.readonly` to `self::SCOPES` caused `callRefreshGrant()` to request those scopes in every refresh call. eBay rejects refresh requests that ask for scopes beyond what was originally granted. The existing DB token was authorized for 3 inventory scopes only.
+
+**Fix (`app/Services/EbaySellingService.php`):**
+```php
+// callRefreshGrant() now uses stored scopes from the DB record, not self::SCOPES
+$scopes = ($record && ! empty($record->scopes)) ? $record->scopes : self::SCOPES;
+```
+
+**Behaviour after fix:**
+- Existing tokens refresh with their original scopes (status/readiness work immediately)
+- Fulfillment endpoints return clear 403 "reconnect via auth-url" for pre-EB-5 tokens
+- New connections (via auth-url) get all 5 scopes including fulfillment
+
+**One-time action required on production:** Call `GET /api/v1/admin/ebay/auth-url`, open the URL in a browser logged in as the eBay seller, approve → new token with fulfillment scope issued.
+
+---
+
+### 25c — Rich Article Editor — Backend (complete)
+
+**Goal:** Replace the plain JSON-array body format with sanitized rich HTML to support TipTap/Quill/Lexical editors on the frontend.
+
+**Audit findings (what existed before):**
+- `body` was stored as a JSON array of plain strings (`['paragraph one', 'paragraph two']`)
+- Zero HTML sanitization — raw input written straight to DB
+- No `meta_title`, `meta_description`, `og_image`, `cover_alt` fields
+- No inline body image upload endpoint
+- Public API returned `body` as a JSON array — frontend had to join manually
+
+**New package:** `mews/purifier` (`^3.4`) — Laravel wrapper for HTMLPurifier.
+
+**New migration:** `2026_05_21_100000_add_rich_content_fields_to_article_translations`
+- `body_format` ENUM(`json_array`, `html`) DEFAULT `json_array` on `article_translations`
+- `meta_title` VARCHAR(160) nullable on `article_translations`
+- `meta_description` VARCHAR(300) nullable on `article_translations`
+- `cover_alt` VARCHAR(200) nullable on `article_translations`
+- `og_image` VARCHAR(500) nullable on `articles`
+
+**New file:** `app/Services/ArticleHtmlSanitizer.php`
+- HTMLPurifier config: allowlist of safe tags (`h1-h6`, `p`, `ul/ol/li`, `table`, `a`, `img`, `blockquote`, `pre`, `figure`, `div[data-type|data-cta-*]`, etc.)
+- Blocked: `script`, `iframe`, `on*` event handlers, `javascript:` / `data:` URLs, external image `src`
+- `img src` restricted to app domain only (editors must use body-image upload endpoint)
+- Purifier cache stored in `storage/app/htmlpurifier/`
+- `jsonArrayToHtml()` utility for one-way legacy conversion
+
+**Zero-downtime body format transition:**
+`ArticleTranslation` model `body_html` accessor: reads `body_format`, converts old JSON arrays to `<p>` tags on the fly. No data migration needed. New saves write sanitized HTML and set `body_format = 'html'`.
+
+**New endpoint:**
+```
+POST /api/v1/admin/articles/{id}/body-image   Upload inline body image → returns { url, path }
+```
+Permission: `products.edit` (same as article write). Files stored at `articles/body/{uuid}.ext`.
+
+**Changed files:**
+| File | Change |
+|---|---|
+| `app/Models/ArticleTranslation.php` | Removed `array` cast on body; added `body_html` accessor; new fillable fields |
+| `app/Models/Article.php` | Added `og_image` to fillable |
+| `app/Http/Requests/Admin/StoreArticleRequest.php` | `body` now `string` (not `array`); SEO field rules added |
+| `app/Http/Requests/Admin/UpdateArticleRequest.php` | Same |
+| `app/Http/Controllers/Admin/AdminArticleController.php` | Sanitizes body on every save via `ArticleHtmlSanitizer`; adds `uploadBodyImage()`; exposes all SEO fields |
+| `app/Http/Controllers/ArticleController.php` | Public `body` returns sanitized HTML string; all SEO fields exposed |
+
+**Public API article shape now includes:**
+```json
+"body": "<h2>Heading</h2><p>Rich HTML...</p>",
+"cover_alt": "Alt text for cover image",
+"meta_title": "SEO title",
+"meta_description": "160-char description",
+"og_image": "https://.../storage/articles/og.jpg"
+```
+
+**Allowed HTML tags (full list):** `h1–h6`, `p`, `br`, `hr`, `strong`, `em`, `u`, `s`, `code`, `mark`, `sub`, `sup`, `pre[class]`, `blockquote`, `ul`, `ol`, `li`, `table`, `thead`, `tbody`, `tfoot`, `tr`, `th`, `td`, `a[href|target|rel|title]`, `img[src|alt|width|height|class|loading]`, `figure`, `figcaption`, `div[class|data-type|data-cta-*]`, `span[class|style]`
+
+---
+
+### 25d — Logistics Dashboard v2 (complete)
+
+**Goal:** Fix the logistics dashboard that showed empty/useless data because it was built before payment milestones, customer acceptance, financial locks, and eBay orders existed.
+
+**Root causes fixed:**
+| Bug | Detail |
+|---|---|
+| `computeMissing()` tied to `payment_status='paid'` | New milestone orders have `payment_stage=deposit_paid` but `payment_status` may still be `pending` — zero docs flagged for ~100% of active orders |
+| `next_action()` had no milestone awareness | Every active order got "No action required" |
+| Summary cards wrong | Counted `payment_status='unpaid'` (empty) and `payment_status='paid'` — meaningless with milestones |
+| `Invoice` model dead query | Per-page DB query on the old Invoice table (old system, never populated) — adds latency for nothing |
+| No eBay source support | eBay orders had no `source` field, no eBay-specific action logic |
+| Old orders hidden | Null `payment_stage` had no fallback — legacy orders appeared with wrong context |
+
+**Key design: `resolveStage()`** — infers effective payment stage from `payment_status`/`status` for pre-milestone orders so old data is never lost:
+```
+payment_status=paid + status=shipped/delivered → 'shipment_released'
+payment_status=paid                            → 'balance_paid'
+status=processing                              → 'deposit_paid'
+(default)                                      → 'pending_proforma'
+```
+
+**`next_action()` full switch (milestone-first):**
+| Stage / Condition | next_action |
+|---|---|
+| `pending_proforma` | Finance: generate proforma invoice |
+| `deposit_requested` | Awaiting deposit payment from customer |
+| `deposit_paid` + docs missing | Generate commercial invoice + packing list |
+| `balance_due` | Awaiting balance payment from customer |
+| `balance_paid` | Full payment received — finance to release shipment |
+| `shipment_released` + no tracking | Add tracking number / container number |
+| eBay paid + not FULFILLED | Prepare and ship eBay order — mark fulfilled on eBay |
+| EU declaration not acknowledged | Acknowledge signed EU declaration |
+
+**New summary cards (18 total):**
+`total_active_orders`, `total_ebay_orders`, `awaiting_proforma`, `awaiting_customer_acceptance`, `awaiting_deposit`, `deposit_paid_docs_needed`, `balance_due`, `ready_for_shipment_release`, `shipment_released`, `ebay_needing_fulfillment`, `missing_commercial_invoice`, `missing_packing_list`, `missing_shipment_document`, `pending_eu_declarations`, `high_risk_orders`, `orders_shipped`, `orders_delivered`
+
+**New filters:**
+| Param | Values |
+|---|---|
+| `source` | `all` / `website` / `ebay` |
+| `payment_stage` | `pending_proforma` / `deposit_requested` / `deposit_paid` / `balance_due` / `balance_paid` / `shipment_released` |
+| `ebay_fulfillment_status` | `NOT_STARTED` / `IN_PROGRESS` / `FULFILLED` / `CANCELLED` |
+| `logistics_ready_only` | `true` — restricts to orders needing logistics action |
+
+**New checklist row fields:**
+`source`, `ebay_order_id`, `ebay_payment_status`, `ebay_fulfillment_status`, `payment_stage`, `customer_acceptance_status`, `financials_locked`, `financials_revision_required`, `deposit_amount`, `balance_amount`, `deposit_paid_at`, `balance_paid_at`, `shipment_released_at`, `updated_at`
+
+**File changed:** `app/Http/Controllers/Admin/AdminLogisticsController.php` — complete rewrite (273 → 371 lines)
+
+---
+
+### Session 25 — Deploy Steps
+
+```bash
+cd /home/u978121777/domains/okelcor.com/public_html/okelcor-api
+git fetch origin
+git reset --hard origin/main
+composer install --no-dev
+/opt/alt/php83/usr/bin/php artisan migrate --force
+/opt/alt/php83/usr/bin/php artisan config:clear
+/opt/alt/php83/usr/bin/php artisan config:cache
+/opt/alt/php83/usr/bin/php artisan route:cache
+```
+
+**Migrations that will run (5 new):**
+1. `2026_05_21_000001` — payment milestone fields on orders (DOC-7, previous session)
+2. `2026_05_21_000002` — milestone email sent_at timestamps (DOC-8, previous session)
+3. `2026_05_21_000003` — eBay fields on orders (EB-5)
+4. `2026_05_21_000004` — `ebay_order_sync_logs` table (EB-5)
+5. `2026_05_21_100000` — rich content fields on article_translations + og_image on articles
+
+**Post-deploy eBay action:** Reconnect eBay seller account once via `GET /api/v1/admin/ebay/auth-url` to issue a new token with fulfillment scope.
+
+---
 
 ---
 
