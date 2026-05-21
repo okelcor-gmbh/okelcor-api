@@ -1,5 +1,110 @@
 # Session Handoff — Okelcor API
-Last updated: 2026-05-21 (session 26)
+Last updated: 2026-05-22 (session 28)
+
+---
+
+## Session 28 — SEC-3: Layered Rate Limiting & Abuse Protection (complete)
+
+**Commit:** `3bca20d` — no migration needed, code-only.
+
+### What was audited first
+
+Before writing code, a full read of `bootstrap/app.php`, `routes/api.php`, `AppServiceProvider.php`, and all middleware aliases confirmed the existing state. Key findings:
+
+- 9 named limiters already existed (auth, auth-email, checkout, tracking, search, vat, payments, public-form, quote-form)
+- Admin login and 2FA had inline `RateLimiter::hit()` counters only — no middleware, no response headers
+- `POST admin/2fa/setup/enable` and `POST admin/2fa/setup/confirm` had **zero protection**
+- `documents/verify/{number}` was using the wrong limiter (`search`/30min instead of its own)
+- `orders/{ref}/accept-confirmation` was using the wrong limiter (`auth`/10min instead of its own)
+- All public content reads (products, articles, categories, etc.) had no throttle
+- Article uploads, eBay sync, admin-sensitive operations had no throttle
+
+### Named limiters — created / updated
+
+| Limiter | Limit | Key | Status |
+|---|---|---|---|
+| `admin-login` | 5/min | IP + email | New |
+| `admin-2fa` | 10 per 5min | IP | New |
+| `password-reset` | 5 per 15min | IP | New |
+| `public-doc-verify` | 60/min | IP | New |
+| `acceptance-links` | 20/min | IP | New |
+| `api-public` | 120/min | IP | New |
+| `ebay-sync` | 10/min | admin user ID | New |
+| `article-upload` | 20/min | admin user ID | New |
+| `admin-sensitive` | 30/min | admin user ID | New |
+| `quote-form` | 10/hour | IP | Updated (was 5/hour) |
+
+### Routes protected for the first time
+
+| Route | Limiter | Note |
+|---|---|---|
+| `POST admin/login` | `admin-login` | Complements existing per-failure inline counter |
+| `POST admin/login/2fa` | `admin-2fa` | |
+| `POST admin/2fa/setup/enable` | `admin-2fa` | Was completely unprotected |
+| `POST admin/2fa/setup/confirm` | `admin-2fa` | Was completely unprotected |
+| `POST auth/reset-password` | `password-reset` | Split out of `auth` group |
+| `GET documents/verify/{number}` | `public-doc-verify` | Was using `search`/30min |
+| `POST orders/{ref}/accept-confirmation` | `acceptance-links` | Was using `auth`/10min |
+| All public content reads | `api-public` | Products, articles, categories, brands, settings, etc. |
+| Article image uploads (3 routes) | `article-upload` | Nested inside `products.edit` group |
+| `ebay/sync-all`, `ebay/orders/sync`, `ebay/orders/{id}/sync` | `ebay-sync` | Nested inside `ebay.manage` group |
+| `admins.manage` group | `admin-sensitive` | All admin user management |
+| `products.import` group | `admin-sensitive` | Bulk import/export/delete |
+| `security.manage` group | `admin-sensitive` | 2FA notices etc. |
+
+### Response headers
+`X-RateLimit-Limit`, `X-RateLimit-Remaining`, `Retry-After` are automatic on all routes using throttle middleware. Laravel provides these natively — no custom middleware needed.
+
+### Structured rate-limit logging
+`ThrottleRequestsException` now logs a structured `warning` entry:
+```
+[rate_limit_exceeded] { route, method, ip, user_id }
+```
+Also added to the skip list in the general critical-exception reporter so it does not appear as a false CRITICAL log event.
+
+### Integrations confirmed unaffected
+- Stripe webhook — no throttle (correct; Stripe signature validates every call)
+- eBay OAuth callback — existing inline `throttle:10,1` unchanged
+- Laravel scheduler — console-only, not HTTP
+
+### Files changed
+| File | Change |
+|---|---|
+| `app/Providers/AppServiceProvider.php` | All new named limiters + quote-form update |
+| `bootstrap/app.php` | ThrottleRequestsException structured warning log |
+| `routes/api.php` | Throttle middleware applied to all newly protected routes |
+
+### Deploy commands (no migration)
+```bash
+cd /home/u978121777/domains/okelcor.com/public_html/okelcor-api
+git fetch origin && git reset --hard origin/main
+composer install --no-dev --optimize-autoloader
+/opt/alt/php83/usr/bin/php artisan config:clear
+/opt/alt/php83/usr/bin/php artisan config:cache
+/opt/alt/php83/usr/bin/php artisan route:cache
+```
+
+### Frontend note
+On any 429 response, read the `Retry-After` header and show:
+> "Too many attempts. Please wait X seconds and try again."
+Do not show a generic server error for 429s.
+
+---
+
+## Session 27 — Track Order "Page Not Found" (Frontend Issue + Backend Shape Fix)
+
+**Frontend (TRK-1 — done by frontend team):** `app/account/orders/[ref]/track/page.tsx` created, "Track Order" button fixed.
+
+**Backend — a response shape mismatch was discovered but reverted at user request.** The backend tracking endpoint exists at `GET /api/v1/tracking/{container}` (public, 30/min). The shape change was reverted; the endpoint still returns its original shape. If a shape alignment is needed in future, see commits `176e1ac` (change) and `0ead0e6` (revert) for the full diff.
+
+Current tracking response shape (original, as of this session):
+```json
+{
+  "data": { "status": "...", "location": "...", "eta": "...", "events": [...] },
+  "carrier": "DHL",
+  "message": "success"
+}
+```
 
 ---
 
@@ -46,10 +151,15 @@ composer install --no-dev
 tail -n 50 storage/logs/laravel.log | grep -i "purifier\|article"
 ```
 
-**Frontend note (separate task):**
-- TipTap duplicate extension warnings (`link`, `underline`) are a frontend-only issue — StarterKit includes them, do not add them again explicitly.
-- The `/api/auth/customer/me` 401 on admin pages is a frontend routing issue — admin pages should not call the customer auth endpoint.
-- When the backend returns 422, read `response.data.message` and display it. The backend now always returns a clear string on article save failure.
+**Frontend notes from session 26:**
+
+1. **TipTap duplicate extensions** — StarterKit already includes `Link` and `Underline`. Do not register them again explicitly; it causes "extension already registered" console warnings.
+2. **Customer auth 401 on admin pages** — Admin pages are calling the customer auth check (`/api/auth/customer/me`). Skip that call on routes under `/admin/*`.
+3. **Article save error display** — On 422, the backend returns `{ message: "..." }` with a user-readable string. Show `error.response.data.message` — not a generic "Server Error".
+4. **Article editor — SEO fields** — Backend stores `meta_title` (max 160), `meta_description` (max 300), `cover_alt` (max 200) per locale. Add input fields and include in the `translations[locale]` payload.
+5. **Article editor — OG image upload** — `POST /api/v1/admin/articles/{id}/og-image` (multipart, field `image`, max 5 MB, jpeg/png/webp). Returns full article with absolute `og_image` URL.
+6. **Article editor — body image upload** — TipTap Image extension must POST to `POST /api/v1/admin/articles/{id}/body-image` with the admin Bearer token. Inject returned `data.url` as `<img src>`. External image URLs are stripped by the sanitizer.
+7. **429 handling (SEC-3)** — On any 429, read `Retry-After` header and show "Too many attempts. Please wait X seconds and try again." Do not show a generic server error.
 
 ---
 
