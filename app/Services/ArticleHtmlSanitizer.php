@@ -28,14 +28,19 @@ class ArticleHtmlSanitizer
 
         $config = \HTMLPurifier_Config::createDefault();
 
-        // ── Disable file-based definition cache ───────────────────────────────
-        // Avoids permission errors on production when the cache dir is not writable.
-        // HTMLPurifier rebuilds its definition per request (negligible cost for article saves).
+        // ── No file cache ─────────────────────────────────────────────────────
+        // Avoids permission errors on production. Cost is negligible for article saves.
         $config->set('Cache.DefinitionImpl', null);
 
+        // ── Custom definition ID (required to use maybeGetRawHTMLDefinition) ──
+        $config->set('HTML.DefinitionID',  'okelcor-tiptap');
+        $config->set('HTML.DefinitionRev', 2);
+
         // ── Allowed elements ──────────────────────────────────────────────────
-        // Covers all TipTap output: headings, inline marks, lists, blockquotes,
-        // tables, links, images, code blocks, and CTA div blocks.
+        // ALL config directives must be set BEFORE maybeGetRawHTMLDefinition()
+        // because that call finalizes the config internally.
+        // HTML5 elements (mark, figure, figcaption) are registered via addElement
+        // below — they must still appear here so the filter passes them through.
         $config->set('HTML.Allowed',
             'h1,h2,h3,h4,h5,h6,' .
             'p,br,hr,' .
@@ -52,21 +57,18 @@ class ArticleHtmlSanitizer
         );
 
         // ── Allowed URL schemes ───────────────────────────────────────────────
-        // Blocks javascript: and data: URLs entirely.
         $config->set('URI.AllowedSchemes', ['http' => true, 'https' => true, 'mailto' => true]);
 
         // ── Link safety ───────────────────────────────────────────────────────
-        $config->set('HTML.TargetBlank', false);
+        $config->set('HTML.TargetBlank',    false);
         $config->set('HTML.TargetNoopener', true);
 
         // ── Allowed CSS in style attributes ───────────────────────────────────
-        // Limited to table cell alignment used by TipTap's table extension.
         $config->set('CSS.AllowedProperties', ['text-align', 'vertical-align', 'width', 'min-width']);
 
         // ── Image safety ──────────────────────────────────────────────────────
-        // Restrict img[src] to the app domain so editors cannot embed arbitrary
-        // external images. Editors must use the body-image upload endpoint.
-        // Note: this does NOT block external a[href] hyperlinks — only embedded resources.
+        // Restrict img[src] to the app domain. Editors must use the body-image
+        // upload endpoint. External a[href] links are NOT affected by this.
         $appDomain = parse_url(config('app.url'), PHP_URL_HOST) ?? '';
         if ($appDomain) {
             $config->set('URI.Host', $appDomain);
@@ -75,20 +77,38 @@ class ArticleHtmlSanitizer
 
         $config->set('HTML.SafeIframe', false);
 
+        // ── Register HTML5 elements and custom attributes ─────────────────────
+        // HTMLPurifier's default definition is HTML 4.01. Elements like
+        // mark/figure/figcaption and data-* attributes are not in that spec.
+        // Without these registrations, HTMLPurifier calls trigger_error() for each
+        // unknown element/attribute — Laravel converts those to ErrorException.
+        //
+        // IMPORTANT: this block must come AFTER all $config->set() calls because
+        // maybeGetRawHTMLDefinition() finalizes the config; no set() after this.
+        if ($def = $config->maybeGetRawHTMLDefinition()) {
+            $def->addElement('mark',       'Inline', 'Inline', 'Common');
+            $def->addElement('figure',     'Block',  'Flow',   'Common');
+            $def->addElement('figcaption', 'Block',  'Flow',   'Common');
+
+            // img[loading] is HTML5 — not in HTMLPurifier's default attribute list
+            $def->addAttribute('img', 'loading', 'Text');
+
+            // data-* on div for TipTap CTA / custom node blocks
+            $def->addAttribute('div', 'data-type',      'Text');
+            $def->addAttribute('div', 'data-cta-title', 'Text');
+            $def->addAttribute('div', 'data-cta-text',  'Text');
+            $def->addAttribute('div', 'data-cta-url',   'Text');
+            $def->addAttribute('div', 'data-cta-label', 'Text');
+        }
+
         try {
             $purifier = new \HTMLPurifier($config);
-            $clean    = $purifier->purify($html);
-
-            // If purification returns empty but the input was not empty, it means
-            // all content was stripped (e.g. all tags disallowed). Return empty
-            // so the controller can decide whether to reject the body.
-            return $clean;
+            return $purifier->purify($html);
         } catch (\Throwable $e) {
             Log::warning('ArticleHtmlSanitizer: HTMLPurifier failed', [
-                'error' => $e->getMessage(),
+                'error'   => $e->getMessage(),
+                'trigger' => get_class($e),
             ]);
-            // Re-throw as a plain RuntimeException so the controller surfaces a
-            // 422 instead of an unhandled 500.
             throw new \RuntimeException(
                 'Article body could not be sanitized. Please check the content and try again.',
                 0,
