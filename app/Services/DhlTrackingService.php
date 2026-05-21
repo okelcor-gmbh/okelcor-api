@@ -22,24 +22,37 @@ class DhlTrackingService
                 'body'   => $response->json(),
             ]);
 
+            if ($response->status() === 404) {
+                return ['error' => 'not_found'];
+            }
+
             if (! $response->ok()) {
-                return ['error' => 'DHL tracking unavailable'];
+                return ['error' => 'unavailable'];
             }
 
             $shipment = $response->json('shipments.0');
 
+            if (! $shipment) {
+                return ['error' => 'not_found'];
+            }
+
+            $events = collect($shipment['events'] ?? [])
+                ->values()
+                ->map(fn ($e, $i) => [
+                    'id'           => $i + 1,
+                    'event_date'   => $e['timestamp'],
+                    'status_label' => $e['description'],
+                    'location'     => $e['location']['address']['addressLocality'] ?? null,
+                    'description'  => $e['description'],
+                ])->toArray();
+
             return [
-                'status'   => $shipment['status']['description'] ?? null,
-                'location' => $shipment['status']['location']['address']['addressLocality'] ?? null,
-                'eta'      => $shipment['estimatedTimeOfDelivery'] ?? null,
-                'events'   => collect($shipment['events'] ?? [])->map(fn ($e) => [
-                    'timestamp'   => $e['timestamp'],
-                    'description' => $e['description'],
-                    'location'    => $e['location']['address']['addressLocality'] ?? null,
-                ])->toArray(),
+                'status'             => $shipment['status']['description'] ?? null,
+                'estimated_delivery' => $shipment['estimatedTimeOfDelivery'] ?? null,
+                'events'             => $events,
             ];
         } catch (\Throwable) {
-            return ['error' => 'DHL tracking unavailable'];
+            return ['error' => 'unavailable'];
         }
     }
 }

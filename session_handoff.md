@@ -1,5 +1,58 @@
 # Session Handoff — Okelcor API
-Last updated: 2026-05-21 (session 26)
+Last updated: 2026-05-21 (session 27)
+
+---
+
+## Session 27 — Track Order: Frontend Page + Backend Response Shape Fix
+
+**Symptom:** Clicking "Track Order" in the customer account area shows a Next.js 404 page.
+
+**Frontend (TRK-1) — done:** `app/account/orders/[ref]/track/page.tsx` created, button fixed.
+
+**Backend — response shape mismatch fixed (this session).**
+
+The existing `GET /api/v1/tracking/{identifier}` endpoint had a different response shape than what the frontend built against. Three files updated:
+
+| File | Change |
+|------|--------|
+| `app/Services/DhlTrackingService.php` | `eta` → `estimated_delivery`; events normalized to `{ id, event_date, status_label, location, description }`; 404 from DHL API → `error: not_found`; other failures → `error: unavailable` |
+| `app/Services/ShipsGoService.php` | Same field normalization; handles ShipsGo v2 paginated envelope (`data[0]`); empty result → `not_found` |
+| `app/Http/Controllers/ContainerTrackingController.php` | `not_found` error → HTTP 404; `unavailable` → 503; `carrier` + `carrier_type` + `identifier` merged into `data`; added `^00` to DHL regex |
+
+**Final response shape** (`GET /api/v1/tracking/{identifier}` — public, 30 req/min rate limit):
+```json
+{
+  "data": {
+    "identifier":        "JD014600006253208458",
+    "carrier":           "DHL",
+    "carrier_type":      "dhl",
+    "status":            "Delivered - Signed for by: MUSTERMANN",
+    "estimated_delivery": "2026-05-25T12:00:00",
+    "events": [
+      {
+        "id":           1,
+        "event_date":   "2026-05-21T09:00:00",
+        "status_label": "Parcel in transit",
+        "location":     "Frankfurt Hub",
+        "description":  "Parcel in transit"
+      }
+    ]
+  }
+}
+```
+
+Error responses:
+- `404` → tracking number not recognised by carrier
+- `503` → carrier API temporarily unavailable
+- `429` → rate limit hit (30/min, handled by Laravel throttle middleware)
+
+**Deploy steps (no migration):**
+```bash
+git fetch origin && git reset --hard origin/main
+composer install --no-dev
+/opt/alt/php83/usr/bin/php artisan config:clear && /opt/alt/php83/usr/bin/php artisan config:cache
+/opt/alt/php83/usr/bin/php artisan route:cache
+```
 
 ---
 
@@ -46,10 +99,21 @@ composer install --no-dev
 tail -n 50 storage/logs/laravel.log | grep -i "purifier\|article"
 ```
 
-**Frontend note (separate task):**
-- TipTap duplicate extension warnings (`link`, `underline`) are a frontend-only issue — StarterKit includes them, do not add them again explicitly.
-- The `/api/auth/customer/me` 401 on admin pages is a frontend routing issue — admin pages should not call the customer auth endpoint.
-- When the backend returns 422, read `response.data.message` and display it. The backend now always returns a clear string on article save failure.
+**Frontend notes for session 26:**
+
+1. **TipTap duplicate extensions** — StarterKit already includes `Link` and `Underline`. Do not add them again explicitly or you get "extension already registered" warnings in the console.
+
+2. **Customer auth 401 on admin pages** — The frontend is calling `/api/auth/customer/me` (or similar customer auth check) on pages under `/admin/*`. Admin pages should only use the admin Sanctum token, not the customer auth session. Add a route guard: skip customer auth checks when `pathname.startsWith('/admin')`.
+
+3. **Article save error display** — When the backend returns 422, it always includes `{ message: "..." }`. Read `error.response.data.message` and show it in the editor UI. Do NOT show a generic "Server Error" — the message is user-readable.
+
+4. **Article editor — missing SEO fields** — The backend stores `meta_title` (max 160), `meta_description` (max 300), `cover_alt` (max 200) per locale on the translation object. Add input fields for these in the article editor form and include them in the `translations[locale]` payload when saving.
+
+5. **Article editor — OG image upload** — The backend now has `POST /api/v1/admin/articles/{id}/og-image` (multipart, field name `image`, max 5 MB, jpeg/png/webp). Add an OG image upload UI to the article editor. The response returns the full article with `og_image` as an absolute URL.
+
+6. **Article editor — body image upload** — TipTap's Image extension must be configured to POST to `POST /api/v1/admin/articles/{id}/body-image` with the admin Bearer token, then inject the returned `data.url` as the image `src`. Do not allow direct external image URLs in the body — they are stripped by the sanitizer (`URI.DisableExternalResources = true` on the domain).
+
+7. **Track order button (Session 27)** — See the session 27 note above for full details. The button currently routes to a non-existent Next.js page.
 
 ---
 

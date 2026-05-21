@@ -32,20 +32,33 @@ class ShipsGoService
             ]);
 
             if (! $response->successful()) {
-                return ['error' => 'Tracking unavailable'];
+                return ['error' => 'unavailable'];
             }
 
-            $data = $response->json();
+            $data     = $response->json();
+            $shipment = $data['data'][0] ?? $data;
+
+            if (empty($shipment)) {
+                return ['error' => 'not_found'];
+            }
+
+            $events = collect($shipment['events'] ?? [])
+                ->values()
+                ->map(fn ($e, $i) => [
+                    'id'           => $i + 1,
+                    'event_date'   => $e['event_date'] ?? $e['timestamp'] ?? $e['date'] ?? null,
+                    'status_label' => $e['event']      ?? $e['description'] ?? $e['status'] ?? null,
+                    'location'     => $e['location']   ?? $e['port'] ?? null,
+                    'description'  => $e['event']      ?? $e['description'] ?? null,
+                ])->toArray();
 
             return [
-                'status'   => $data['status']         ?? null,
-                'vessel'   => $data['vessel']          ?? null,
-                'location' => $data['location']        ?? null,
-                'eta'      => $data['eta']              ?? null,
-                'events'   => $data['events']           ?? [],
+                'status'             => $shipment['status'] ?? null,
+                'estimated_delivery' => $shipment['eta']    ?? null,
+                'events'             => $events,
             ];
         } catch (\Throwable) {
-            return ['error' => 'Tracking unavailable'];
+            return ['error' => 'unavailable'];
         }
     }
 }

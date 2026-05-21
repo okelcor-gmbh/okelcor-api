@@ -10,28 +10,29 @@ class ContainerTrackingController extends Controller
 {
     public function __invoke(string $container): JsonResponse
     {
-        $isDhl = (bool) preg_match('/^\d{10,12}$|^[0-9]{3}[-]?[0-9]{8}$|^JD|^1Z|^GM/', $container);
+        $isDhl = (bool) preg_match('/^\d{10,12}$|^[0-9]{3}[-]?[0-9]{8}$|^JD|^00|^1Z|^GM/', $container);
 
         if ($isDhl) {
-            $data    = app(DhlTrackingService::class)->track($container);
-            $carrier = 'DHL';
+            $result      = app(DhlTrackingService::class)->track($container);
+            $carrierName = 'DHL';
+            $carrierType = 'dhl';
         } else {
-            $data    = app(ShipsGoService::class)->trackContainer($container);
-            $carrier = 'Sea Freight';
+            $result      = app(ShipsGoService::class)->trackContainer($container);
+            $carrierName = 'Sea Freight';
+            $carrierType = 'sea_freight';
         }
 
-        if (isset($data['error'])) {
-            return response()->json([
-                'data'    => null,
-                'carrier' => $carrier,
-                'message' => $data['error'],
-            ], 503);
+        if (isset($result['error'])) {
+            $status = $result['error'] === 'not_found' ? 404 : 503;
+            return response()->json(['data' => null, 'message' => $result['error']], $status);
         }
 
         return response()->json([
-            'data'    => $data,
-            'carrier' => $carrier,
-            'message' => 'success',
+            'data' => array_merge($result, [
+                'identifier'  => $container,
+                'carrier'     => $carrierName,
+                'carrier_type' => $carrierType,
+            ]),
         ]);
     }
 }
