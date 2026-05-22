@@ -183,6 +183,59 @@ class CustomerQuoteAcceptanceController extends Controller
     }
 
     /**
+     * GET /api/v1/orders/{ref}/accept-confirmation?token={token}
+     *
+     * Public — returns safe order summary the frontend needs to display before
+     * the customer confirms. Does NOT expose PII beyond what the token holder
+     * already knows (they clicked the link in their own email).
+     */
+    public function confirmationTokenInfo(Request $request, string $ref): JsonResponse
+    {
+        $request->validate([
+            'token' => ['required', 'string', 'size:64'],
+        ]);
+
+        $order = Order::where('ref', $ref)
+            ->where('acceptance_token', $request->query('token'))
+            ->first();
+
+        if (! $order) {
+            return response()->json([
+                'message' => 'Invalid or expired acceptance link.',
+                'code'    => 'invalid_token',
+            ], 403);
+        }
+
+        if ($order->acceptance_token_expires_at && $order->acceptance_token_expires_at->isPast()) {
+            return response()->json([
+                'message' => 'This acceptance link has expired. Please contact Okelcor for a new one.',
+                'code'    => 'token_expired',
+            ], 403);
+        }
+
+        $document = TradeDocument::where('order_id', $order->id)
+            ->where('type', 'order_confirmation')
+            ->whereIn('status', ['issued', 'sent'])
+            ->first();
+
+        return response()->json([
+            'data' => [
+                'order_ref'                  => $order->ref,
+                'order_total'                => (float) $order->total,
+                'currency'                   => 'EUR',
+                'customer_acceptance_status' => $order->customer_acceptance_status,
+                'already_actioned'           => $order->customer_acceptance_status !== 'pending',
+                'expires_at'                 => $order->acceptance_token_expires_at?->toIso8601String(),
+                'document' => $document ? [
+                    'type'   => $document->type,
+                    'number' => $document->number,
+                ] : null,
+            ],
+            'message' => 'success',
+        ]);
+    }
+
+    /**
      * POST /api/v1/orders/{ref}/accept-confirmation
      *
      * Public (no account required) — token-protected.

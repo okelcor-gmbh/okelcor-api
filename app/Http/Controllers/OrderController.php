@@ -96,6 +96,10 @@ class OrderController extends Controller
                     'created_at'   => $e->created_at?->toIso8601String(),
                 ])->values()
                 : [],
+            // Order confirmation acceptance — customer-visible status
+            'customer_acceptance_status' => $o->customer_acceptance_status ?? 'pending',
+            'customer_accepted_at'       => $o->customer_accepted_at?->toIso8601String(),
+
             // Payment milestones — customer-visible progress
             'payment_stage'        => $o->payment_stage ?? 'pending_proforma',
             'deposit_amount'       => $o->deposit_amount !== null ? (float) $o->deposit_amount : null,

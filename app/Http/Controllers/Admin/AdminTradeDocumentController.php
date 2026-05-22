@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Mail\OrderConfirmationAcceptanceRequest;
 use App\Mail\TradeDocumentEmail;
 use App\Models\Order;
 use App\Models\OrderLog;
@@ -839,5 +840,112 @@ class AdminTradeDocumentController extends Controller
             'created_at'        => $d->created_at?->toIso8601String(),
             'updated_at'        => $d->updated_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * POST /api/v1/admin/orders/{id}/send-acceptance-request
+     *
+     * Generate (or rotate) an acceptance token, email the customer the Order
+     * Confirmation PDF with an embedded accept/reject link, and log the event.
+     *
+     * Body (optional):
+     *   recipient_email  — override; defaults to order.customer_email
+     *   message          — optional note shown in the email body
+     */
+    public function sendAcceptanceRequest(Request $request, int $id): JsonResponse
+    {
+        $order = Order::findOrFail($id);
+        $admin = $request->user();
+
+        $request->validate([
+            'recipient_email' => ['nullable', 'email', 'max:255'],
+            'message'         => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        if ($order->customer_acceptance_status === 'accepted') {
+            return response()->json([
+                'message' => 'Customer has already accepted this order confirmation.',
+            ], 409);
+        }
+
+        // Must have a generated order confirmation document to attach
+        $document = TradeDocument::where('order_id', $order->id)
+            ->where('type', 'order_confirmation')
+            ->whereIn('status', ['issued', 'sent'])
+            ->first();
+
+        if (! $document) {
+            return response()->json([
+                'message' => 'Generate the Order Confirmation document first before sending an acceptance request.',
+                'code'    => 'no_order_confirmation',
+            ], 422);
+        }
+
+        // Generate / rotate acceptance token (7-day TTL)
+        $token   = bin2hex(random_bytes(32));
+        $expires = now()->addDays(7);
+
+        $order->update([
+            'acceptance_token'            => $token,
+            'acceptance_token_expires_at' => $expires,
+        ]);
+
+        $frontendUrl = rtrim(config('app.frontend_url', 'https://okelcor.com'), '/');
+        $acceptUrl   = $frontendUrl . '/orders/' . $order->ref . '/accept-confirmation?token=' . $token;
+
+        $recipientEmail = $request->input('recipient_email') ?? $order->customer_email;
+
+        if (! $recipientEmail) {
+            return response()->json([
+                'message' => 'No recipient email could be determined. Please provide one.',
+            ], 422);
+        }
+
+        try {
+            Mail::to($recipientEmail)->send(new OrderConfirmationAcceptanceRequest(
+                order:        $order,
+                document:     $document,
+                acceptUrl:    $acceptUrl,
+                expiresAt:    $expires->format('d M Y'),
+                adminMessage: $request->input('message'),
+            ));
+        } catch (\Throwable $e) {
+            Log::error('Acceptance request email failed', [
+                'order_ref'  => $order->ref,
+                'recipient'  => $recipientEmail,
+                'error'      => $e->getMessage(),
+            ]);
+            return response()->json([
+                'message' => 'Failed to send acceptance request email. Please try again or contact support.',
+            ], 500);
+        }
+
+        // Advance document lifecycle: issued → sent
+        $document->update(['status' => 'sent', 'sent_at' => now()]);
+
+        try {
+            OrderLog::create([
+                'order_id'         => $order->id,
+                'order_ref'        => $order->ref,
+                'admin_user_id'    => $admin?->id,
+                'admin_user_email' => $admin?->email,
+                'action'           => 'acceptance_request_sent',
+                'notes'            => 'Acceptance request sent to ' . $recipientEmail
+                    . '. Link expires: ' . $expires->toDateString(),
+                'ip_address'       => $request->ip(),
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('OrderLog write failed (acceptance request sent)', ['order_ref' => $order->ref]);
+        }
+
+        return response()->json([
+            'data' => [
+                'accept_url'      => $acceptUrl,
+                'expires_at'      => $expires->toIso8601String(),
+                'recipient_email' => $recipientEmail,
+                'order_ref'       => $order->ref,
+            ],
+            'message' => 'Acceptance request sent to ' . $recipientEmail . '.',
+        ]);
     }
 }

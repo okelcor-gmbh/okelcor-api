@@ -1,5 +1,138 @@
 # Session Handoff — Okelcor API
-Last updated: 2026-05-22 (session 28)
+Last updated: 2026-05-22 (session 29)
+
+---
+
+## Session 29 — DOC-6: Customer Order Confirmation Acceptance Flow (fix + complete)
+
+### Audit findings (what already existed)
+
+| Item | Status |
+|---|---|
+| Migration `2026_05_20_000003_add_customer_acceptance_to_orders` — 7 fields on `orders` | Existed |
+| `CustomerQuoteAcceptanceController` — `acceptOrderConfirmation()`, `acceptConfirmationByToken()`, `acceptQuote()`, `rejectQuote()` | Existed |
+| Admin `AdminTradeDocumentController::generateAcceptanceLink()` — generates 64-char token + frontend URL | Existed |
+| Admin `AdminTradeDocumentController::generateOrderConfirmation()` — generates AB-YYYY-XXXX PDF | Existed |
+| Admin proforma gate: `customer_acceptance_status !== 'accepted'` → 409 (super_admin can override) | Existed |
+| `TradeDocumentService::generateOrderConfirmationForOrder()` — AB- prefix, `order_confirmation` type | Existed |
+| `AdminOrderController` response: `customer_acceptance_status`, `customer_accepted_at`, `customer_acceptance_note` | Existed |
+| Route `POST /auth/orders/{ref}/accept-order-confirmation` | Existed |
+| Route `POST /orders/{ref}/accept-confirmation` (public token, throttle:acceptance-links) | Existed |
+| Route `POST /admin/orders/{id}/generate-acceptance-link` | Existed |
+
+### Bugs and gaps found
+
+| # | Issue | Severity |
+|---|---|---|
+| 1 | `order_logs.action` enum missing `order_confirmation_accepted`, `order_confirmation_rejected`, `customer_proposal_accepted`, `customer_proposal_rejected`, `acceptance_link_generated`, `acceptance_request_sent`, `proforma_generation_blocked_no_acceptance`, `document_voided` — controller writes these but MySQL silently fails (try/catch swallows error) | **Critical** |
+| 2 | No GET endpoint for token acceptance preview — frontend can't display order/document details before customer clicks Accept | **Missing** |
+| 3 | `customer_acceptance_status` / `customer_accepted_at` absent from public customer order response (`OrderController::formatOrder()`) — account order page can't show acceptance banner | **Missing** |
+| 4 | `generateAcceptanceLink` returns the URL but never emails it — admin must copy/paste manually; no mailable, no acceptance request email | **Missing** |
+
+### What was built
+
+**Fix 1 — Migration: extend `order_logs.action` enum**
+`database/migrations/2026_05_22_000001_add_acceptance_actions_to_order_logs.php`
+Adds 8 new enum values (additive ALTER TABLE — no data loss):
+`order_confirmation_accepted`, `order_confirmation_rejected`, `customer_proposal_accepted`,
+`customer_proposal_rejected`, `acceptance_link_generated`, `acceptance_request_sent`,
+`proforma_generation_blocked_no_acceptance`, `document_voided`
+
+**Fix 2 — GET public endpoint: acceptance token preview**
+`GET /api/v1/orders/{ref}/accept-confirmation?token={token}`
+- Returns order_ref, order_total, currency, customer_acceptance_status, already_actioned, expires_at, document (type + number)
+- Uses same throttle:acceptance-links group (20/min)
+- Same token + ref validation as the POST endpoint
+- No PII exposed beyond what the link holder already has from their email
+- Controller: `CustomerQuoteAcceptanceController::confirmationTokenInfo()`
+
+**Fix 3 — `customer_acceptance_status` in public customer order response**
+`app/Http/Controllers/OrderController.php` — `formatOrder()` now includes:
+```
+customer_acceptance_status  pending | accepted | rejected
+customer_accepted_at        ISO 8601 or null
+```
+
+**Fix 4 — "Send Acceptance Request" email**
+New endpoint: `POST /api/v1/admin/orders/{id}/send-acceptance-request`
+- Permission: `trade_documents.manage`
+- Guards: 409 if already accepted; 422 if no issued/sent order_confirmation document exists
+- Generates / rotates acceptance token (7-day TTL, same as generateAcceptanceLink)
+- Sends `OrderConfirmationAcceptanceRequest` mailable to `recipient_email` (defaults to `order.customer_email`)
+- Attaches the Order Confirmation PDF from private disk
+- Advances document lifecycle: `issued → sent` (stamps `sent_at`)
+- Logs `acceptance_request_sent` to `order_logs`
+- Returns `{ accept_url, expires_at, recipient_email, order_ref }`
+- Controller: `AdminTradeDocumentController::sendAcceptanceRequest()`
+
+### New files
+| File | Purpose |
+|---|---|
+| `database/migrations/2026_05_22_000001_add_acceptance_actions_to_order_logs.php` | Extend order_logs.action enum |
+| `app/Mail/OrderConfirmationAcceptanceRequest.php` | Mailable — AB PDF + accept link |
+| `resources/views/emails/order-confirmation-acceptance-request.blade.php` | HTML email |
+| `resources/views/emails/order-confirmation-acceptance-request-text.blade.php` | Plain-text fallback |
+
+### Changed files
+| File | Change |
+|---|---|
+| `routes/api.php` | Added GET `/orders/{ref}/accept-confirmation`; added `POST /admin/orders/{id}/send-acceptance-request` |
+| `app/Http/Controllers/OrderController.php` | Added `customer_acceptance_status` + `customer_accepted_at` to `formatOrder()` |
+| `app/Http/Controllers/CustomerQuoteAcceptanceController.php` | Added `confirmationTokenInfo()` method |
+| `app/Http/Controllers/Admin/AdminTradeDocumentController.php` | Added `use OrderConfirmationAcceptanceRequest`; added `sendAcceptanceRequest()` method |
+
+### Full flow after fix
+
+**Admin flow:**
+1. Admin generates Order Confirmation: `POST /admin/orders/{id}/trade-documents/order-confirmation` → returns AB-YYYY-XXXX
+2. Admin sends acceptance request: `POST /admin/orders/{id}/send-acceptance-request` → emails customer with AB PDF attached + accept/reject link
+3. Admin can also just copy the link: `POST /admin/orders/{id}/generate-acceptance-link` → returns `accept_url` without emailing
+
+**Customer (account) flow:**
+1. Customer loads `/account/orders/{ref}` → response includes `customer_acceptance_status: "pending"`
+2. Customer sees AB PDF in `trade_documents[]` (type `order_confirmation`, status `sent`)
+3. Customer clicks "Accept Order Confirmation" → `POST /auth/orders/{ref}/accept-order-confirmation`
+4. `customer_acceptance_status` → `accepted`; `acceptance_token` cleared
+
+**Customer (public link) flow:**
+1. Customer opens emailed link: `{FRONTEND_URL}/orders/{ref}/accept-confirmation?token={token}`
+2. Frontend fetches order details: `GET /api/v1/orders/{ref}/accept-confirmation?token={token}` → shows order ref, total, AB number, expiry
+3. Customer clicks Accept or Decline → `POST /api/v1/orders/{ref}/accept-confirmation` body: `{ action: "accept"|"reject", token: "...", note: "..." }`
+4. `customer_acceptance_status` → `accepted` or `rejected`; token cleared
+
+**After customer accepts:**
+- Admin page updates: `customer_acceptance_status: accepted`
+- Generate Proforma button unlocks (409 gate lifted)
+- `POST /admin/orders/{id}/trade-documents/proforma` → generates PI-YYYY-XXXX
+
+### Deploy steps
+```bash
+cd /home/u978121777/domains/okelcor.com/public_html/okelcor-api
+git fetch origin && git reset --hard origin/main
+composer install --no-dev --optimize-autoloader
+/opt/alt/php83/usr/bin/php artisan migrate --force
+/opt/alt/php83/usr/bin/php artisan config:clear && /opt/alt/php83/usr/bin/php artisan config:cache
+/opt/alt/php83/usr/bin/php artisan route:cache
+/opt/alt/php83/usr/bin/php artisan view:clear
+```
+
+**Migration that will run:** `2026_05_22_000001_add_acceptance_actions_to_order_logs` — additive ALTER TABLE on `order_logs.action`, no data loss.
+
+### Frontend integration notes
+
+**Account order page (`/account/orders/{ref}`):**
+- Check `order.customer_acceptance_status === 'pending'` AND `order.trade_documents` contains an `order_confirmation` with `status: 'sent'`
+- Show banner: "Please review and accept the Order Confirmation before the Proforma Invoice is issued."
+- Show AB PDF download button (from `trade_documents` array)
+- Show "Accept Order Confirmation" button → `POST /api/v1/auth/orders/{ref}/accept-order-confirmation`
+- Optionally show "Decline" button → show rejection reason input → same endpoint body `{ note }`... (no separate reject endpoint for account users — not implemented yet)
+
+**Public token page (`/orders/{ref}/accept-confirmation?token=...`):**
+1. On load: `GET /api/v1/orders/{ref}/accept-confirmation?token={token}` — show order ref, total, document number, expiry
+2. If `already_actioned: true` → show already-accepted/rejected message
+3. Accept button → `POST /api/v1/orders/{ref}/accept-confirmation` body `{ action: "accept", token: "...", note: "" }`
+4. Decline button → show reason input → `POST` with `action: "reject"`
+5. On 403 → show "This link is invalid or has expired" message
 
 ---
 

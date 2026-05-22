@@ -185,6 +185,9 @@ Route::prefix('v1')->group(function () {
 
     // Order confirmation acceptance via secure token (non-account customers) — 20/min per IP
     Route::middleware('throttle:acceptance-links')->group(function () {
+        // GET — preview order details before accepting (safe; no PII exposed)
+        Route::get('orders/{ref}/accept-confirmation', [CustomerQuoteAcceptanceController::class, 'confirmationTokenInfo']);
+        // POST — accept or reject via token
         Route::post('orders/{ref}/accept-confirmation', [CustomerQuoteAcceptanceController::class, 'acceptConfirmationByToken']);
     });
 
@@ -476,6 +479,7 @@ Route::prefix('v1')->group(function () {
             Route::post('trade-documents/{id}/void', [AdminTradeDocumentController::class, 'void']);
             Route::delete('trade-documents/{id}', [AdminTradeDocumentController::class, 'destroy']);
             Route::post('orders/{id}/generate-acceptance-link', [AdminTradeDocumentController::class, 'generateAcceptanceLink']);
+            Route::post('orders/{id}/send-acceptance-request', [AdminTradeDocumentController::class, 'sendAcceptanceRequest']);
         });
 
         // -----------------------------------------------------------------
