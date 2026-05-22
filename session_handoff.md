@@ -1,5 +1,62 @@
 # Session Handoff — Okelcor API
-Last updated: 2026-05-22 (session 29)
+Last updated: 2026-05-22 (session 29 + route alignment)
+
+---
+
+## Session 29b — DOC-6 Route Alignment (complete)
+
+**Commits:** `7c2da1d` (session 29 fixes) + `05910f7` (route alignment)
+
+### Changes
+
+| Item | Before | After |
+|---|---|---|
+| Admin send-acceptance-request | `POST /admin/orders/{id}/send-acceptance-request` only | Added alias `POST /admin/orders/{id}/acceptance/send` (frontend-matching). Old route kept. |
+| Public token preview | `GET /orders/{ref}/accept-confirmation?token=` (ref + query) | Added `GET /documents/acceptance/{token}` (token-only, canonical). Old route kept. |
+| Public token accept | `POST /orders/{ref}/accept-confirmation` body `{action,token,note}` | Added `POST /documents/acceptance/{token}/accept` body `{note}` (optional). Old route kept. |
+| Public token reject | Same as accept with `action:reject` | Added `POST /documents/acceptance/{token}/reject` body `{note}` (optional). Old route kept. |
+| Authenticated customer reject | Not implemented | Added `POST /auth/orders/{ref}/reject-order-confirmation` |
+| Admin order detail `acceptance_token` | Not exposed | Now included when `customer_acceptance_status = pending`; null after accept/reject |
+| Frontend URL in emailed link | `/orders/{ref}/accept-confirmation?token=` | Changed to `/documents/acceptance/{token}` in both `generateAcceptanceLink` and `sendAcceptanceRequest` |
+
+### Complete final route list (acceptance only)
+
+**Admin (auth:sanctum + permission:trade_documents.manage):**
+```
+POST /api/v1/admin/orders/{id}/acceptance/send           ← frontend canonical (new)
+POST /api/v1/admin/orders/{id}/send-acceptance-request   ← kept for backwards compat
+POST /api/v1/admin/orders/{id}/generate-acceptance-link  ← returns URL without emailing
+```
+
+**Authenticated customer (auth.customer):**
+```
+POST /api/v1/auth/orders/{ref}/accept-order-confirmation
+POST /api/v1/auth/orders/{ref}/reject-order-confirmation  ← new
+```
+
+**Public token — canonical (throttle:acceptance-links):**
+```
+GET  /api/v1/documents/acceptance/{token}          ← preview, no PII
+POST /api/v1/documents/acceptance/{token}/accept   ← body: { note? }
+POST /api/v1/documents/acceptance/{token}/reject   ← body: { note? }
+```
+
+**Public token — legacy (throttle:acceptance-links, kept):**
+```
+GET  /api/v1/orders/{ref}/accept-confirmation?token=
+POST /api/v1/orders/{ref}/accept-confirmation      body: { action, token, note? }
+```
+
+### Admin order detail response — acceptance fields
+```json
+{
+  "customer_acceptance_status":  "pending | accepted | rejected",
+  "customer_accepted_at":        "ISO 8601 | null",
+  "customer_acceptance_note":    "string | null",
+  "acceptance_token":            "64-char hex string | null (null once actioned)",
+  "acceptance_token_expires_at": "ISO 8601 | null"
+}
+```
 
 ---
 
