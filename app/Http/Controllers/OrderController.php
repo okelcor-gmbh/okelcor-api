@@ -9,7 +9,9 @@ use App\Models\Invoice;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Services\EuDeclarationService;
+use App\Services\TradeDocumentService;
 use App\Services\VatValidationService;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -131,7 +133,8 @@ class OrderController extends Controller
             'trade_documents' => $o->relationLoaded('tradeDocuments')
                 ? $o->tradeDocuments
                     ->filter(fn ($d) => in_array($d->status, ['issued', 'sent'], true)
-                        && in_array($d->type, ['order_confirmation', 'proforma', 'commercial_invoice', 'packing_list', 'delivery_note', 'shipment_document'], true))
+                        && in_array($d->type, ['order_confirmation', 'proforma', 'commercial_invoice', 'packing_list', 'delivery_note', 'shipment_document'], true)
+                        && ! ($d->type === 'proforma' && ($o->customer_acceptance_status ?? 'pending') !== 'accepted'))
                     ->map(fn ($d) => [
                         'id'                => $d->id,
                         'type'              => $d->type,
@@ -230,6 +233,16 @@ class OrderController extends Controller
         });
 
         $order->load('items');
+
+        // Auto-generate order confirmation (AB) — proforma must not be issued before customer accepts
+        try {
+            app(TradeDocumentService::class)->generateOrderConfirmationForOrder($order, null);
+        } catch (\Throwable $e) {
+            Log::warning('Order confirmation auto-generation failed after manual order creation', [
+                'order_ref' => $order->ref,
+                'error'     => $e->getMessage(),
+            ]);
+        }
 
         $adminEmail = env('ORDER_EMAIL');
         if ($adminEmail) {

@@ -247,16 +247,14 @@ class AdminQuoteRequestController extends Controller
         // Load items once — used by both Stripe session and email
         $order->load('items');
 
-        // Auto-generate order confirmation for bank transfer orders
-        if ($paymentMethod === 'bank_transfer') {
-            try {
-                app(TradeDocumentService::class)->generateOrderConfirmationForOrder($order, $request->user());
-            } catch (\Throwable $e) {
-                Log::warning('Order confirmation auto-generation failed after quote conversion', [
-                    'order_ref' => $order->ref,
-                    'error'     => $e->getMessage(),
-                ]);
-            }
+        // Auto-generate order confirmation (AB) for all new orders — proforma must not be issued before customer accepts
+        try {
+            app(TradeDocumentService::class)->generateOrderConfirmationForOrder($order, $request->user());
+        } catch (\Throwable $e) {
+            Log::warning('Order confirmation auto-generation failed after quote conversion', [
+                'order_ref' => $order->ref,
+                'error'     => $e->getMessage(),
+            ]);
         }
 
         // If payment is Stripe, create a Checkout Session for this order

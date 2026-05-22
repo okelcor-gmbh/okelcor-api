@@ -1,5 +1,74 @@
 # Session Handoff — Okelcor API
-Last updated: 2026-05-22 (session 29 + route alignment)
+Last updated: 2026-05-22 (session 30 — stop premature proforma)
+
+---
+
+## Session 30 — URGENT: Stop Auto-Proforma Before Customer Acceptance (complete)
+
+### Root cause
+`PaymentController::createSession()` bank_transfer path automatically called
+`generateProformaForOrder()` immediately after creating the order — before any
+customer acceptance. This issued a PI before the customer had even seen the AB.
+
+### Changes made
+
+**`app/Http/Controllers/PaymentController.php`**
+- Bank transfer path (was lines 225-233): replaced `generateProformaForOrder` with
+  `generateOrderConfirmationForOrder(order, null)`
+- Stripe path: added `$order->load('items')` + `generateOrderConfirmationForOrder(order, null)`
+  right after the DB transaction, before the Stripe session is built
+
+**`app/Http/Controllers/Admin/AdminQuoteRequestController.php`**
+- Removed `if ($paymentMethod === 'bank_transfer')` guard; AB is now generated for
+  ALL payment methods (Stripe path was previously missing AB auto-generation)
+
+**`app/Http/Controllers/OrderController.php`**
+- Added `use App\Services\TradeDocumentService` + `use Illuminate\Support\Facades\Log`
+- Added `generateOrderConfirmationForOrder(order, null)` after `$order->load('items')` in `store()`
+- `formatOrder()`: proforma is now filtered from `trade_documents[]` when
+  `customer_acceptance_status !== 'accepted'` (prevents frontend from displaying
+  the PI before acceptance, even if one somehow exists)
+
+**`database/migrations/2026_05_22_000002_add_proforma_fix_actions_to_order_logs.php`** (NEW)
+- Extends `order_logs.action` enum: adds `premature_proforma_superseded` and
+  `order_confirmation_auto_generated` — additive ALTER TABLE, no data loss
+
+**`app/Console/Commands/FixPrematureProformas.php`** (NEW)
+- `php artisan orders:fix-premature-proformas --dry-run` — list affected orders
+- `php artisan orders:fix-premature-proformas --apply` — supersede premature proformas
+- Finds orders with `customer_acceptance_status IN (pending, rejected)` that have an
+  `issued/sent` proforma; sets status=superseded, fills `supersede_reason`, logs
+  `premature_proforma_superseded` to `order_logs`
+
+### AB generation coverage after session 30
+
+| Path | Before | After |
+|---|---|---|
+| `PaymentController` bank_transfer | Auto-PI (BUG) | Auto-AB |
+| `PaymentController` Stripe checkout | No doc | Auto-AB |
+| `AdminQuoteRequestController` bank_transfer | Auto-AB | Auto-AB (unchanged) |
+| `AdminQuoteRequestController` Stripe | No doc (BUG) | Auto-AB |
+| `OrderController::store()` manual | No doc | Auto-AB |
+| `AdminTradeDocumentController` endpoints | On-demand admin trigger | On-demand admin trigger (unchanged) |
+
+### Deploy steps (session 30)
+```bash
+cd /home/u978121777/domains/okelcor.com/public_html/okelcor-api
+git fetch origin && git reset --hard origin/main
+/opt/alt/php83/usr/bin/php artisan migrate --force
+/opt/alt/php83/usr/bin/php artisan route:cache
+/opt/alt/php83/usr/bin/php artisan view:clear
+
+# One-time cleanup of any premature proformas already in production:
+/opt/alt/php83/usr/bin/php artisan orders:fix-premature-proformas --dry-run
+# If dry-run output looks correct:
+/opt/alt/php83/usr/bin/php artisan orders:fix-premature-proformas --apply
+```
+
+**Migration that will run:** `2026_05_22_000002_add_proforma_fix_actions_to_order_logs`
+— additive ALTER TABLE on `order_logs.action`, no data loss.
+
+---
 
 ---
 

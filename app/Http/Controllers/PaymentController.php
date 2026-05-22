@@ -222,11 +222,11 @@ class PaymentController extends Controller
 
                 $order->load('items');
 
-                // Auto-generate proforma invoice for bank transfer orders
+                // Auto-generate order confirmation (AB) — proforma must not be issued before customer accepts
                 try {
-                    app(TradeDocumentService::class)->generateProformaForOrder($order);
+                    app(TradeDocumentService::class)->generateOrderConfirmationForOrder($order, null);
                 } catch (\Throwable $e) {
-                    Log::warning('Proforma auto-generation failed after bank transfer order creation', [
+                    Log::warning('Order confirmation auto-generation failed after bank transfer order creation', [
                         'order_ref' => $order->ref,
                         'error'     => $e->getMessage(),
                     ]);
@@ -320,6 +320,17 @@ class PaymentController extends Controller
 
                 return $order;
             });
+
+            // Auto-generate order confirmation (AB) — proforma must not be issued before customer accepts
+            $order->load('items');
+            try {
+                app(TradeDocumentService::class)->generateOrderConfirmationForOrder($order, null);
+            } catch (\Throwable $e) {
+                Log::warning('Order confirmation auto-generation failed after Stripe order creation', [
+                    'order_ref' => $order->ref,
+                    'error'     => $e->getMessage(),
+                ]);
+            }
 
             // Build Stripe line items: net product items + VAT as separate line (standard only)
             $currency    = strtolower((string) config('services.stripe.currency', 'eur'));
