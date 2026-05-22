@@ -461,6 +461,11 @@ class AdminOrderController extends Controller
             'customer_acceptance_status'           => $o->customer_acceptance_status ?? 'pending',
             'customer_accepted_at'                 => $o->customer_accepted_at?->toIso8601String(),
             'customer_acceptance_note'             => $o->customer_acceptance_note,
+            'acceptance_token_expires_at'          => $o->acceptance_token_expires_at?->toIso8601String(),
+            // token itself only included while pending (invalidated on accept/reject)
+            'acceptance_token'                     => ($o->customer_acceptance_status ?? 'pending') === 'pending'
+                                                        ? $o->acceptance_token
+                                                        : null,
 
             // Financial lock
             'financials_locked'                    => $o->isFinancialsLocked(),

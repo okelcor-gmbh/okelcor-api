@@ -306,7 +306,237 @@ class CustomerQuoteAcceptanceController extends Controller
         ]);
     }
 
+    /**
+     * POST /api/v1/auth/orders/{ref}/reject-order-confirmation
+     *
+     * Authenticated customer rejects the Order Confirmation.
+     * Requires an issued/sent order confirmation document.
+     */
+    public function rejectOrderConfirmation(Request $request, string $ref): JsonResponse
+    {
+        $customer = $request->user();
+
+        $order = Order::where('ref', $ref)->first();
+
+        if (! $order || strtolower($order->customer_email) !== strtolower($customer->email)) {
+            return response()->json(['message' => 'Order not found.'], 404);
+        }
+
+        if ($order->customer_acceptance_status === 'rejected') {
+            return response()->json([
+                'message' => 'Order confirmation has already been rejected.',
+                'data'    => ['customer_acceptance_status' => 'rejected'],
+            ], 409);
+        }
+
+        if ($order->customer_acceptance_status === 'accepted') {
+            return response()->json([
+                'message' => 'Order confirmation has already been accepted and cannot be rejected.',
+            ], 409);
+        }
+
+        $hasAb = TradeDocument::where('order_id', $order->id)
+            ->where('type', 'order_confirmation')
+            ->whereIn('status', ['issued', 'sent'])
+            ->exists();
+
+        if (! $hasAb) {
+            return response()->json([
+                'message' => 'No order confirmation has been issued yet. Please contact Okelcor.',
+                'code'    => 'no_order_confirmation',
+            ], 422);
+        }
+
+        $request->validate([
+            'note' => ['sometimes', 'nullable', 'string', 'max:1000'],
+        ]);
+
+        $order->update([
+            'customer_acceptance_status'   => 'rejected',
+            'customer_accepted_at'         => now(),
+            'customer_accepted_ip'         => $request->ip(),
+            'customer_accepted_user_agent' => $request->userAgent(),
+            'customer_acceptance_note'     => $request->input('note'),
+            'acceptance_token'             => null,
+            'acceptance_token_expires_at'  => null,
+        ]);
+
+        $this->logOrderEvent($order, 'order_confirmation_rejected',
+            'Customer rejected order confirmation for order ' . $order->ref
+            . ($request->filled('note') ? '. Reason: ' . $request->input('note') : '.'));
+
+        return response()->json([
+            'data'    => ['customer_acceptance_status' => 'rejected'],
+            'message' => 'Response recorded. Okelcor will be in touch shortly.',
+        ]);
+    }
+
+    /**
+     * GET /api/v1/documents/acceptance/{token}
+     *
+     * Public token-only acceptance preview (canonical route).
+     * Token is the sole key — no order ref needed in URL.
+     */
+    public function acceptanceInfo(Request $request, string $token): JsonResponse
+    {
+        [$order, $error] = $this->findOrderByToken($token);
+
+        if ($error) {
+            return $error;
+        }
+
+        $document = TradeDocument::where('order_id', $order->id)
+            ->where('type', 'order_confirmation')
+            ->whereIn('status', ['issued', 'sent'])
+            ->first();
+
+        return response()->json([
+            'data' => [
+                'order_ref'                  => $order->ref,
+                'order_total'                => (float) $order->total,
+                'currency'                   => 'EUR',
+                'customer_acceptance_status' => $order->customer_acceptance_status,
+                'already_actioned'           => $order->customer_acceptance_status !== 'pending',
+                'expires_at'                 => $order->acceptance_token_expires_at?->toIso8601String(),
+                'document' => $document ? [
+                    'type'   => $document->type,
+                    'number' => $document->number,
+                ] : null,
+            ],
+            'message' => 'success',
+        ]);
+    }
+
+    /**
+     * POST /api/v1/documents/acceptance/{token}/accept
+     *
+     * Public token-only accept (canonical route).
+     * Body: { "note": "..." } (optional)
+     */
+    public function acceptByToken(Request $request, string $token): JsonResponse
+    {
+        [$order, $error] = $this->findOrderByToken($token);
+
+        if ($error) {
+            return $error;
+        }
+
+        if ($order->customer_acceptance_status === 'accepted') {
+            return response()->json([
+                'message' => 'Order confirmation has already been accepted.',
+                'data'    => ['customer_acceptance_status' => 'accepted'],
+            ], 409);
+        }
+
+        $request->validate([
+            'note' => ['sometimes', 'nullable', 'string', 'max:1000'],
+        ]);
+
+        $order->update([
+            'customer_acceptance_status'   => 'accepted',
+            'customer_accepted_at'         => now(),
+            'customer_accepted_ip'         => $request->ip(),
+            'customer_accepted_user_agent' => $request->userAgent(),
+            'customer_acceptance_note'     => $request->input('note'),
+            'acceptance_token'             => null,
+            'acceptance_token_expires_at'  => null,
+        ]);
+
+        $this->logOrderEvent($order, 'order_confirmation_accepted',
+            'Customer accepted order confirmation via signed link.');
+
+        return response()->json([
+            'data'    => ['customer_acceptance_status' => 'accepted'],
+            'message' => 'Order confirmation accepted. Okelcor will now prepare your proforma invoice.',
+        ]);
+    }
+
+    /**
+     * POST /api/v1/documents/acceptance/{token}/reject
+     *
+     * Public token-only reject (canonical route).
+     * Body: { "note": "..." } (optional)
+     */
+    public function rejectByToken(Request $request, string $token): JsonResponse
+    {
+        [$order, $error] = $this->findOrderByToken($token);
+
+        if ($error) {
+            return $error;
+        }
+
+        if ($order->customer_acceptance_status === 'accepted') {
+            return response()->json([
+                'message' => 'Order confirmation has already been accepted and cannot be rejected.',
+            ], 409);
+        }
+
+        if ($order->customer_acceptance_status === 'rejected') {
+            return response()->json([
+                'message' => 'Order confirmation has already been rejected.',
+                'data'    => ['customer_acceptance_status' => 'rejected'],
+            ], 409);
+        }
+
+        $request->validate([
+            'note' => ['sometimes', 'nullable', 'string', 'max:1000'],
+        ]);
+
+        $order->update([
+            'customer_acceptance_status'   => 'rejected',
+            'customer_accepted_at'         => now(),
+            'customer_accepted_ip'         => $request->ip(),
+            'customer_accepted_user_agent' => $request->userAgent(),
+            'customer_acceptance_note'     => $request->input('note'),
+            'acceptance_token'             => null,
+            'acceptance_token_expires_at'  => null,
+        ]);
+
+        $this->logOrderEvent($order, 'order_confirmation_rejected',
+            'Customer rejected order confirmation via signed link.'
+            . ($request->filled('note') ? ' Reason: ' . $request->input('note') : ''));
+
+        return response()->json([
+            'data'    => ['customer_acceptance_status' => 'rejected'],
+            'message' => 'Response recorded. Okelcor will be in touch shortly.',
+        ]);
+    }
+
     // -------------------------------------------------------------------------
+
+    /**
+     * Look up an order by its acceptance token.
+     * Returns [Order, null] on success or [null, JsonResponse] on failure.
+     *
+     * @return array{0: Order|null, 1: JsonResponse|null}
+     */
+    private function findOrderByToken(string $token): array
+    {
+        if (strlen($token) !== 64) {
+            return [null, response()->json([
+                'message' => 'Invalid or expired acceptance link.',
+                'code'    => 'invalid_token',
+            ], 403)];
+        }
+
+        $order = Order::where('acceptance_token', $token)->first();
+
+        if (! $order) {
+            return [null, response()->json([
+                'message' => 'Invalid or expired acceptance link.',
+                'code'    => 'invalid_token',
+            ], 403)];
+        }
+
+        if ($order->acceptance_token_expires_at && $order->acceptance_token_expires_at->isPast()) {
+            return [null, response()->json([
+                'message' => 'This acceptance link has expired. Please contact Okelcor for a new one.',
+                'code'    => 'token_expired',
+            ], 403)];
+        }
+
+        return [$order, null];
+    }
 
     private function customerOwnsQuote($customer, QuoteRequest $quote): bool
     {

@@ -609,7 +609,7 @@ class AdminTradeDocumentController extends Controller
         ]);
 
         $frontendUrl = rtrim(config('app.frontend_url', 'https://okelcor.com'), '/');
-        $acceptUrl   = $frontendUrl . '/orders/' . $order->ref . '/accept-confirmation?token=' . $token;
+        $acceptUrl   = $frontendUrl . '/documents/acceptance/' . $token;
 
         try {
             OrderLog::create([
@@ -891,7 +891,7 @@ class AdminTradeDocumentController extends Controller
         ]);
 
         $frontendUrl = rtrim(config('app.frontend_url', 'https://okelcor.com'), '/');
-        $acceptUrl   = $frontendUrl . '/orders/' . $order->ref . '/accept-confirmation?token=' . $token;
+        $acceptUrl   = $frontendUrl . '/documents/acceptance/' . $token;
 
         $recipientEmail = $request->input('recipient_email') ?? $order->customer_email;
 

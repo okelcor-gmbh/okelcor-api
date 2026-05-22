@@ -105,6 +105,7 @@ Route::prefix('v1')->group(function () {
         Route::post('quotes/{id}/accept', [CustomerQuoteAcceptanceController::class, 'acceptQuote']);
         Route::post('quotes/{id}/reject', [CustomerQuoteAcceptanceController::class, 'rejectQuote']);
         Route::post('orders/{ref}/accept-order-confirmation', [CustomerQuoteAcceptanceController::class, 'acceptOrderConfirmation']);
+        Route::post('orders/{ref}/reject-order-confirmation', [CustomerQuoteAcceptanceController::class, 'rejectOrderConfirmation']);
 
         // Addresses
         Route::get('addresses', [CustomerAddressController::class, 'index']);
@@ -185,9 +186,13 @@ Route::prefix('v1')->group(function () {
 
     // Order confirmation acceptance via secure token (non-account customers) — 20/min per IP
     Route::middleware('throttle:acceptance-links')->group(function () {
-        // GET — preview order details before accepting (safe; no PII exposed)
-        Route::get('orders/{ref}/accept-confirmation', [CustomerQuoteAcceptanceController::class, 'confirmationTokenInfo']);
-        // POST — accept or reject via token
+        // Token-only routes (canonical) — token is the sole key, no ref needed
+        Route::get('documents/acceptance/{token}',         [CustomerQuoteAcceptanceController::class, 'acceptanceInfo']);
+        Route::post('documents/acceptance/{token}/accept', [CustomerQuoteAcceptanceController::class, 'acceptByToken']);
+        Route::post('documents/acceptance/{token}/reject', [CustomerQuoteAcceptanceController::class, 'rejectByToken']);
+
+        // Legacy ref+token routes — kept for backwards compatibility and existing emails
+        Route::get('orders/{ref}/accept-confirmation',  [CustomerQuoteAcceptanceController::class, 'confirmationTokenInfo']);
         Route::post('orders/{ref}/accept-confirmation', [CustomerQuoteAcceptanceController::class, 'acceptConfirmationByToken']);
     });
 
@@ -479,7 +484,8 @@ Route::prefix('v1')->group(function () {
             Route::post('trade-documents/{id}/void', [AdminTradeDocumentController::class, 'void']);
             Route::delete('trade-documents/{id}', [AdminTradeDocumentController::class, 'destroy']);
             Route::post('orders/{id}/generate-acceptance-link', [AdminTradeDocumentController::class, 'generateAcceptanceLink']);
-            Route::post('orders/{id}/send-acceptance-request', [AdminTradeDocumentController::class, 'sendAcceptanceRequest']);
+            Route::post('orders/{id}/send-acceptance-request',  [AdminTradeDocumentController::class, 'sendAcceptanceRequest']);
+            Route::post('orders/{id}/acceptance/send',           [AdminTradeDocumentController::class, 'sendAcceptanceRequest']);
         });
 
         // -----------------------------------------------------------------
