@@ -99,17 +99,69 @@ class RepairPublicTranslations extends Command
             ],
         ],
 
-        // ── Admin-created slides — add entries below once EN content is confirmed ──
-        // Run --audit on production to get the EN title/subtitle/cta values,
-        // then add a new entry here following the same structure as above.
-        //
-        // Example (replace with actual content from --audit output):
-        //
-        // 'Slide Title Here' => [
-        //     'de' => ['title' => '', 'subtitle' => '', 'cta_primary' => '', 'cta_secondary' => ''],
-        //     'fr' => ['title' => '', 'subtitle' => '', 'cta_primary' => '', 'cta_secondary' => ''],
-        //     'es' => ['title' => '', 'subtitle' => '', 'cta_primary' => '', 'cta_secondary' => ''],
-        // ],
+        // ── Admin-created slides (IDs 4, 5, 6 — confirmed via --audit 2026-05-28) ──────
+        // EN rows for these slides are auto-filled from hero_slides base table columns
+        // (see repairHeroSlides — EN auto-fill block). Only DE/FR/ES needed here.
+        'Quality Used Tyres, Globally Sourced' => [
+            'de' => [
+                'title'         => 'Qualitäts-Gebrauchreifen, Global Beschafft',
+                'subtitle'      => 'Streng klassifizierte Gebrauchreifen für Märkte, die Preis-Leistung ohne Qualitätskompromisse fordern.',
+                'cta_primary'   => '',
+                'cta_secondary' => '',
+            ],
+            'fr' => [
+                'title'         => 'Pneus d\'Occasion de Qualité, Approvisionnement Mondial',
+                'subtitle'      => 'Pneus d\'occasion rigoureusement classés pour les marchés exigeant de la valeur sans compromis sur la qualité.',
+                'cta_primary'   => '',
+                'cta_secondary' => '',
+            ],
+            'es' => [
+                'title'         => 'Neumáticos Usados de Calidad, Abastecimiento Global',
+                'subtitle'      => 'Neumáticos usados rigurosamente clasificados para mercados que exigen valor sin comprometer la calidad.',
+                'cta_primary'   => '',
+                'cta_secondary' => '',
+            ],
+        ],
+        'From Munich to Every Market' => [
+            'de' => [
+                'title'         => 'Von München in jeden Markt',
+                'subtitle'      => 'Zuverlässige Reifenlieferketten für Distributoren in ganz Europa, Afrika, dem Nahen Osten und darüber hinaus.',
+                'cta_primary'   => '',
+                'cta_secondary' => '',
+            ],
+            'fr' => [
+                'title'         => 'De Munich à Chaque Marché',
+                'subtitle'      => 'Des chaînes d\'approvisionnement fiables en pneumatiques au service des distributeurs en Europe, en Afrique, au Moyen-Orient et au-delà.',
+                'cta_primary'   => '',
+                'cta_secondary' => '',
+            ],
+            'es' => [
+                'title'         => 'De Múnich a Cada Mercado',
+                'subtitle'      => 'Cadenas de suministro de neumáticos fiables al servicio de distribuidores en Europa, África, Oriente Medio y más allá.',
+                'cta_primary'   => '',
+                'cta_secondary' => '',
+            ],
+        ],
+        'Your Wholesale Tyre Partner' => [
+            'de' => [
+                'title'         => 'Ihr Großhandels-Reifenpartner',
+                'subtitle'      => 'Fordern Sie noch heute ein Angebot an und erfahren Sie, warum Importeure weltweit Okelcor als ihren bevorzugten Großhandelspartner wählen.',
+                'cta_primary'   => '',
+                'cta_secondary' => '',
+            ],
+            'fr' => [
+                'title'         => 'Votre Partenaire Grossiste en Pneumatiques',
+                'subtitle'      => 'Demandez un devis aujourd\'hui et découvrez pourquoi les importateurs du monde entier choisissent Okelcor comme partenaire grossiste de confiance.',
+                'cta_primary'   => '',
+                'cta_secondary' => '',
+            ],
+            'es' => [
+                'title'         => 'Su Socio Mayorista en Neumáticos',
+                'subtitle'      => 'Solicite un presupuesto hoy y descubra por qué importadores de todo el mundo eligen Okelcor como su socio mayorista de confianza.',
+                'cta_primary'   => '',
+                'cta_secondary' => '',
+            ],
+        ],
     ];
 
     private array $categoryTranslations = [
@@ -204,7 +256,7 @@ class RepairPublicTranslations extends Command
 
             $this->line("┌─ Slide ID {$slide->id} | sort_order={$slide->sort_order} | {$activeFlag}");
             $this->line("│  EN title:    {$enTitle}");
-            $this->line("│  EN subtitle: " . substr((string) $enSub, 0, 80));
+            $this->line("│  EN subtitle: " . substr((string) $enSub, 0, 120));
             $this->line("│  EN CTAs:     [{$enPrimary}] / [{$enSecondary}]");
             $this->line("│  Locales:     present=[{$presentLocales}]  missing=[{$missingLocales}]");
             $this->line("│  In seed map: {$inSeedMap}");
@@ -246,17 +298,39 @@ class RepairPublicTranslations extends Command
 
         foreach ($slides as $slide) {
             $enTranslation = $slide->translations->firstWhere('locale', 'en');
-            $enTitle       = $enTranslation?->title ?? $slide->title;
+            // Use EN translation row title when available; fall back to base table column.
+            // For admin-created slides with zero translation rows, $slide->title is the EN text.
+            $enTitle         = $enTranslation?->title ?? $slide->title;
+            $existingLocales = $slide->translations->pluck('locale')->all();
 
+            // ── Step 1: Auto-fill EN from base table if missing ──────────────────
+            // Slides created via the admin UI before syncTranslations() was deployed
+            // have no translation rows at all. Copy base table values to the EN row.
+            if (! in_array('en', $existingLocales)) {
+                $this->line("  slide {$slide->id} [en] \"{$enTitle}\" — " . ($dryRun ? 'WOULD fill from base table' : 'filling from base table') . '.');
+
+                if (! $dryRun) {
+                    HeroSlideTranslation::create([
+                        'slide_id'      => $slide->id,
+                        'locale'        => 'en',
+                        'title'         => $slide->title,
+                        'subtitle'      => $slide->subtitle ?? '',
+                        'cta_primary'   => $slide->cta_primary_label ?? '',
+                        'cta_secondary' => $slide->cta_secondary_label ?? '',
+                    ]);
+                }
+
+                ++$filled;
+            }
+
+            // ── Step 2: Fill DE/FR/ES from seed map ──────────────────────────────
             $seedData = $this->heroTranslations[$enTitle] ?? null;
 
             if ($seedData === null) {
-                $this->warn("  slide {$slide->id} \"{$enTitle}\" — no seed data (run --audit to inspect).");
+                $this->warn("  slide {$slide->id} \"{$enTitle}\" — no DE/FR/ES seed data, skipping non-EN locales.");
                 ++$unknown;
                 continue;
             }
-
-            $existingLocales = $slide->translations->pluck('locale')->all();
 
             foreach (['de', 'fr', 'es'] as $locale) {
                 if (in_array($locale, $existingLocales)) {
