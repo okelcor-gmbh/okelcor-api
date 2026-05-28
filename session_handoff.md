@@ -1,5 +1,207 @@
 # Session Handoff — Okelcor API
-Last updated: 2026-05-22 (session 30 — stop premature proforma)
+Last updated: 2026-05-28 (session 31b — LANG-1B backend translation coverage)
+
+---
+
+## Session 31c — LANG-1C: Hero Slide Audit + Repair Command Enhancement (complete)
+
+### Root cause of slides 5/6/7 not translating
+Slides 5, 6, 7 were created via the admin UI **after** the seeder ran. Their EN titles are not in the `$heroTranslations` seed map inside `RepairPublicTranslations`. The repair command already skipped them with "no approved seed data" — they need their EN content retrieved and translations added to the map.
+
+### What was done
+`translations:repair-public-content` now has an `--audit` flag (read-only) that dumps:
+- Every hero slide: ID, sort_order, active flag, EN title, EN subtitle, EN CTAs, present locales, missing locales, whether it's in the seed map
+- Every category: same summary in table form
+- Clear marker `⚠ NO — add to seed map` for any slide not yet covered
+
+### Workflow to fix slides 5/6/7 on production
+```bash
+# Step 1 — run audit on production to see the EN content of ALL slides:
+/opt/alt/php83/usr/bin/php artisan translations:repair-public-content --audit
+
+# Step 2 — the output for slides not in the seed map looks like:
+# ┌─ Slide ID 5 | sort_order=5 | active
+# │  EN title:    <ACTUAL TITLE HERE>
+# │  EN subtitle: <ACTUAL SUBTITLE HERE>
+# │  EN CTAs:     [Shop Now] / [Learn More]
+# │  Locales:     present=[en]  missing=[de, fr, es]
+# │  In seed map: ⚠ NO — add to seed map
+
+# Step 3 — share that output with backend dev (or paste into the $heroTranslations
+# array in RepairPublicTranslations.php with de/fr/es translations added).
+
+# Step 4 — re-run repair after seed map is updated:
+/opt/alt/php83/usr/bin/php artisan translations:repair-public-content --dry-run
+/opt/alt/php83/usr/bin/php artisan translations:repair-public-content
+```
+
+### PENDING: translations for slides 5/6/7
+The EN titles of slides 5/6/7 are not visible locally (local MySQL not running).
+**Action required:** run `--audit` on production, paste output back here, and the seed map will be updated.
+Until then, the LANG-1 fallback logic (session 31) means the public API returns the EN text for those slides — no broken/null content.
+
+### Files changed
+| File | Change |
+|---|---|
+| `app/Console/Commands/RepairPublicTranslations.php` | Added `--audit` flag; improved warning messages; added inline comment block for adding unknown slides |
+
+### Deploy steps (no migrations)
+```bash
+cd /home/u978121777/domains/okelcor.com/public_html/okelcor-api
+git fetch origin && git reset --hard origin/main
+/opt/alt/php83/usr/bin/php artisan config:clear
+/opt/alt/php83/usr/bin/php artisan config:cache
+/opt/alt/php83/usr/bin/php artisan translations:repair-public-content --audit
+```
+
+---
+
+## Session 31b — LANG-1B: Backend Translation Coverage Cleanup (complete)
+
+### New Artisan commands
+
+#### `php artisan translations:repair-public-content`
+Fills missing hero-slide and category translations from approved seed data. Safe to run on production.
+
+| Flag | Behaviour |
+|---|---|
+| _(none)_ | Write missing translations |
+| `--dry-run` | Show what would be filled without writing |
+
+Rules:
+- Never overwrites an existing translation row
+- Matches hero slides by their EN title (resilient to sort-order changes)
+- Matches categories by slug
+- Slides/categories with no approved seed data are skipped and reported
+- Contains translations for all 3 known hero slides × 3 non-EN locales (de/fr/es) and all 4 categories × 4 locales
+
+#### `php artisan articles:missing-translations`
+Read-only report of articles that have missing locale translations.
+
+| Flag | Behaviour |
+|---|---|
+| _(none)_ | Check all locales, all articles |
+| `--locale=fr` | Filter to a single locale |
+| `--published-only` | Only check published articles |
+
+Output: table of article ID / slug / EN title / published status / missing locales.
+**Never auto-translates** — all translations require human editor via admin UI.
+
+### New files
+
+| File | Purpose |
+|---|---|
+| `app/Console/Commands/RepairPublicTranslations.php` | `translations:repair-public-content` |
+| `app/Console/Commands/ArticleMissingTranslations.php` | `articles:missing-translations` |
+
+### Deploy steps (no migrations)
+```bash
+cd /home/u978121777/domains/okelcor.com/public_html/okelcor-api
+git fetch origin && git reset --hard origin/main
+/opt/alt/php83/usr/bin/php artisan config:clear
+/opt/alt/php83/usr/bin/php artisan config:cache
+/opt/alt/php83/usr/bin/php artisan route:cache
+
+# Dry-run first to see what's missing:
+/opt/alt/php83/usr/bin/php artisan translations:repair-public-content --dry-run
+
+# If output looks correct, apply:
+/opt/alt/php83/usr/bin/php artisan translations:repair-public-content
+
+# Check which articles need human translation:
+/opt/alt/php83/usr/bin/php artisan articles:missing-translations
+/opt/alt/php83/usr/bin/php artisan articles:missing-translations --published-only
+```
+
+### New article missing translations
+If a new article was created with English only, `articles:missing-translations` will list it.
+**Do not auto-translate.** The editor must open the article in the admin editor and fill FR/DE/ES tabs.
+The `missing_locales: ["fr","de","es"]` field already appears on `GET /admin/articles/{id}` (added in session 31).
+The public `GET /api/v1/articles?locale=fr` endpoint already falls back to EN gracefully.
+
+### Fallback logic validation (all three cases verified)
+| Scenario | Result |
+|---|---|
+| FR row exists → `?locale=fr` | Returns French translation |
+| FR row missing, EN row exists → `?locale=fr` | Returns EN translation (correct fallback) |
+| No translation rows at all → `?locale=fr` | Returns `hero_slides.title` base column (last resort) |
+| Category no FR row → `?locale=fr` | Returns EN translation, never null |
+
+---
+
+## Session 31 — LANG-1: Backend Translation Foundation Fixes (complete)
+
+### Root causes fixed
+Two public controllers had broken locale fallback behaviour (identified in the LANG audit):
+
+| Controller | Bug | Fix |
+|---|---|---|
+| `HeroSlideController` | Loaded only the requested locale; if FR row absent fell back to `hero_slides.title` column (EN text), not the EN translation row | Load `[$locale, 'en']` with `whereIn`; resolve with `firstWhere($locale) ?? firstWhere('en')` |
+| `CategoryController` | Loaded only the requested locale; no fallback at all — returned `null` for title/label/subtitle | Same fix; final fallback to `''` (empty string, never null) |
+
+### New `missing_locales` field on admin responses
+
+All three admin content controllers now include a `missing_locales` array in their response to signal which translations are absent. Does **not** block saving.
+
+```json
+// GET /admin/articles/{id}
+// GET /admin/hero-slides/{id}
+// GET /admin/categories (each item)
+{
+  "missing_locales": ["fr", "es"]
+}
+```
+
+An empty array `[]` means all four locales (en/de/fr/es) are present.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `app/Http/Controllers/HeroSlideController.php` | `whereIn([$locale,'en'])` + `firstWhere` cascade fallback |
+| `app/Http/Controllers/CategoryController.php` | Same fix; returns `''` not `null` when no translation |
+| `app/Http/Controllers/Admin/AdminArticleController.php` | Added `missing_locales` to `formatArticle()` |
+| `app/Http/Controllers/Admin/AdminHeroSlideController.php` | Added `missing_locales` to `formatSlide()` |
+| `app/Http/Controllers/Admin/AdminCategoryController.php` | Added `missing_locales` to `formatCategory()` |
+
+### Locale support summary (post LANG-1)
+
+| Public endpoint | `?locale=` | EN fallback |
+|---|---|---|
+| `GET /api/v1/hero-slides` | ✅ | ✅ EN translation row → base column |
+| `GET /api/v1/categories` | ✅ | ✅ EN translation row → empty string |
+| `GET /api/v1/articles` | ✅ | ✅ (was already correct) |
+| `GET /api/v1/articles/{slug}` | ✅ | ✅ (was already correct) |
+| `GET /api/v1/search` | ✅ | ✅ articles only |
+| `GET /api/v1/products` | ❌ no translation table | N/A |
+
+### Deploy steps (no migrations)
+```bash
+cd /home/u978121777/domains/okelcor.com/public_html/okelcor-api
+git fetch origin && git reset --hard origin/main
+/opt/alt/php83/usr/bin/php artisan config:clear
+/opt/alt/php83/usr/bin/php artisan config:cache
+/opt/alt/php83/usr/bin/php artisan route:cache
+```
+
+### Test checklist
+```
+GET /api/v1/hero-slides?locale=fr   → each slide has non-null title + cta labels in French
+GET /api/v1/hero-slides?locale=de   → German text
+GET /api/v1/categories?locale=fr    → title/label/subtitle all non-null in French
+GET /api/v1/categories?locale=xx    → invalid locale → falls back to en silently
+GET /admin/articles/{id}            → response includes missing_locales: []  (seeded articles have all 4)
+GET /admin/hero-slides/{id}         → response includes missing_locales: []
+GET /admin/categories               → each item has missing_locales: []
+```
+
+### Known remaining backend gaps (future phases)
+- No `preferred_language` on `customers` table → emails always English
+- All mailables hardcoded English
+- All PDF templates hardcoded `<html lang="en">`
+- Products have no translation table
+- Site settings have no per-locale values
+- Admin article/hero/slide editors do not enforce EN locale presence on save
 
 ---
 

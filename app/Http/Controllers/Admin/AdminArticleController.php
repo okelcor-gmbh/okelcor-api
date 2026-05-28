@@ -268,7 +268,7 @@ class AdminArticleController extends Controller
                 'title'            => $t->title,
                 'read_time'        => $t->read_time,
                 'summary'          => $t->summary,
-                'body'             => $t->body_html,        // resolved HTML (handles legacy too)
+                'body'             => $t->body_html,
                 'body_format'      => $t->body_format ?? 'json_array',
                 'meta_title'       => $t->meta_title,
                 'meta_description' => $t->meta_description,
@@ -276,20 +276,23 @@ class AdminArticleController extends Controller
             ];
         }
 
-        $en = $a->translations->firstWhere('locale', 'en');
+        $en              = $a->translations->firstWhere('locale', 'en');
+        $presentLocales  = $a->translations->pluck('locale')->all();
+        $missingLocales  = array_values(array_diff(['en', 'de', 'fr', 'es'], $presentLocales));
 
         return [
-            'id'           => $a->id,
-            'slug'         => $a->slug,
-            'image'        => $a->image ? url('storage/' . $a->image) : null,
-            'og_image'     => $a->og_image ? url('storage/' . $a->og_image) : null,
-            'published_at' => $a->published_at?->toDateString(),
-            'is_published' => (bool) $a->is_published,
-            'sort_order'   => $a->sort_order,
-            'title'        => $en?->title,
-            'category'     => $en?->category,
-            'translations' => $translations,
-            'created_at'   => $a->created_at?->toIso8601String(),
+            'id'              => $a->id,
+            'slug'            => $a->slug,
+            'image'           => $a->image ? url('storage/' . $a->image) : null,
+            'og_image'        => $a->og_image ? url('storage/' . $a->og_image) : null,
+            'published_at'    => $a->published_at?->toDateString(),
+            'is_published'    => (bool) $a->is_published,
+            'sort_order'      => $a->sort_order,
+            'title'           => $en?->title,
+            'category'        => $en?->category,
+            'translations'    => $translations,
+            'missing_locales' => $missingLocales,
+            'created_at'      => $a->created_at?->toIso8601String(),
         ];
     }
 }

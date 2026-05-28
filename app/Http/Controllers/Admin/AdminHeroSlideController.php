@@ -202,7 +202,6 @@ class AdminHeroSlideController extends Controller
 
     private function formatSlide(HeroSlide $s): array
     {
-        // Build translations map for admin response
         $translations = [];
         foreach ($s->translations ?? [] as $t) {
             $translations[$t->locale] = [
@@ -212,6 +211,9 @@ class AdminHeroSlideController extends Controller
                 'cta_secondary' => $t->cta_secondary,
             ];
         }
+
+        $presentLocales = collect($s->translations ?? [])->pluck('locale')->all();
+        $missingLocales = array_values(array_diff(['en', 'de', 'fr', 'es'], $presentLocales));
 
         return [
             'id'                  => $s->id,
@@ -226,6 +228,7 @@ class AdminHeroSlideController extends Controller
             'cta_secondary_label' => $s->cta_secondary_label,
             'cta_secondary_href'  => $s->cta_secondary_href,
             'translations'        => $translations,
+            'missing_locales'     => $missingLocales,
         ];
     }
 }

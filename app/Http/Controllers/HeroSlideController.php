@@ -11,11 +11,13 @@ class HeroSlideController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $locale = in_array($request->query('locale'), ['en', 'de', 'fr', 'es'])
+        $locale  = in_array($request->query('locale'), ['en', 'de', 'fr', 'es'])
             ? $request->query('locale')
             : 'en';
 
-        $slides = HeroSlide::with(['translations' => fn ($q) => $q->where('locale', $locale)])
+        $locales = array_unique([$locale, 'en']);
+
+        $slides = HeroSlide::with(['translations' => fn ($q) => $q->whereIn('locale', $locales)])
             ->where('is_active', true)
             ->orderBy('sort_order')
             ->get();
@@ -28,8 +30,9 @@ class HeroSlideController extends Controller
 
     private function formatSlide(HeroSlide $s, string $locale): array
     {
-        // Use locale translation when available; fall back to direct columns (EN default)
-        $t = $s->translations->first();
+        // Requested locale first → EN translation fallback → base table columns as last resort
+        $t = $s->translations->firstWhere('locale', $locale)
+            ?? $s->translations->firstWhere('locale', 'en');
 
         return [
             'id'                  => $s->id,

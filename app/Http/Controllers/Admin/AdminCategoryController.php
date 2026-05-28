@@ -72,13 +72,17 @@ class AdminCategoryController extends Controller
             ];
         }
 
+        $presentLocales = $c->translations->pluck('locale')->all();
+        $missingLocales = array_values(array_diff(['en', 'de', 'fr', 'es'], $presentLocales));
+
         return [
-            'id'           => $c->id,
-            'slug'         => $c->slug,
-            'image'        => $c->image ? url('storage/' . $c->image) : null,
-            'sort_order'   => $c->sort_order,
-            'is_active'    => (bool) $c->is_active,
-            'translations' => $translations,
+            'id'              => $c->id,
+            'slug'            => $c->slug,
+            'image'           => $c->image ? url('storage/' . $c->image) : null,
+            'sort_order'      => $c->sort_order,
+            'is_active'       => (bool) $c->is_active,
+            'translations'    => $translations,
+            'missing_locales' => $missingLocales,
         ];
     }
 }
