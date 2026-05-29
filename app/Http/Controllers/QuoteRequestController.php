@@ -105,15 +105,17 @@ class QuoteRequestController extends Controller
         $quote = QuoteRequest::create(array_merge(
             $validated,
             [
-                'customer_id'   => $customer?->id,
-                'ref_number'    => $refNumber,
-                'status'        => 'new',
-                'review_status' => $quality['review_status'],
-                'quality_score' => $quality['quality_score'],
-                'quality_flags' => $quality['quality_flags'],
-                'ip_address'    => $request->ip(),
-                'vat_number'    => $vatNumber,
-                'vat_valid'     => $vatValid,
+                'customer_id'          => $customer?->id,
+                'ref_number'           => $refNumber,
+                'status'               => 'new',
+                'review_status'        => $quality['review_status'],
+                'quality_score'        => $quality['quality_score'],
+                'quality_flags'        => $quality['quality_flags'],
+                'qualification_status' => $quality['review_status'],  // mirrors review_status at creation
+                'lead_source'          => 'website_quote',
+                'ip_address'           => $request->ip(),
+                'vat_number'           => $vatNumber,
+                'vat_valid'            => $vatValid,
             ]
         ));
 

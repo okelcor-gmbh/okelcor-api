@@ -63,6 +63,8 @@ class AdminPermissions
 
         // ── Quotes ────────────────────────────────────────────────────────
         'quotes.manage'           => ['super_admin', 'admin', 'order_manager', 'sales_manager'],
+        'quotes.view'             => ['super_admin', 'admin', 'order_manager', 'sales_manager'],
+        'quotes.update'           => ['super_admin', 'admin', 'order_manager'],
 
         // ── Contacts ──────────────────────────────────────────────────────
         'contacts.view'           => ['super_admin', 'admin', 'order_manager', 'support'],

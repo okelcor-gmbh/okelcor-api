@@ -436,20 +436,36 @@ Route::prefix('v1')->group(function () {
         });
 
         // -----------------------------------------------------------------
-        // Quotes — quotes.manage (super_admin, admin, order_manager, sales_manager)
+        // Quotes — read + pipeline (quotes.manage = view+write for SM; quotes.update = mutations only)
         // -----------------------------------------------------------------
+
+        // Read — quotes.manage (sales_manager can view)
         Route::middleware('permission:quotes.manage')->group(function () {
+            Route::get('quote-requests/summary', [AdminQuoteRequestController::class, 'summary']);
             Route::get('quote-requests', [AdminQuoteRequestController::class, 'index']);
             Route::get('quote-requests/{id}', [AdminQuoteRequestController::class, 'show']);
+            // Attachments streamed through controller — never via public URL
+            Route::get('quote-attachments/{id}/download', [AdminQuoteAttachmentController::class, 'download']);
+        });
+
+        // Write — quotes.update (order_manager + admin; sales_manager read-only)
+        Route::middleware('permission:quotes.update')->group(function () {
             Route::put('quote-requests/{id}', [AdminQuoteRequestController::class, 'update']);
             Route::patch('quote-requests/{id}/status', [AdminQuoteRequestController::class, 'updateStatus']);
             Route::post('quote-requests/{id}/convert-to-order', [AdminQuoteRequestController::class, 'convertToOrder']);
-            // Quality review actions (CRM-2)
+            // CRM-2 quality review
             Route::post('quote-requests/{id}/qualify', [AdminQuoteRequestController::class, 'qualify']);
             Route::post('quote-requests/{id}/reject', [AdminQuoteRequestController::class, 'rejectInquiry']);
             Route::post('quote-requests/{id}/spam', [AdminQuoteRequestController::class, 'markSpam']);
-            // Attachments streamed through controller — never via public URL
-            Route::get('quote-attachments/{id}/download', [AdminQuoteAttachmentController::class, 'download']);
+            // CRM-3 pipeline
+            Route::post('quote-requests/{id}/assign', [AdminQuoteRequestController::class, 'assign']);
+            Route::post('quote-requests/{id}/qualification', [AdminQuoteRequestController::class, 'updateQualification']);
+            Route::post('quote-requests/{id}/notes', [AdminQuoteRequestController::class, 'updateNotes']);
+        });
+
+        // Convert to customer — customers.manage required
+        Route::middleware('permission:customers.manage')->group(function () {
+            Route::post('quote-requests/{id}/convert-to-customer', [AdminQuoteRequestController::class, 'convertToCustomer']);
         });
 
         // -----------------------------------------------------------------

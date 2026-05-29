@@ -5,17 +5,20 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\ConvertQuoteToOrderRequest;
 use App\Mail\QuoteConvertedToOrder;
+use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\OrderLog;
 use App\Models\QuoteRequest;
 use App\Services\PromoCodeService;
+use App\Services\SecurityEventService;
 use App\Services\StripeService;
 use App\Services\TaxService;
 use App\Services\TradeDocumentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
@@ -35,6 +38,38 @@ class AdminQuoteRequestController extends Controller
             $query->where('review_status', $request->review_status);
         }
 
+        // CRM-3 pipeline filters
+        if ($request->filled('qualification_status')) {
+            $query->where('qualification_status', $request->qualification_status);
+        }
+
+        if ($request->filled('assigned_to')) {
+            $query->where('assigned_to', $request->integer('assigned_to'));
+        }
+
+        if ($request->boolean('unassigned')) {
+            $query->whereNull('assigned_to')
+                  ->whereNotIn('qualification_status', ['spam', 'rejected', 'converted', 'closed']);
+        }
+
+        if ($request->filled('lead_priority')) {
+            $query->where('lead_priority', $request->lead_priority);
+        }
+
+        if ($request->filled('lead_customer_type')) {
+            $query->where('lead_customer_type', $request->lead_customer_type);
+        }
+
+        if ($request->filled('lead_source')) {
+            $query->where('lead_source', $request->lead_source);
+        }
+
+        if ($request->boolean('follow_up_due')) {
+            $query->whereNotNull('follow_up_at')
+                  ->where('follow_up_at', '<=', now())
+                  ->whereNotIn('qualification_status', ['converted', 'closed', 'spam', 'rejected']);
+        }
+
         if ($request->filled('customer_id')) {
             $query->where('customer_id', $request->integer('customer_id'));
         }
@@ -48,7 +83,8 @@ class AdminQuoteRequestController extends Controller
             $query->where(function ($sub) use ($q) {
                 $sub->where('ref_number', 'like', "%{$q}%")
                     ->orWhere('full_name', 'like', "%{$q}%")
-                    ->orWhere('email', 'like', "%{$q}%");
+                    ->orWhere('email', 'like', "%{$q}%")
+                    ->orWhere('company_name', 'like', "%{$q}%");
             });
         }
 
@@ -320,6 +356,222 @@ class AdminQuoteRequestController extends Controller
         ], 201);
     }
 
+    // ── GET /admin/quote-requests/summary ────────────────────────────────────
+
+    public function summary(): JsonResponse
+    {
+        $base  = DB::table('quote_requests');
+        $now   = now();
+        $active = ['spam', 'rejected', 'converted', 'closed'];
+
+        return response()->json([
+            'data' => [
+                'new_count'           => (clone $base)->where('qualification_status', 'new')->count(),
+                'needs_review_count'  => (clone $base)->where('qualification_status', 'needs_review')->count(),
+                'qualified_count'     => (clone $base)->where('qualification_status', 'qualified')->count(),
+                'proposal_sent_count' => (clone $base)->where('qualification_status', 'proposal_sent')->count(),
+                'converted_count'     => (clone $base)->where('qualification_status', 'converted')->count(),
+                'spam_count'          => (clone $base)->where('qualification_status', 'spam')->count(),
+                'follow_up_due_count' => (clone $base)
+                    ->whereNotNull('follow_up_at')
+                    ->where('follow_up_at', '<=', $now)
+                    ->whereNotIn('qualification_status', $active)
+                    ->count(),
+                'unassigned_count'    => (clone $base)
+                    ->whereNull('assigned_to')
+                    ->whereNotIn('qualification_status', $active)
+                    ->count(),
+                'high_priority_count' => (clone $base)
+                    ->whereIn('lead_priority', ['high', 'urgent'])
+                    ->whereNotIn('qualification_status', $active)
+                    ->count(),
+            ],
+            'message' => 'success',
+        ]);
+    }
+
+    // ── POST /admin/quote-requests/{id}/assign ────────────────────────────────
+
+    public function assign(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate([
+            'assigned_to'  => ['required', 'integer', 'exists:admin_users,id'],
+            'follow_up_at' => ['nullable', 'date'],
+        ]);
+
+        $quote = QuoteRequest::findOrFail($id);
+
+        $quote->update([
+            'assigned_to'  => $data['assigned_to'],
+            'assigned_at'  => now(),
+            'follow_up_at' => $data['follow_up_at'] ?? $quote->follow_up_at,
+        ]);
+
+        Log::info('[lead_assigned] Lead assigned to admin', [
+            'event'      => 'lead_assigned',
+            'quote_ref'  => $quote->ref_number,
+            'assigned_to' => $data['assigned_to'],
+            'by_admin'   => $request->user()?->id,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'data'    => $this->formatDetail($quote->fresh()->load('order')),
+            'message' => 'Lead assigned.',
+        ]);
+    }
+
+    // ── POST /admin/quote-requests/{id}/qualification ─────────────────────────
+
+    public function updateQualification(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate([
+            'qualification_status' => ['nullable', Rule::in([
+                'new', 'needs_review', 'qualified', 'proposal_sent',
+                'customer_invited', 'converted', 'rejected', 'spam', 'closed',
+            ])],
+            'lead_priority'        => ['nullable', Rule::in(['low', 'normal', 'high', 'urgent'])],
+            'lead_customer_type'   => ['nullable', Rule::in([
+                'private_buyer', 'dealer', 'workshop', 'fleet', 'exporter', 'unknown',
+            ])],
+            'follow_up_at'         => ['nullable', 'date'],
+            'qualification_reason' => ['nullable', 'string', 'max:1000'],
+            'internal_notes'       => ['nullable', 'string', 'max:5000'],
+        ]);
+
+        $quote  = QuoteRequest::findOrFail($id);
+        $update = array_filter($data, fn ($v) => $v !== null);
+
+        $quote->update($update);
+
+        Log::info('[lead_qualification_updated] Lead qualification updated', [
+            'event'      => 'lead_qualification_updated',
+            'quote_ref'  => $quote->ref_number,
+            'changes'    => array_keys($update),
+            'by_admin'   => $request->user()?->id,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'data'    => $this->formatDetail($quote->fresh()->load('order')),
+            'message' => 'Lead qualification updated.',
+        ]);
+    }
+
+    // ── POST /admin/quote-requests/{id}/notes ─────────────────────────────────
+
+    public function updateNotes(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate([
+            'internal_notes' => ['required', 'string', 'max:5000'],
+        ]);
+
+        $quote = QuoteRequest::findOrFail($id);
+        $quote->update(['internal_notes' => $data['internal_notes']]);
+
+        Log::info('[lead_note_updated] Lead internal notes updated', [
+            'event'     => 'lead_note_updated',
+            'quote_ref' => $quote->ref_number,
+            'by_admin'  => $request->user()?->id,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Notes updated.',
+        ]);
+    }
+
+    // ── POST /admin/quote-requests/{id}/convert-to-customer ──────────────────
+
+    public function convertToCustomer(Request $request, int $id): JsonResponse
+    {
+        $quote = QuoteRequest::findOrFail($id);
+
+        if ($quote->qualification_status === 'converted') {
+            return response()->json([
+                'message'     => 'This lead has already been converted to a customer.',
+                'customer_id' => $quote->customer_id,
+            ], 409);
+        }
+
+        $existing = Customer::where('email', $quote->email)->first();
+
+        if ($existing) {
+            // Link quote to existing customer
+            $quote->update([
+                'customer_id'          => $existing->id,
+                'qualification_status' => 'converted',
+            ]);
+
+            SecurityEventService::log(
+                'lead_converted_to_customer', $existing->id,
+                $request->ip(), $request->userAgent(),
+                "Lead {$quote->ref_number} linked to existing customer by admin", 'info'
+            );
+
+            Log::info('[lead_converted_to_customer] Lead linked to existing customer', [
+                'event'       => 'lead_converted_to_customer',
+                'quote_ref'   => $quote->ref_number,
+                'customer_id' => $existing->id,
+                'action'      => 'linked',
+                'by_admin'    => $request->user()?->id,
+            ]);
+
+            return response()->json([
+                'success'     => true,
+                'action'      => 'linked',
+                'customer_id' => $existing->id,
+                'customer'    => $this->formatCustomerSummary($existing),
+                'message'     => 'Lead linked to existing customer account.',
+            ]);
+        }
+
+        // Create new customer from quote data (pending_review — admin must invite separately)
+        [$firstName, $lastName] = $this->splitFullName($quote->full_name);
+
+        $customer = Customer::create([
+            'first_name'        => $firstName,
+            'last_name'         => $lastName,
+            'email'             => $quote->email,
+            'password'          => Hash::make(Str::random(32)),
+            'phone'             => $quote->phone,
+            'country'           => $quote->country,
+            'company_name'      => $quote->company_name,
+            'vat_number'        => $quote->vat_number,
+            'customer_type'     => $quote->company_name ? 'b2b' : 'b2c',
+            'onboarding_status' => 'pending_review',
+            'is_active'         => false,
+            'must_reset_password' => true,
+        ]);
+
+        $quote->update([
+            'customer_id'          => $customer->id,
+            'qualification_status' => 'converted',
+        ]);
+
+        SecurityEventService::log(
+            'lead_converted_to_customer', $customer->id,
+            $request->ip(), $request->userAgent(),
+            "Customer created from lead {$quote->ref_number} by admin — pending_review", 'info'
+        );
+
+        Log::info('[lead_converted_to_customer] New customer created from lead', [
+            'event'       => 'lead_converted_to_customer',
+            'quote_ref'   => $quote->ref_number,
+            'customer_id' => $customer->id,
+            'action'      => 'created',
+            'by_admin'    => $request->user()?->id,
+        ]);
+
+        return response()->json([
+            'success'     => true,
+            'action'      => 'created',
+            'customer_id' => $customer->id,
+            'customer'    => $this->formatCustomerSummary($customer),
+            'message'     => 'Customer account created (pending_review). Use the invite action to send an activation email.',
+        ], 201);
+    }
+
     // ── POST /admin/quote-requests/{id}/qualify ──────────────────────────────
 
     public function qualify(Request $request, int $id): JsonResponse
@@ -327,10 +579,11 @@ class AdminQuoteRequestController extends Controller
         $quote = QuoteRequest::findOrFail($id);
 
         $quote->update([
-            'review_status' => 'qualified',
-            'reviewed_by'   => $request->user()?->id,
-            'reviewed_at'   => now(),
-            'rejection_reason' => null,
+            'review_status'        => 'qualified',
+            'qualification_status' => 'qualified',
+            'reviewed_by'          => $request->user()?->id,
+            'reviewed_at'          => now(),
+            'rejection_reason'     => null,
         ]);
 
         Log::info('[quote_review_qualify] Admin qualified inquiry', [
@@ -356,10 +609,11 @@ class AdminQuoteRequestController extends Controller
         $quote = QuoteRequest::findOrFail($id);
 
         $quote->update([
-            'review_status'    => 'rejected',
-            'reviewed_by'      => $request->user()?->id,
-            'reviewed_at'      => now(),
-            'rejection_reason' => $data['reason'] ?? null,
+            'review_status'        => 'rejected',
+            'qualification_status' => 'rejected',
+            'reviewed_by'          => $request->user()?->id,
+            'reviewed_at'          => now(),
+            'rejection_reason'     => $data['reason'] ?? null,
         ]);
 
         Log::info('[quote_review_reject] Admin rejected inquiry', [
@@ -382,9 +636,10 @@ class AdminQuoteRequestController extends Controller
         $quote = QuoteRequest::findOrFail($id);
 
         $quote->update([
-            'review_status' => 'spam',
-            'reviewed_by'   => $request->user()?->id,
-            'reviewed_at'   => now(),
+            'review_status'        => 'spam',
+            'qualification_status' => 'spam',
+            'reviewed_by'          => $request->user()?->id,
+            'reviewed_at'          => now(),
         ]);
 
         Log::info('[quote_review_spam] Admin marked inquiry as spam', [
@@ -477,12 +732,22 @@ class AdminQuoteRequestController extends Controller
             'delivery_city'            => $r->delivery_city,
             'delivery_postal_code'     => $r->delivery_postal_code,
             'status'                   => $r->status,
-            // Quality / review
+            // Quality (CRM-2)
             'review_status'            => $r->review_status ?? 'new',
             'quality_score'            => $r->quality_score,
             'quality_flags'            => $r->quality_flags ?? [],
             'reviewed_at'              => $r->reviewed_at?->toIso8601String(),
             'rejection_reason'         => $r->rejection_reason,
+            // Pipeline (CRM-3)
+            'qualification_status'     => $r->qualification_status ?? 'new',
+            'lead_priority'            => $r->lead_priority ?? 'normal',
+            'lead_source'              => $r->lead_source,
+            'lead_customer_type'       => $r->lead_customer_type ?? 'unknown',
+            'assigned_to'              => $r->assigned_to,
+            'assigned_at'              => $r->assigned_at?->toIso8601String(),
+            'follow_up_at'             => $r->follow_up_at?->toIso8601String(),
+            'follow_up_overdue'        => $r->follow_up_at && $r->follow_up_at->isPast()
+                                          && ! in_array($r->qualification_status ?? 'new', ['converted', 'closed', 'spam', 'rejected'], true),
             'created_at'               => $r->created_at?->toIso8601String(),
             'order_id'                 => $r->order_id,
             'has_attachment'           => (bool) $r->attachment_path,
@@ -544,13 +809,25 @@ class AdminQuoteRequestController extends Controller
             'notes'                => $r->notes,
             'admin_notes'          => $r->admin_notes,
 
-            // Quality / review
+            // Quality (CRM-2)
             'review_status'        => $r->review_status ?? 'new',
             'quality_score'        => $r->quality_score,
             'quality_flags'        => $r->quality_flags ?? [],
             'reviewed_by'          => $r->reviewed_by,
             'reviewed_at'          => $r->reviewed_at?->toIso8601String(),
             'rejection_reason'     => $r->rejection_reason,
+            // Pipeline (CRM-3)
+            'qualification_status' => $r->qualification_status ?? 'new',
+            'qualification_reason' => $r->qualification_reason,
+            'lead_priority'        => $r->lead_priority ?? 'normal',
+            'lead_source'          => $r->lead_source,
+            'lead_customer_type'   => $r->lead_customer_type ?? 'unknown',
+            'assigned_to'          => $r->assigned_to,
+            'assigned_at'          => $r->assigned_at?->toIso8601String(),
+            'follow_up_at'         => $r->follow_up_at?->toIso8601String(),
+            'follow_up_overdue'    => $r->follow_up_at && $r->follow_up_at->isPast()
+                                      && ! in_array($r->qualification_status ?? 'new', ['converted', 'closed', 'spam', 'rejected'], true),
+            'internal_notes'       => $r->internal_notes,
 
             // Linked order
             'order_id'             => $r->order_id,
@@ -563,6 +840,27 @@ class AdminQuoteRequestController extends Controller
             'attachment_original_name' => $r->attachment_original_name,
             'attachment_size'          => $r->attachment_size,
             'attachment_mime'          => $r->attachment_mime,
+        ];
+    }
+
+    /** @return array{string, string} */
+    private function splitFullName(string $fullName): array
+    {
+        $parts     = explode(' ', trim($fullName), 2);
+        $firstName = $parts[0] ?? $fullName;
+        $lastName  = $parts[1] ?? '-';
+        return [$firstName, $lastName];
+    }
+
+    private function formatCustomerSummary(Customer $c): array
+    {
+        return [
+            'id'                => $c->id,
+            'email'             => $c->email,
+            'full_name'         => $c->first_name . ' ' . $c->last_name,
+            'company_name'      => $c->company_name,
+            'onboarding_status' => $c->onboarding_status ?? 'active',
+            'is_active'         => (bool) $c->is_active,
         ];
     }
 }

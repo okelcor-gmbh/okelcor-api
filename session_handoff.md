@@ -1,5 +1,234 @@
 # Session Handoff — Okelcor API
-Last updated: 2026-05-29 (session 33 — CRM-2 inquiry quality filtering)
+Last updated: 2026-05-29 (session 34 — CRM-3 lead qualification & sales ownership pipeline)
+
+---
+
+## Session 34 — CRM-3: Lead Qualification & Sales Ownership Pipeline (complete)
+
+### What was built
+
+#### 1. Migration — lead pipeline fields on `quote_requests`
+
+`database/migrations/2026_05_29_000003_add_lead_pipeline_fields_to_quote_requests_table.php`
+
+| Column | Type | Purpose |
+|---|---|---|
+| `assigned_to` | FK → admin_users nullable | Sales owner |
+| `assigned_at` | TIMESTAMP nullable | When assigned |
+| `follow_up_at` | TIMESTAMP nullable | Scheduled follow-up date |
+| `lead_priority` | ENUM(low/normal/high/urgent) DEFAULT normal | Priority flag |
+| `lead_source` | VARCHAR(60) nullable | Origin: website_quote/ebay/phone/email/referral/contact_form |
+| `lead_customer_type` | ENUM(private_buyer/dealer/workshop/fleet/exporter/unknown) DEFAULT unknown | Admin-set buyer classification |
+| `qualification_status` | ENUM(9 values) DEFAULT new | Sales pipeline stage |
+| `qualification_reason` | TEXT nullable | Admin note on qualification decision |
+| `internal_notes` | TEXT nullable | Internal team notes (not sent to customer) |
+
+`qualification_status` values: `new`, `needs_review`, `qualified`, `proposal_sent`, `customer_invited`, `converted`, `rejected`, `spam`, `closed`
+
+**Backfill:** All existing rows get `lead_source=website_quote` + `qualification_status` derived from `review_status` (qualified→qualified, spam→spam, rejected→rejected, needs_review→needs_review, others→new).
+
+`lead_customer_type` is separate from `customer_type` (b2b/b2c) — it's the sales classification (dealer vs fleet vs exporter etc.), admin-set during qualification.
+
+#### 2. New admin endpoints
+
+All under `/api/v1/admin/...`:
+
+| Endpoint | Permission | Description |
+|---|---|---|
+| `GET /quote-requests/summary` | quotes.manage | Pipeline counts dashboard |
+| `POST /quote-requests/{id}/assign` | quotes.update | Assign owner + follow-up date |
+| `POST /quote-requests/{id}/qualification` | quotes.update | Update pipeline stage, priority, type, notes |
+| `POST /quote-requests/{id}/notes` | quotes.update | Update internal_notes only |
+| `POST /quote-requests/{id}/convert-to-customer` | customers.manage | Create/link customer from lead |
+
+#### 3. Summary endpoint
+
+`GET /api/v1/admin/quote-requests/summary` returns:
+```json
+{
+  "data": {
+    "new_count": 5,
+    "needs_review_count": 3,
+    "qualified_count": 8,
+    "proposal_sent_count": 2,
+    "converted_count": 12,
+    "spam_count": 41,
+    "follow_up_due_count": 4,
+    "unassigned_count": 6,
+    "high_priority_count": 3
+  }
+}
+```
+
+#### 4. Assign endpoint
+
+`POST /admin/quote-requests/{id}/assign`
+```json
+{ "assigned_to": 3, "follow_up_at": "2026-06-01T10:00:00Z" }
+```
+Sets `assigned_to`, `assigned_at=now()`, `follow_up_at`. Logs `lead_assigned`.
+
+#### 5. Qualification endpoint
+
+`POST /admin/quote-requests/{id}/qualification`
+```json
+{
+  "qualification_status": "qualified",
+  "lead_priority": "high",
+  "lead_customer_type": "dealer",
+  "follow_up_at": "2026-06-03T09:00:00Z",
+  "qualification_reason": "Verified dealer in Lagos, regular orders expected",
+  "internal_notes": "Call +234... to confirm container size"
+}
+```
+All fields are optional — only updates what's provided. Logs `lead_qualification_updated`.
+
+#### 6. Convert-to-customer endpoint
+
+`POST /admin/quote-requests/{id}/convert-to-customer`
+
+**If customer email already exists:**
+- Links `quote.customer_id = existing.id`
+- Sets `qualification_status=converted`
+- Returns `action=linked`
+
+**If customer email is new:**
+- Creates `Customer` from quote data (name split, email, phone, country, company, VAT)
+- Sets `onboarding_status=pending_review`, `is_active=false` (CRM-1 rules — admin must invite)
+- Links quote, sets `qualification_status=converted`
+- Returns `action=created`
+
+Both paths log `lead_converted_to_customer` via SecurityEventService. After conversion, use `POST /admin/customers/{id}/invite` to send activation email.
+
+#### 7. Permission changes
+
+`app/Support/AdminPermissions.php` — two new permissions added:
+
+| Permission | Roles |
+|---|---|
+| `quotes.view` | super_admin, admin, order_manager, sales_manager |
+| `quotes.update` | super_admin, admin, order_manager |
+
+Route split:
+- `quotes.manage` → GET routes (summary, index, show, attachment download) — sales_manager can read
+- `quotes.update` → all write routes (assign, qualification, notes, qualify, reject, spam, convert-to-order, update)
+- `customers.manage` → convert-to-customer
+
+#### 8. CRM-2 qualify/reject/spam sync
+
+The existing CRM-2 `qualify`, `rejectInquiry`, `markSpam` methods now ALSO update `qualification_status` in sync with `review_status`. No breaking change — both columns track the same value after admin review.
+
+#### 9. Index filters (all new)
+
+`GET /admin/quote-requests` now accepts:
+```
+?qualification_status=qualified
+?assigned_to=3
+?unassigned=true
+?lead_priority=high
+?lead_customer_type=dealer
+?lead_source=website_quote
+?follow_up_due=true
+```
+
+#### 10. formatList/formatDetail updates
+
+Both formatters now include all pipeline fields:
+`qualification_status`, `lead_priority`, `lead_source`, `lead_customer_type`, `assigned_to`, `assigned_at`, `follow_up_at`, `follow_up_overdue` (computed bool), `qualification_reason`, `internal_notes`
+
+`follow_up_overdue=true` when `follow_up_at` is in the past AND status is not converted/closed/spam/rejected.
+
+#### 11. Public submission
+
+`QuoteRequestController::store()` now sets:
+- `lead_source=website_quote` on every public submission
+- `qualification_status` mirrors `review_status` at creation
+
+### Pipeline status flow
+
+```
+New inquiry submitted
+  → qualification_status = new (or needs_review/spam from quality scoring)
+
+Admin reviews
+  → assign to sales owner
+  → update qualification + priority + customer_type
+  → set follow_up_at
+
+Pipeline stages:
+  new → needs_review → qualified → proposal_sent → customer_invited → converted
+                                                                    ↘ rejected
+                                                                    ↘ closed
+  (any stage) → spam (admin override)
+
+Converted:
+  → POST /convert-to-customer → Customer created (pending_review) or linked
+  → POST /admin/customers/{id}/invite → Activation email sent
+  → Customer activates → onboarding_status=active → can log in
+```
+
+### Audit log events
+
+| Log event | Trigger |
+|---|---|
+| `lead_assigned` | `POST /assign` |
+| `lead_qualification_updated` | `POST /qualification` |
+| `lead_note_updated` | `POST /notes` |
+| `lead_converted_to_customer` | `POST /convert-to-customer` |
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `database/migrations/2026_05_29_000003_add_lead_pipeline_fields_to_quote_requests_table.php` | New |
+| `app/Models/QuoteRequest.php` | Pipeline fields fillable/casts + assignedTo() relation |
+| `app/Support/AdminPermissions.php` | Added quotes.view + quotes.update |
+| `app/Http/Controllers/Admin/AdminQuoteRequestController.php` | summary/assign/updateQualification/updateNotes/convertToCustomer methods; updated filters+formatters; CRM-2 methods sync qualification_status |
+| `app/Http/Controllers/QuoteRequestController.php` | Sets lead_source=website_quote + qualification_status on store |
+| `routes/api.php` | Restructured quotes routes: quotes.manage (read) + quotes.update (write) + customers.manage (convert) |
+
+### Deploy steps
+
+```bash
+cd /home/u978121777/domains/okelcor.com/public_html/okelcor-api
+git fetch origin && git reset --hard origin/main
+composer install --no-dev
+/opt/alt/php83/usr/bin/php artisan migrate --force
+/opt/alt/php83/usr/bin/php artisan config:clear
+/opt/alt/php83/usr/bin/php artisan config:cache
+/opt/alt/php83/usr/bin/php artisan route:cache
+```
+
+**Migration that will run:** `2026_05_29_000003_add_lead_pipeline_fields_to_quote_requests_table`
+— additive ALTER TABLE + backfill UPDATE. No data loss.
+
+### Test checklist
+
+```
+# Submit "Need 200 Michelin 205/55R16 to Ghana"
+POST /api/v1/quote-requests → 201, review_status=qualified, lead_source=website_quote
+
+# Admin views summary
+GET /api/v1/admin/quote-requests/summary → counts including new/qualified/etc.
+
+# Admin assigns lead to self
+POST /api/v1/admin/quote-requests/{id}/assign { assigned_to: 1, follow_up_at: "2026-06-01..." } → 200
+
+# Admin updates qualification
+POST /api/v1/admin/quote-requests/{id}/qualification { qualification_status: "qualified", lead_priority: "high", lead_customer_type: "dealer" } → 200
+
+# Admin adds notes
+POST /api/v1/admin/quote-requests/{id}/notes { internal_notes: "Spoke to buyer, genuine dealer" } → 200
+
+# Admin converts to customer
+POST /api/v1/admin/quote-requests/{id}/convert-to-customer → 201, action=created, onboarding_status=pending_review
+
+# Admin invites customer
+POST /api/v1/admin/customers/{customer_id}/invite → 200, invitation email sent
+
+# Spam inquiry — still visible, not emailed
+GET /api/v1/admin/quote-requests?qualification_status=spam → spam leads listed, no email in logs
+```
 
 ---
 

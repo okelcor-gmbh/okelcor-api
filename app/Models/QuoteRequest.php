@@ -52,13 +52,23 @@ class QuoteRequest extends Model
         'customer_accepted_ip',
         'customer_accepted_user_agent',
         'customer_acceptance_note',
-        // Quality / review
+        // Quality / review (CRM-2)
         'quality_score',
         'quality_flags',
         'review_status',
         'reviewed_by',
         'reviewed_at',
         'rejection_reason',
+        // Lead pipeline (CRM-3)
+        'assigned_to',
+        'assigned_at',
+        'follow_up_at',
+        'lead_priority',
+        'lead_source',
+        'lead_customer_type',
+        'qualification_status',
+        'qualification_reason',
+        'internal_notes',
     ];
 
     protected $casts = [
@@ -66,6 +76,8 @@ class QuoteRequest extends Model
         'quality_flags'        => 'array',
         'customer_accepted_at' => 'datetime',
         'reviewed_at'          => 'datetime',
+        'assigned_at'          => 'datetime',
+        'follow_up_at'         => 'datetime',
         'quality_score'        => 'integer',
     ];
 
@@ -81,5 +93,10 @@ class QuoteRequest extends Model
     public function order(): BelongsTo
     {
         return $this->belongsTo(Order::class);
+    }
+
+    public function assignedTo(): BelongsTo
+    {
+        return $this->belongsTo(\App\Models\AdminUser::class, 'assigned_to');
     }
 }
