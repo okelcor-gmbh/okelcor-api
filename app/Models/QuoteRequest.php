@@ -9,6 +9,7 @@ class QuoteRequest extends Model
 {
     protected $fillable = [
         'customer_id',
+        'possible_customer_id',
         'order_id',
         'ref_number',
         'full_name',

@@ -1,5 +1,178 @@
 # Session Handoff — Okelcor API
-Last updated: 2026-05-29 (session 35 — CRM-4 customer segmentation & access control)
+Last updated: 2026-05-29 (session 36 — CRM-5 customer data quality & deduplication)
+
+---
+
+## Session 36 — CRM-5: Customer Data Quality & Deduplication (complete)
+
+### Migrations
+
+**`2026_05_29_000005_add_data_quality_fields_to_customers_table`**
+
+| Column | Type | Default | Purpose |
+|---|---|---|---|
+| `data_quality_score` | SMALLINT UNSIGNED nullable | null | 0–100 completeness score |
+| `data_quality_flags` | JSON nullable | null | Array of flag strings |
+| `normalized_email` | VARCHAR(255) nullable | null | `lower(trim(email))` |
+| `normalized_company_name` | VARCHAR(255) nullable | null | Normalized for duplicate detection |
+| `duplicate_group_id` | VARCHAR(36) nullable | null | Groups related duplicate records |
+| `possible_duplicate_of` | FK → customers nullable | null | Most likely duplicate candidate |
+| `data_review_status` | ENUM DEFAULT `needs_review` | needs_review | Admin-facing quality state |
+
+`data_review_status` values: `clean`, `needs_review`, `duplicate_suspected`, `merged`, `ignored`
+
+Backfill in migration SQL: `normalized_email = LOWER(TRIM(email))` for all rows. Company normalization + full scoring done by Artisan command post-deploy.
+
+**`2026_05_29_000006_add_possible_customer_to_quote_requests_table`**
+
+Adds `possible_customer_id` (FK → customers, nullable) to `quote_requests`. Set when a guest quote submission email matches an existing customer.
+
+### CustomerDataQualityService (`app/Services/CustomerDataQualityService.php`)
+
+**Scoring (0–100):**
+
+| Signal | Points |
+|---|---|
+| Email present (structural) | +20 |
+| Phone present | +15 |
+| Company name present + non-trivial | +20 |
+| Country present | +15 |
+| VAT number present | +15 |
+| Has saved delivery address | +10 |
+| Segment/access configured | +5 |
+| Personal email for B2B | −5 |
+
+**Completeness flags:**
+`missing_phone`, `missing_country`, `missing_company` (b2b only), `missing_address`, `weak_company_name` (< 3 chars), `personal_email_for_b2b`, `incomplete_profile` (score < 50)
+
+**Duplicate flags (auto-detected):**
+
+| Flag | Method | Confidence |
+|---|---|---|
+| `duplicate_email` | `LOWER(TRIM(email))` match | High |
+| `duplicate_phone` | Stripped phone digits match | High |
+| `duplicate_company_country` | `normalized_company_name` + `country` match | Medium |
+
+**Company normalization:**
+1. Lowercase + trim
+2. Strip punctuation → spaces
+3. Collapse whitespace
+4. Remove trailing legal suffixes: `ltd`, `limited`, `gmbh`, `llc`, `inc`, `bv`, `sarl`, `co`, `company`, `corp`, `ug`, `ag`, `kg`, and more
+
+**`data_review_status` determination:**
+- Any duplicate found → `duplicate_suspected`
+- Score < 50 → `needs_review`
+- Otherwise → `clean`
+- Admin overrides (`ignored`, `merged`) are never overwritten by recalculation
+
+### Admin endpoints
+
+All under `permission:customers.manage`:
+
+| Endpoint | Description |
+|---|---|
+| `GET /admin/customers/data-quality/summary` | Counts: total/clean/needs_review/duplicate_suspected/incomplete/personal_email/unscored |
+| `GET /admin/customers/data-quality/issues` | Paginated issue list. Filters: `review_status`, `flag`, `min_score`, `max_score`, `duplicate_only` |
+| `POST /admin/customers/{id}/data-quality/recalculate` | Re-run scoring + duplicate detection for one customer |
+| `POST /admin/customers/{id}/data-quality/mark-clean` | Admin clears flags, sets status=clean |
+| `POST /admin/customers/{id}/data-quality/ignore-duplicate` | Admin dismisses duplicate flag (status=ignored) |
+| `POST /admin/customers/{id}/data-quality/link-duplicate` | Body: `{ possible_duplicate_of: id }` — admin-confirmed duplicate link + shared `duplicate_group_id` |
+| `POST /admin/customers/{id}/data-quality/merge-preview` | Body: `{ merge_into: id }` — read-only field diff, no changes written |
+
+No destructive merge endpoint. `merge-preview` shows field conflicts + record counts (quotes/orders/addresses) to prepare for manual admin DB action.
+
+### Quote possible customer detection (CRM-5)
+
+`QuoteRequestController::store()` — after saving a guest quote, checks if `email` matches an existing customer:
+```php
+$existing = Customer::whereRaw('LOWER(TRIM(email)) = ?', [lower(trim($quote->email))])->first();
+if ($existing) $quote->update(['possible_customer_id' => $existing->id]);
+```
+
+`AdminQuoteRequestController::formatDetail()` now includes `possible_customer_id`.
+
+Frontend shows: "This inquiry may belong to an existing customer." + View Customer button.
+
+### System health — data quality group
+
+New `data_quality` group in `GET /admin/system/health`:
+- `duplicate_customers`: warning if any `data_review_status=duplicate_suspected`
+- `unscored_customers`: warning if any customers have no score yet (run backfill command)
+
+### Artisan command
+
+```bash
+# Full backfill (run once after deploy)
+php artisan customers:recalculate-data-quality --all
+
+# Single customer
+php artisan customers:recalculate-data-quality --id=42
+
+# Only unscored customers
+php artisan customers:recalculate-data-quality --unscored
+
+# Preview without saving
+php artisan customers:recalculate-data-quality --id=42 --dry-run
+```
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `database/migrations/2026_05_29_000005_*` | New — quality fields on customers |
+| `database/migrations/2026_05_29_000006_*` | New — possible_customer_id on quote_requests |
+| `app/Services/CustomerDataQualityService.php` | New — scoring engine |
+| `app/Http/Controllers/Admin/AdminCustomerDataQualityController.php` | New — all data quality endpoints |
+| `app/Console/Commands/RecalculateCustomerDataQuality.php` | New — bulk backfill command |
+| `app/Models/Customer.php` | Quality fields fillable/casts + possibleDuplicateOf() relation |
+| `app/Models/QuoteRequest.php` | possible_customer_id in fillable |
+| `app/Http/Controllers/QuoteRequestController.php` | possible_customer_id detection on guest submission |
+| `app/Http/Controllers/Admin/AdminQuoteRequestController.php` | possible_customer_id in formatDetail |
+| `app/Http/Controllers/Admin/SystemHealthController.php` | data_quality group (duplicate + unscored checks) |
+| `routes/api.php` | 7 new data quality routes |
+
+### Deploy steps
+
+```bash
+cd /home/u978121777/domains/okelcor.com/public_html/okelcor-api
+git fetch origin && git reset --hard origin/main
+composer install --no-dev
+/opt/alt/php83/usr/bin/php artisan migrate --force
+/opt/alt/php83/usr/bin/php artisan config:clear
+/opt/alt/php83/usr/bin/php artisan config:cache
+/opt/alt/php83/usr/bin/php artisan route:cache
+
+# Run scoring backfill (do this after deploy — chunked, safe on large datasets)
+/opt/alt/php83/usr/bin/php artisan customers:recalculate-data-quality --all
+```
+
+**2 migrations run:** customers quality fields + quote_requests possible_customer_id. Both additive, no data loss.
+
+### Test checklist
+
+```
+# Same email (different casing) → duplicate_email flag
+Create customer john@company.com, then John@Company.com (via import)
+POST /admin/customers/{id}/data-quality/recalculate → flags=["duplicate_email"], status=duplicate_suspected
+
+# Same company + country → duplicate_company_country
+"Okelcor GmbH" Germany + "Okelcor" Germany → duplicate_company_country (after normalization both → "okelcor")
+
+# Missing phone/country
+Customer with no phone/country → flags=["missing_phone","missing_country","incomplete_profile"], score<50
+
+# Guest quote matches existing customer
+POST /api/v1/quote-requests with email=existing@customer.com (no auth)
+→ quote.possible_customer_id = existing customer ID
+GET /admin/quote-requests/{id} → possible_customer_id populated
+
+# Admin marks ignored
+POST /admin/customers/{id}/data-quality/ignore-duplicate → status=ignored
+POST /admin/customers/{id}/data-quality/recalculate → status stays ignored (not overwritten)
+
+# Merge preview — no changes
+POST /admin/customers/{id}/data-quality/merge-preview { merge_into: other_id } → diff shown, no records changed
+```
 
 ---
 

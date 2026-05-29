@@ -134,6 +134,15 @@ class QuoteRequestController extends Controller
             ]);
         }
 
+        // Link to existing customer if guest submission matches a known email (CRM-5)
+        if (! $customer) {
+            $existingCustomer = Customer::whereRaw('LOWER(TRIM(email)) = ?', [strtolower(trim($quote->email))])
+                ->first();
+            if ($existingCustomer) {
+                $quote->update(['possible_customer_id' => $existingCustomer->id]);
+            }
+        }
+
         // Admin notification — send for both qualified and needs_review; never for spam
         $quoteEmail   = config('mail.quote_email');
         $isNeedsReview = $quality['review_status'] === 'needs_review';

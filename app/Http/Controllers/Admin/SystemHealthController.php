@@ -18,13 +18,14 @@ class SystemHealthController extends Controller
     public function index(): JsonResponse
     {
         $groups = [
-            'application' => $this->checkApplication(),
-            'database'    => $this->checkDatabase(),
-            'backups'     => $this->checkBackups(),
-            'mail'        => $this->checkMail(),
-            'security'    => $this->checkSecurity(),
-            'inquiries'   => $this->checkInquiryQueue(),
-            'endpoints'   => $this->checkEndpoints(),
+            'application'   => $this->checkApplication(),
+            'database'      => $this->checkDatabase(),
+            'backups'       => $this->checkBackups(),
+            'mail'          => $this->checkMail(),
+            'security'      => $this->checkSecurity(),
+            'inquiries'     => $this->checkInquiryQueue(),
+            'data_quality'  => $this->checkDataQuality(),
+            'endpoints'     => $this->checkEndpoints(),
         ];
 
         $all = collect($groups)->flatten(1);
@@ -474,6 +475,48 @@ class SystemHealthController extends Controller
                     ];
                 } catch (\Throwable) {
                     return ['status' => 'pass', 'severity' => 'low', 'message' => 'Spam count unavailable'];
+                }
+            }),
+        ];
+    }
+
+    /** @return array<int, array> */
+    public function checkDataQuality(): array
+    {
+        return [
+            $this->check('duplicate_customers', 'Suspected Duplicate Customers', function () {
+                try {
+                    $count = DB::table('customers')
+                        ->where('data_review_status', 'duplicate_suspected')
+                        ->count();
+
+                    return [
+                        'status'   => $count > 0 ? 'warning' : 'pass',
+                        'severity' => 'low',
+                        'message'  => $count === 0
+                            ? 'No suspected duplicate customers'
+                            : "{$count} customer(s) flagged as possible duplicates",
+                        'fix_hint' => $count > 0
+                            ? 'Review at GET /api/v1/admin/customers/data-quality/issues?review_status=duplicate_suspected' : null,
+                    ];
+                } catch (\Throwable) {
+                    return ['status' => 'pass', 'severity' => 'low', 'message' => 'Duplicate check unavailable'];
+                }
+            }),
+            $this->check('unscored_customers', 'Customers Without Quality Score', function () {
+                try {
+                    $count = DB::table('customers')->whereNull('data_quality_score')->count();
+                    return [
+                        'status'   => $count > 0 ? 'warning' : 'pass',
+                        'severity' => 'low',
+                        'message'  => $count === 0
+                            ? 'All customers have quality scores'
+                            : "{$count} customer(s) not yet scored",
+                        'fix_hint' => $count > 0
+                            ? 'Run: php artisan customers:recalculate-data-quality --all' : null,
+                    ];
+                } catch (\Throwable) {
+                    return ['status' => 'pass', 'severity' => 'low', 'message' => 'Score check unavailable'];
                 }
             }),
         ];

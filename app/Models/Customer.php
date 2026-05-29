@@ -43,6 +43,14 @@ class Customer extends Authenticatable
         'approved_for_quotes',
         'approved_for_wholesale_pricing',
         'approved_for_documents',
+        // Data quality (CRM-5)
+        'data_quality_score',
+        'data_quality_flags',
+        'normalized_email',
+        'normalized_company_name',
+        'duplicate_group_id',
+        'possible_duplicate_of',
+        'data_review_status',
     ];
 
     protected $hidden = [
@@ -62,6 +70,8 @@ class Customer extends Authenticatable
         'approved_for_quotes'            => 'boolean',
         'approved_for_wholesale_pricing' => 'boolean',
         'approved_for_documents'         => 'boolean',
+        'data_quality_score'             => 'integer',
+        'data_quality_flags'             => 'array',
     ];
 
     public function getFullNameAttribute(): string
@@ -102,5 +112,10 @@ class Customer extends Authenticatable
     public function securityEvents(): HasMany
     {
         return $this->hasMany(SecurityEvent::class)->orderByDesc('created_at');
+    }
+
+    public function possibleDuplicateOf(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(Customer::class, 'possible_duplicate_of');
     }
 }

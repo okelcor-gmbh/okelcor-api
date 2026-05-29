@@ -37,6 +37,7 @@ use App\Http\Controllers\Admin\MediaController;
 use App\Http\Controllers\Admin\ProductImportController;
 use App\Http\Controllers\Admin\SupplierController;
 use App\Http\Controllers\Admin\AdminCustomerController;
+use App\Http\Controllers\Admin\AdminCustomerDataQualityController;
 use App\Http\Controllers\Admin\CustomerImportController;
 use App\Http\Controllers\Admin\EbayListingController;
 use App\Http\Controllers\Admin\EbayOrderController;
@@ -538,6 +539,10 @@ Route::prefix('v1')->group(function () {
             Route::get('customers', [AdminCustomerController::class, 'index']);
             Route::post('customers', [AdminCustomerController::class, 'store']);
             Route::get('customers/export', [AdminCustomerController::class, 'export']);
+
+            // Data quality overview (CRM-5) — static routes before {id} to avoid routing conflict
+            Route::get('customers/data-quality/summary', [AdminCustomerDataQualityController::class, 'summary']);
+            Route::get('customers/data-quality/issues', [AdminCustomerDataQualityController::class, 'issues']);
             Route::get('customers/{id}', [AdminCustomerController::class, 'show']);
             Route::patch('customers/{id}', [AdminCustomerController::class, 'update']);
             Route::delete('customers/{id}', [AdminCustomerController::class, 'destroy']);
@@ -560,6 +565,13 @@ Route::prefix('v1')->group(function () {
 
             // Segmentation & access control (CRM-4)
             Route::patch('customers/{id}/access', [AdminCustomerController::class, 'updateAccess']);
+
+            // Data quality per-customer actions (CRM-5)
+            Route::post('customers/{id}/data-quality/recalculate', [AdminCustomerDataQualityController::class, 'recalculate']);
+            Route::post('customers/{id}/data-quality/mark-clean', [AdminCustomerDataQualityController::class, 'markClean']);
+            Route::post('customers/{id}/data-quality/ignore-duplicate', [AdminCustomerDataQualityController::class, 'ignoreDuplicate']);
+            Route::post('customers/{id}/data-quality/link-duplicate', [AdminCustomerDataQualityController::class, 'linkDuplicate']);
+            Route::post('customers/{id}/data-quality/merge-preview', [AdminCustomerDataQualityController::class, 'mergePreview']);
         });
 
         // Customer CSV import — customers.import (super_admin only)

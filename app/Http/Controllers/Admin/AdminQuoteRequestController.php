@@ -851,6 +851,9 @@ class AdminQuoteRequestController extends Controller
                                       && ! in_array($r->qualification_status ?? 'new', ['converted', 'closed', 'spam', 'rejected'], true),
             'internal_notes'       => $r->internal_notes,
 
+            // CRM-5: possible existing customer match (guest submissions)
+            'possible_customer_id' => $r->possible_customer_id,
+
             // Linked order
             'order_id'             => $r->order_id,
             'order_ref'            => $r->order?->ref,
