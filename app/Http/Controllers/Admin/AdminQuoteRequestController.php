@@ -488,9 +488,17 @@ class AdminQuoteRequestController extends Controller
         $quote = QuoteRequest::findOrFail($id);
 
         if ($quote->qualification_status === 'converted') {
+            // Resolve the linked customer for the frontend to display/navigate
+            $linked = $quote->customer_id
+                ? Customer::find($quote->customer_id)
+                : Customer::where('email', $quote->email)->first();
+
             return response()->json([
-                'message'     => 'This lead has already been converted to a customer.',
-                'customer_id' => $quote->customer_id,
+                'code'            => 'already_converted',
+                'message'         => 'This lead has already been converted to a customer.',
+                'customer_id'     => $linked?->id ?? $quote->customer_id,
+                'customer_exists' => $linked !== null,
+                'customer'        => $linked ? $this->formatCustomerSummary($linked) : null,
             ], 409);
         }
 
