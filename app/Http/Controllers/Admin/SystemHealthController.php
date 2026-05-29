@@ -326,6 +326,24 @@ class SystemHealthController extends Controller
                 'message'  => config('mail.mailers.smtp.host') ? 'MAIL_HOST configured' : 'MAIL_HOST not set',
                 'fix_hint' => ! config('mail.mailers.smtp.host') ? 'Set MAIL_HOST in .env' : null,
             ]),
+            $this->check('quote_email', 'Quote Request Email', fn () => [
+                'status'   => config('mail.quote_email') ? 'pass' : 'fail',
+                'severity' => 'high',
+                'message'  => config('mail.quote_email')
+                    ? 'QUOTE_EMAIL = ' . config('mail.quote_email')
+                    : 'QUOTE_EMAIL not set — admin will never receive quote notifications',
+                'fix_hint' => ! config('mail.quote_email')
+                    ? 'Set QUOTE_EMAIL=support@okelcor.com in .env' : null,
+            ]),
+            $this->check('order_email', 'Order Notification Email', fn () => [
+                'status'   => config('mail.order_email') ? 'pass' : 'warning',
+                'severity' => 'medium',
+                'message'  => config('mail.order_email')
+                    ? 'ORDER_EMAIL = ' . config('mail.order_email')
+                    : 'ORDER_EMAIL not set — admin will not receive order notifications',
+                'fix_hint' => ! config('mail.order_email')
+                    ? 'Set ORDER_EMAIL=support@okelcor.com in .env' : null,
+            ]),
         ];
     }
 

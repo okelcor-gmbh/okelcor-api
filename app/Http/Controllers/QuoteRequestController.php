@@ -97,21 +97,50 @@ class QuoteRequestController extends Controller
         $quoteEmail = config('mail.quote_email');
         if ($quoteEmail) {
             try {
-                Log::info('Sending quote request admin notification', ['ref' => $refNumber, 'to' => $quoteEmail]);
+                Log::info('[quote_email_sending] Dispatching admin notification', [
+                    'event' => 'quote_email_sending',
+                    'ref'   => $refNumber,
+                    'to'    => $quoteEmail,
+                ]);
                 Mail::to($quoteEmail)->send(new QuoteRequestReceived($quote));
-                Log::info('Quote request admin notification sent', ['ref' => $refNumber]);
+                Log::info('[quote_email_sent] Admin notification delivered', [
+                    'event' => 'quote_email_sent',
+                    'ref'   => $refNumber,
+                    'to'    => $quoteEmail,
+                ]);
             } catch (\Throwable $e) {
-                Log::error('Quote request admin notification failed', ['ref' => $refNumber, 'error' => $e->getMessage()]);
+                Log::error('[quote_email_failed] Admin notification failed', [
+                    'event' => 'quote_email_failed',
+                    'ref'   => $refNumber,
+                    'to'    => $quoteEmail,
+                    'error' => $e->getMessage(),
+                ]);
             }
+        } else {
+            Log::warning('[quote_email_misconfigured] QUOTE_EMAIL is not set — admin notification skipped', [
+                'event' => 'quote_email_misconfigured',
+                'ref'   => $refNumber,
+            ]);
         }
 
         // Customer acknowledgement
         try {
-            Log::info('Sending quote request acknowledgement', ['ref' => $refNumber, 'to' => $quote->email]);
+            Log::info('[quote_ack_sending] Dispatching customer acknowledgement', [
+                'event' => 'quote_ack_sending',
+                'ref'   => $refNumber,
+                'to'    => $quote->email,
+            ]);
             Mail::to($quote->email)->send(new QuoteRequestAcknowledgement($quote));
-            Log::info('Quote request acknowledgement sent', ['ref' => $refNumber]);
+            Log::info('[quote_ack_sent] Customer acknowledgement delivered', [
+                'event' => 'quote_ack_sent',
+                'ref'   => $refNumber,
+            ]);
         } catch (\Throwable $e) {
-            Log::error('Quote request acknowledgement failed', ['ref' => $refNumber, 'error' => $e->getMessage()]);
+            Log::error('[quote_ack_failed] Customer acknowledgement failed', [
+                'event' => 'quote_ack_failed',
+                'ref'   => $refNumber,
+                'error' => $e->getMessage(),
+            ]);
         }
 
         return response()->json([

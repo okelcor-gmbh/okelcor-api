@@ -61,18 +61,21 @@ class CustomerAuthController extends Controller
 
         $customer = Customer::create([
             ...$data,
-            'password'     => Hash::make($data['password']),
-            'vat_verified' => $vatVerified,
+            'password'          => Hash::make($data['password']),
+            'vat_verified'      => $vatVerified,
+            'onboarding_status' => 'pending_review',
+            'is_active'         => false,
         ]);
 
-        try {
-            $this->sendVerificationEmail($customer);
-        } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::error('Verification email failed for customer ' . $customer->id . ': ' . $e->getMessage());
-        }
+        SecurityEventService::log(
+            'customer_pending_review_created', $customer->id,
+            $request->ip(), $request->userAgent(),
+            "New customer registration pending review: {$customer->email}", 'info'
+        );
 
         return response()->json([
-            'message' => 'Registration successful. Please check your email to verify your account.',
+            'message'           => 'Your request has been received and is under review. Our team will contact you once your account has been approved.',
+            'onboarding_status' => 'pending_review',
         ], 201);
     }
 
@@ -166,6 +169,23 @@ class CustomerAuthController extends Controller
             if (! $customer->is_active) {
                 return response()->json(['message' => 'Your account is deactivated.'], 403);
             }
+        }
+
+        // Onboarding gate — controlled B2B access
+        $onboardingStatus = $customer->onboarding_status ?? 'active';
+        if ($onboardingStatus !== 'active') {
+            $onboardingMessage = match ($onboardingStatus) {
+                'pending_review' => 'Your account request is under review. Our team will contact you once it has been approved.',
+                'approved'       => 'Your account has been approved. Please check your email for an invitation to set your password.',
+                'invited'        => 'You have a pending invitation. Please check your email to activate your account.',
+                'rejected'       => 'Your account application was not approved. Please contact support for assistance.',
+                'blocked'        => 'Your account access has been restricted. Please contact support.',
+                default          => 'Your account is not yet active.',
+            };
+            return response()->json([
+                'message'           => $onboardingMessage,
+                'onboarding_status' => $onboardingStatus,
+            ], 403);
         }
 
         if (! $customer->email_verified_at) {
@@ -358,10 +378,24 @@ class CustomerAuthController extends Controller
             return response()->json(['message' => 'Invalid or expired reset token.'], 422);
         }
 
-        $customer->update([
+        $updates = [
             'password'            => Hash::make($data['password']),
             'must_reset_password' => false,
-        ]);
+        ];
+
+        // Invited customers activate their account by completing password set
+        if (($customer->onboarding_status ?? 'active') === 'invited') {
+            $updates['onboarding_status']  = 'active';
+            $updates['is_active']          = true;
+            $updates['email_verified_at']  = $updates['email_verified_at'] ?? $customer->email_verified_at ?? now();
+
+            SecurityEventService::log(
+                'customer_activated', $customer->id, null, null,
+                'Customer account activated via invitation password set', 'info'
+            );
+        }
+
+        $customer->update($updates);
 
         DB::table('password_reset_tokens')->where('email', $data['email'])->delete();
 
@@ -370,7 +404,7 @@ class CustomerAuthController extends Controller
             'Password reset completed', 'info'
         );
 
-        return response()->json(['message' => 'Password reset successfully. You can now log in.']);
+        return response()->json(['message' => 'Password set successfully. You can now log in.']);
     }
 
     // -------------------------------------------------------------------------
@@ -711,19 +745,20 @@ class CustomerAuthController extends Controller
     private function formatCustomer(Customer $c): array
     {
         return [
-            'id'            => $c->id,
-            'customer_type' => $c->customer_type,
-            'first_name'    => $c->first_name,
-            'last_name'     => $c->last_name,
-            'full_name'     => $c->full_name,
-            'email'         => $c->email,
-            'phone'         => $c->phone,
-            'country'       => $c->country,
-            'company_name'  => $c->company_name,
-            'vat_number'    => $c->vat_number,
-            'vat_verified'  => $c->vat_verified,
-            'industry'      => $c->industry,
-            'email_verified' => (bool) $c->email_verified_at,
+            'id'                => $c->id,
+            'customer_type'     => $c->customer_type,
+            'first_name'        => $c->first_name,
+            'last_name'         => $c->last_name,
+            'full_name'         => $c->full_name,
+            'email'             => $c->email,
+            'phone'             => $c->phone,
+            'country'           => $c->country,
+            'company_name'      => $c->company_name,
+            'vat_number'        => $c->vat_number,
+            'vat_verified'      => $c->vat_verified,
+            'industry'          => $c->industry,
+            'email_verified'    => (bool) $c->email_verified_at,
+            'onboarding_status' => $c->onboarding_status ?? 'active',
         ];
     }
 }

@@ -33,6 +33,15 @@ class CustomerAuth
             return response()->json(['message' => 'Account is inactive.'], 401);
         }
 
+        // Onboarding gate — block access for accounts not yet fully active
+        $onboardingStatus = $customer->onboarding_status ?? 'active';
+        if (in_array($onboardingStatus, ['pending_review', 'rejected', 'blocked'], true)) {
+            return response()->json([
+                'message'           => 'Account access not yet granted.',
+                'onboarding_status' => $onboardingStatus,
+            ], 403);
+        }
+
         $request->setUserResolver(fn () => $customer);
 
         return $next($request);

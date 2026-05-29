@@ -1,5 +1,283 @@
 # Session Handoff — Okelcor API
-Last updated: 2026-05-28 (session 31b — LANG-1B backend translation coverage)
+Last updated: 2026-05-29 (session 32 — CRM-1 controlled customer onboarding foundation)
+
+---
+
+## Session 32 — CRM-1: Controlled Customer Onboarding Foundation (complete)
+
+### Audit findings (what existed before)
+
+| Area | Finding | Risk |
+|---|---|---|
+| Registration | `POST /api/v1/auth/register` public, auto-creates `status=active` customer | Any person could self-register and access platform after email verify |
+| Login guard | Only checked `status` (active/suspended/banned/locked) + `email_verified_at` | No B2B approval gate |
+| CustomerAuth middleware | Only checked `is_active` — not `status` column | `status=suspended` with `is_active=true` could bypass |
+| Admin customer creation | No `POST /admin/customers` endpoint | Admin could not manually onboard a customer |
+| Admin invite | No invite flow — only `force-password-reset` | No controlled onboarding path |
+| Guest orders | `POST /api/v1/orders` fully public, no auth | Any person can place order (intentional for B2B inquiry flow) |
+| Quote email | Already had logging; root cause: `MAIL_MAILER=log` default OR `QUOTE_EMAIL` unset | Emails log to file but never deliver unless SMTP configured |
+
+### What was built
+
+#### 1. Migration — `onboarding_status` column
+
+`database/migrations/2026_05_29_000001_add_onboarding_status_to_customers_table.php`
+
+Adds `onboarding_status` ENUM to `customers` table:
+
+| Value | Meaning |
+|---|---|
+| `pending_review` | Self-registered, awaiting admin decision |
+| `approved` | Admin approved, invite not yet sent |
+| `invited` | Invite email sent, customer hasn't activated yet |
+| `active` | Fully active — can log in and access platform |
+| `rejected` | Admin rejected application |
+| `blocked` | Admin blocked — cannot log in |
+
+- DEFAULT `active` → all existing customers remain active after migration (non-destructive)
+- Backfill: `status=banned/suspended` → `onboarding_status=blocked`
+- This column is **separate** from `status` (which handles security lockouts: active/suspended/banned/locked)
+
+#### 2. Registration flow change
+
+`CustomerAuthController::register()`:
+- New customers now get `onboarding_status=pending_review`, `is_active=false`
+- No verification email sent (no point verifying until approved)
+- Response changed to: "Your request has been received and is under review."
+- Logs `customer_pending_review_created` security event
+
+#### 3. Login onboarding gate
+
+`CustomerAuthController::login()` — after the security `status` check, new gate:
+
+| onboarding_status | HTTP | Message |
+|---|---|---|
+| `pending_review` | 403 | "Your account request is under review..." |
+| `approved` | 403 | "Your account has been approved. Please check your email for an invitation..." |
+| `invited` | 403 | "You have a pending invitation. Please check your email to activate..." |
+| `rejected` | 403 | "Your account application was not approved..." |
+| `blocked` | 403 | "Your account access has been restricted. Contact support." |
+| `active` | proceed | (existing flow continues) |
+
+Response includes `onboarding_status` field so frontend can show appropriate UI.
+
+#### 4. CustomerAuth middleware
+
+`app/Http/Middleware/CustomerAuth.php` — now also blocks token access for `pending_review`, `rejected`, `blocked`.
+
+#### 5. Invitation activation flow
+
+`CustomerAuthController::resetPassword()` — when a customer with `onboarding_status=invited` completes the password set:
+- `onboarding_status → active`
+- `is_active → true`
+- `email_verified_at → now()` (invite serves as email verification)
+- Logs `customer_activated` event
+
+Frontend should use `/activate?token=...&email=...` as the route for invitation links (same mechanism as password reset but different page UX).
+
+#### 6. New admin endpoints
+
+All under `POST /api/v1/admin/...`, permission: `customers.manage`.
+
+| Endpoint | Method | Controller | Description |
+|---|---|---|---|
+| `POST /admin/customers` | store() | Creates customer + sends invite | Admin manually onboards a customer |
+| `POST /admin/customers/{id}/approve` | approve() | Sets `onboarding_status=approved` | Mark pending application as approved |
+| `POST /admin/customers/{id}/reject` | reject() | Sets `onboarding_status=rejected` | Decline application (reason optional) |
+| `POST /admin/customers/{id}/invite` | invite() | Sets `invited` + sends invite email | Send activation email |
+| `POST /admin/customers/{id}/resend-invite` | resendInvite() | Resends invite email | Re-send to `invited` or `approved` customers |
+| `POST /admin/customers/{id}/block` | blockOnboarding() | Sets `onboarding_status=blocked` | Block access (different from security ban) |
+
+**Admin create customer flow:**
+```
+POST /api/v1/admin/customers  { customer_type, first_name, last_name, email, ... }
+→ Customer created with onboarding_status=invited
+→ Invite email sent immediately
+→ Customer clicks link → sets password → onboarding_status=active
+```
+
+**Approve pending registration flow:**
+```
+Admin sees onboarding_status=pending_review in customer list
+POST /admin/customers/{id}/approve  → onboarding_status=approved
+POST /admin/customers/{id}/invite   → sends invite email, onboarding_status=invited
+Customer clicks link → sets password → onboarding_status=active
+```
+
+**Reject flow:**
+```
+POST /admin/customers/{id}/reject  { reason: "Not a registered business" }
+→ onboarding_status=rejected, is_active=false, reason appended to admin_notes
+→ All tokens revoked
+```
+
+#### 7. CustomerInvitation mailable + views
+
+| File | Purpose |
+|---|---|
+| `app/Mail/CustomerInvitation.php` | Mailable — activation link |
+| `resources/views/emails/customer-invitation.blade.php` | HTML email template |
+| `resources/views/emails/customer-invitation-text.blade.php` | Plain-text fallback |
+
+Invitation link format: `{FRONTEND_URL}/activate?token={token}&email={email}`
+Token TTL: 48 hours (stored in `password_reset_tokens` table, same mechanism as password reset).
+
+#### 8. Quote email fix + health checks
+
+`QuoteRequestController::store()`:
+- Now logs `[quote_email_sent]` / `[quote_email_failed]` / `[quote_email_misconfigured]` with structured context
+- Logs `warning` when `QUOTE_EMAIL` not set (was silently skipping)
+
+`SystemHealthController::checkMail()` — two new checks:
+- `quote_email` — **fail** if `QUOTE_EMAIL` not set (high severity)
+- `order_email` — **warning** if `ORDER_EMAIL` not set (medium severity)
+
+#### 9. Admin customer list — new fields + filter
+
+`GET /admin/customers` now accepts `?onboarding_status=pending_review|approved|invited|active|rejected|blocked`
+
+`formatSummary()` now includes:
+- `onboarding_status`
+- `phone`
+- `country`
+- `vat_number`
+
+### Audit log events used
+
+| Event | When |
+|---|---|
+| `customer_pending_review_created` | New self-registration |
+| `customer_approved` | Admin approves application |
+| `customer_rejected` | Admin rejects application |
+| `customer_invited` | Admin sends/resends invite |
+| `customer_activated` | Customer sets password via invite link |
+| `customer_blocked` | Admin blocks customer |
+
+### Customer flow: before vs after
+
+**Before (open registration):**
+```
+Customer registers → email verified → immediately active → can log in
+```
+
+**After (controlled onboarding):**
+```
+Customer registers → pending_review (cannot log in)
+Admin reviews → approve → invite (email sent)
+Customer clicks link → sets password → active → can log in
+
+OR:
+
+Admin creates customer directly → invite email sent immediately
+Customer clicks link → sets password → active
+```
+
+**Existing customers:** Unaffected. `onboarding_status=active` (set by migration DEFAULT).
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `database/migrations/2026_05_29_000001_add_onboarding_status_to_customers_table.php` | New — adds onboarding_status column |
+| `app/Models/Customer.php` | Added onboarding_status to fillable + casts |
+| `app/Http/Controllers/CustomerAuthController.php` | register: pending_review; login: onboarding gate; resetPassword: activate on invite; formatCustomer: exposes onboarding_status |
+| `app/Http/Middleware/CustomerAuth.php` | Block pending_review/rejected/blocked at token level |
+| `app/Http/Controllers/Admin/AdminCustomerController.php` | Added store/approve/reject/invite/resendInvite/blockOnboarding; updated formatSummary + index filter |
+| `app/Mail/CustomerInvitation.php` | New — invitation mailable |
+| `resources/views/emails/customer-invitation.blade.php` | New — HTML invite email |
+| `resources/views/emails/customer-invitation-text.blade.php` | New — plain-text invite email |
+| `routes/api.php` | Added POST customers, approve, reject, invite, resend-invite, block routes; moved export before {id} |
+| `app/Http/Controllers/QuoteRequestController.php` | Structured log events; warning when QUOTE_EMAIL unset |
+| `app/Http/Controllers/Admin/SystemHealthController.php` | Added quote_email + order_email health checks |
+
+### Deploy steps
+
+```bash
+cd /home/u978121777/domains/okelcor.com/public_html/okelcor-api
+git fetch origin && git reset --hard origin/main
+composer install --no-dev
+/opt/alt/php83/usr/bin/php artisan migrate --force
+/opt/alt/php83/usr/bin/php artisan config:clear
+/opt/alt/php83/usr/bin/php artisan config:cache
+/opt/alt/php83/usr/bin/php artisan route:cache
+/opt/alt/php83/usr/bin/php artisan view:clear
+```
+
+**Migration that will run:** `2026_05_29_000001_add_onboarding_status_to_customers_table`
+— additive ALTER TABLE. No data loss. Existing customers get `onboarding_status=active` (column default).
+
+**Post-deploy: verify quote email health**
+```bash
+# Check health endpoint for quote_email status:
+curl https://api.okelcor.com/api/v1/admin/system/health \
+  -H "Authorization: Bearer {ADMIN_TOKEN}"
+# Look for mail.quote_email — should be "pass"
+```
+
+**If QUOTE_EMAIL shows fail:**
+```
+# On server, add to .env:
+QUOTE_EMAIL=support@okelcor.com
+MAIL_MAILER=smtp   # (if currently set to 'log')
+# Then:
+php artisan config:clear && php artisan config:cache
+```
+
+### Test checklist
+
+```
+# Existing customer login still works:
+POST /api/v1/auth/login { email: existing@..., password: ... } → 200
+
+# New registration → pending_review:
+POST /api/v1/auth/register { ... } → 201, message "under review", onboarding_status=pending_review
+
+# Pending customer cannot log in:
+POST /api/v1/auth/login { email: pending@..., password: ... } → 403, onboarding_status=pending_review
+
+# Admin sees pending_review customer:
+GET /api/v1/admin/customers?onboarding_status=pending_review → list includes new customer
+
+# Admin approves:
+POST /api/v1/admin/customers/{id}/approve → 200, onboarding_status=approved
+
+# Admin invites:
+POST /api/v1/admin/customers/{id}/invite → 200, email sent, onboarding_status=invited
+
+# Admin creates new customer directly:
+POST /api/v1/admin/customers { first_name, last_name, email, customer_type, ... } → 201, invite sent
+
+# Invited customer cannot log in yet:
+POST /api/v1/auth/login → 403, onboarding_status=invited
+
+# Customer sets password via invite link:
+POST /api/v1/auth/reset-password { token, email, password, password_confirmation } → 200
+
+# Customer can now log in:
+POST /api/v1/auth/login → 200, token issued
+
+# Rejected customer cannot log in:
+POST /api/v1/admin/customers/{id}/reject { reason: "..." }
+POST /api/v1/auth/login → 403, onboarding_status=rejected
+
+# Blocked customer cannot log in or use existing token:
+POST /api/v1/admin/customers/{id}/block
+POST /api/v1/auth/login → 403, onboarding_status=blocked
+GET /api/v1/auth/me (with token) → 403, onboarding_status=blocked
+
+# Quote email health:
+GET /api/v1/admin/system/health → mail.quote_email = pass (if QUOTE_EMAIL set)
+```
+
+### Known gaps / future phases (CRM-2+)
+
+- Frontend: registration page should explain B2B-only access + show "under review" message
+- Frontend: admin customer list needs onboarding_status badge + action buttons
+- Frontend: `/activate` page needed for invitation link (same as reset-password page but different copy)
+- Invitation token TTL is 48h — same `password_reset_tokens` table used; frontend reset-password flow works as-is
+- No email sent to customer on rejection (could add a rejection mailable in CRM-2)
+- No bulk-approve/reject action (could add in CRM-2)
+- `preferred_language` field not yet on customers — invitation email is English only
 
 ---
 

@@ -29,6 +29,7 @@ class Customer extends Authenticatable
         'is_active',
         'imported_from_wix',
         'status',
+        'onboarding_status',
         'last_login_at',
         'last_login_ip',
         'last_login_location',
@@ -48,6 +49,7 @@ class Customer extends Authenticatable
         'is_active'            => 'boolean',
         'imported_from_wix'    => 'boolean',
         'failed_login_count'   => 'integer',
+        'onboarding_status'    => 'string',
     ];
 
     public function getFullNameAttribute(): string

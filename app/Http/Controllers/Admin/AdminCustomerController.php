@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Mail\CustomerInvitation;
 use App\Mail\CustomerPasswordReset;
 use App\Models\BlockedEntity;
 use App\Models\Customer;
@@ -21,17 +22,22 @@ class AdminCustomerController extends Controller
     public function index(Request $request): JsonResponse
     {
         $request->validate([
-            'status'   => ['nullable', 'in:active,suspended,banned,locked'],
-            'type'     => ['nullable', 'in:b2b,b2c,wix'],
-            'since'    => ['nullable', 'date'],
-            'search'   => ['nullable', 'string', 'max:100'],
-            'per_page' => ['nullable', 'integer', 'min:1', 'max:200'],
+            'status'            => ['nullable', 'in:active,suspended,banned,locked'],
+            'onboarding_status' => ['nullable', 'in:pending_review,approved,invited,active,rejected,blocked'],
+            'type'              => ['nullable', 'in:b2b,b2c,wix'],
+            'since'             => ['nullable', 'date'],
+            'search'            => ['nullable', 'string', 'max:100'],
+            'per_page'          => ['nullable', 'integer', 'min:1', 'max:200'],
         ]);
 
         $query = Customer::orderByDesc('created_at');
 
         if ($request->filled('status')) {
             $query->where('status', $request->status);
+        }
+
+        if ($request->filled('onboarding_status')) {
+            $query->where('onboarding_status', $request->onboarding_status);
         }
 
         if ($request->filled('type')) {
@@ -308,6 +314,193 @@ class AdminCustomerController extends Controller
         return response()->json(['success' => true, 'message' => 'Password reset email sent and sessions invalidated.']);
     }
 
+    // ── POST /admin/customers ─────────────────────────────────────────────────
+
+    public function store(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'customer_type' => ['required', 'in:b2c,b2b'],
+            'first_name'    => ['required', 'string', 'max:100'],
+            'last_name'     => ['required', 'string', 'max:100'],
+            'email'         => ['required', 'email', 'max:255', 'unique:customers,email'],
+            'phone'         => ['nullable', 'string', 'max:50'],
+            'country'       => ['nullable', 'string', 'max:100'],
+            'company_name'  => ['nullable', 'string', 'max:200'],
+            'vat_number'    => ['nullable', 'string', 'max:20'],
+            'industry'      => ['nullable', 'string', 'max:100'],
+            'admin_notes'   => ['nullable', 'string'],
+        ]);
+
+        $customer = Customer::create([
+            ...$data,
+            'password'          => Hash::make(Str::random(32)),
+            'onboarding_status' => 'invited',
+            'is_active'         => false,
+            'must_reset_password' => true,
+        ]);
+
+        SecurityEventService::log(
+            'customer_invited', $customer->id,
+            $request->ip(), $request->userAgent(),
+            'Customer account created and invited by admin', 'info'
+        );
+
+        $this->sendInvitationEmail($customer);
+
+        return response()->json([
+            'success' => true,
+            'data'    => $this->formatSummary($customer->fresh()),
+            'message' => 'Customer account created and invitation email sent.',
+        ], 201);
+    }
+
+    // ── POST /admin/customers/{id}/approve ────────────────────────────────────
+
+    public function approve(Request $request, int $id): JsonResponse
+    {
+        $customer = Customer::findOrFail($id);
+
+        if (! in_array($customer->onboarding_status ?? 'active', ['pending_review', 'rejected'], true)) {
+            return response()->json(['message' => 'Customer is not in a reviewable state.'], 422);
+        }
+
+        $customer->update(['onboarding_status' => 'approved']);
+
+        SecurityEventService::log(
+            'customer_approved', $customer->id,
+            $request->ip(), $request->userAgent(),
+            'Customer approved by admin', 'info'
+        );
+
+        return response()->json([
+            'success' => true,
+            'data'    => $this->formatSummary($customer->fresh()),
+            'message' => 'Customer approved. Use the invite action to send the activation email.',
+        ]);
+    }
+
+    // ── POST /admin/customers/{id}/reject ─────────────────────────────────────
+
+    public function reject(Request $request, int $id): JsonResponse
+    {
+        $customer = Customer::findOrFail($id);
+
+        $data = $request->validate([
+            'reason' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $customer->update([
+            'onboarding_status' => 'rejected',
+            'is_active'         => false,
+            'admin_notes'       => $customer->admin_notes
+                ? $customer->admin_notes . "\n[Rejected] " . ($data['reason'] ?? '')
+                : '[Rejected] ' . ($data['reason'] ?? ''),
+        ]);
+
+        $customer->tokens()->delete();
+
+        SecurityEventService::log(
+            'customer_rejected', $customer->id,
+            $request->ip(), $request->userAgent(),
+            'Customer rejected by admin' . ($data['reason'] ? ': ' . $data['reason'] : ''), 'warning'
+        );
+
+        return response()->json([
+            'success' => true,
+            'data'    => $this->formatSummary($customer->fresh()),
+            'message' => 'Customer rejected.',
+        ]);
+    }
+
+    // ── POST /admin/customers/{id}/invite ─────────────────────────────────────
+
+    public function invite(Request $request, int $id): JsonResponse
+    {
+        $customer = Customer::findOrFail($id);
+
+        $allowedStates = ['pending_review', 'approved', 'rejected'];
+        if (! in_array($customer->onboarding_status ?? 'active', $allowedStates, true)) {
+            return response()->json(['message' => 'Customer cannot be invited in their current state.'], 422);
+        }
+
+        $customer->update([
+            'onboarding_status' => 'invited',
+            'is_active'         => false,
+            'must_reset_password' => true,
+        ]);
+
+        $this->sendInvitationEmail($customer);
+
+        SecurityEventService::log(
+            'customer_invited', $customer->id,
+            $request->ip(), $request->userAgent(),
+            'Customer invitation sent by admin', 'info'
+        );
+
+        return response()->json([
+            'success' => true,
+            'data'    => $this->formatSummary($customer->fresh()),
+            'message' => 'Invitation email sent.',
+        ]);
+    }
+
+    // ── POST /admin/customers/{id}/resend-invite ──────────────────────────────
+
+    public function resendInvite(Request $request, int $id): JsonResponse
+    {
+        $customer = Customer::findOrFail($id);
+
+        if (! in_array($customer->onboarding_status ?? 'active', ['invited', 'approved'], true)) {
+            return response()->json(['message' => 'Customer does not have a pending invitation.'], 422);
+        }
+
+        $this->sendInvitationEmail($customer);
+
+        SecurityEventService::log(
+            'customer_invited', $customer->id,
+            $request->ip(), $request->userAgent(),
+            'Customer invitation resent by admin', 'info'
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Invitation email resent.',
+        ]);
+    }
+
+    // ── POST /admin/customers/{id}/block ──────────────────────────────────────
+
+    public function blockOnboarding(Request $request, int $id): JsonResponse
+    {
+        $customer = Customer::findOrFail($id);
+
+        $data = $request->validate([
+            'reason' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $customer->update([
+            'onboarding_status' => 'blocked',
+            'is_active'         => false,
+            'admin_notes'       => $customer->admin_notes
+                ? $customer->admin_notes . "\n[Blocked] " . ($data['reason'] ?? '')
+                : '[Blocked] ' . ($data['reason'] ?? ''),
+        ]);
+
+        $customer->tokens()->delete();
+
+        SecurityEventService::log(
+            'customer_blocked', $customer->id,
+            $request->ip(), $request->userAgent(),
+            'Customer blocked by admin' . ($data['reason'] ? ': ' . $data['reason'] : ''), 'warning'
+        );
+
+        return response()->json([
+            'success' => true,
+            'data'    => $this->formatSummary($customer->fresh()),
+            'message' => 'Customer blocked.',
+        ]);
+    }
+
     // ── GET /admin/customers/{id}/sessions ───────────────────────────────────
 
     public function sessions(int $id): JsonResponse
@@ -365,9 +558,13 @@ class AdminCustomerController extends Controller
             'first_name'           => $c->first_name,
             'last_name'            => $c->last_name,
             'email'                => $c->email,
+            'phone'                => $c->phone,
+            'country'              => $c->country,
             'company_name'         => $c->company_name,
+            'vat_number'           => $c->vat_number,
             'customer_type'        => $c->customer_type,
             'status'               => $c->status ?? 'active',
+            'onboarding_status'    => $c->onboarding_status ?? 'active',
             'last_login_at'        => $c->last_login_at?->toIso8601String(),
             'last_login_ip'        => $c->last_login_ip,
             'last_login_location'  => $c->last_login_location,
@@ -378,5 +575,26 @@ class AdminCustomerController extends Controller
             'imported_from_wix'    => (bool) $c->imported_from_wix,
             'created_at'           => $c->created_at?->toIso8601String(),
         ];
+    }
+
+    private function sendInvitationEmail(Customer $customer): void
+    {
+        $token = Str::random(64);
+
+        DB::table('password_reset_tokens')->upsert(
+            [
+                'email'      => $customer->email,
+                'token'      => Hash::make($token),
+                'created_at' => now(),
+            ],
+            ['email'],
+            ['token', 'created_at']
+        );
+
+        // Invitation link expires in 48 hours (vs 60 min for standard password reset)
+        $frontendUrl   = rtrim(config('app.frontend_url', 'https://okelcor.com'), '/');
+        $activationUrl = $frontendUrl . '/activate?token=' . $token . '&email=' . urlencode($customer->email);
+
+        Mail::to($customer->email)->send(new CustomerInvitation($customer, $activationUrl));
     }
 }

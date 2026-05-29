@@ -516,9 +516,13 @@ Route::prefix('v1')->group(function () {
         // -----------------------------------------------------------------
         Route::middleware('permission:customers.manage')->group(function () {
             Route::get('customers', [AdminCustomerController::class, 'index']);
+            Route::post('customers', [AdminCustomerController::class, 'store']);
+            Route::get('customers/export', [AdminCustomerController::class, 'export']);
             Route::get('customers/{id}', [AdminCustomerController::class, 'show']);
             Route::patch('customers/{id}', [AdminCustomerController::class, 'update']);
             Route::delete('customers/{id}', [AdminCustomerController::class, 'destroy']);
+
+            // Security actions
             Route::post('customers/{id}/suspend', [AdminCustomerController::class, 'suspend']);
             Route::post('customers/{id}/ban', [AdminCustomerController::class, 'ban']);
             Route::post('customers/{id}/activate', [AdminCustomerController::class, 'activate']);
@@ -526,7 +530,13 @@ Route::prefix('v1')->group(function () {
             Route::post('customers/{id}/logout-all', [AdminCustomerController::class, 'logoutAll']);
             Route::post('customers/{id}/force-password-reset', [AdminCustomerController::class, 'forcePasswordReset']);
             Route::get('customers/{id}/sessions', [AdminCustomerController::class, 'sessions']);
-            Route::get('customers/export', [AdminCustomerController::class, 'export']);
+
+            // Onboarding actions (CRM-1)
+            Route::post('customers/{id}/approve', [AdminCustomerController::class, 'approve']);
+            Route::post('customers/{id}/reject', [AdminCustomerController::class, 'reject']);
+            Route::post('customers/{id}/invite', [AdminCustomerController::class, 'invite']);
+            Route::post('customers/{id}/resend-invite', [AdminCustomerController::class, 'resendInvite']);
+            Route::post('customers/{id}/block', [AdminCustomerController::class, 'blockOnboarding']);
         });
 
         // Customer CSV import — customers.import (super_admin only)
