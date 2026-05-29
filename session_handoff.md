@@ -95,7 +95,7 @@ php artisan crm:follow-ups-digest --dry-run   # print summary only
 
 Add to `.env` if desired:
 ```
-CRM_DIGEST_EMAIL=sales@okelcor.com
+CRM_DIGEST_EMAIL=support@okelcor.com
 ```
 
 ### Permissions
@@ -161,7 +161,7 @@ composer install --no-dev
 
 Optional — add to `.env`:
 ```
-CRM_DIGEST_EMAIL=sales@okelcor.com
+CRM_DIGEST_EMAIL=support@okelcor.com
 ```
 
 ### Test checklist
