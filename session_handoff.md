@@ -1,5 +1,205 @@
 # Session Handoff — Okelcor API
-Last updated: 2026-05-29 (session 32 — CRM-1 controlled customer onboarding foundation)
+Last updated: 2026-05-29 (session 33 — CRM-2 inquiry quality filtering)
+
+---
+
+## Session 33 — CRM-2: Inquiry Quality Filtering (complete)
+
+### Audit findings
+
+| Area | Finding |
+|---|---|
+| Quote storage | `quote_requests` table — fully stored in DB already |
+| Quote controller | `QuoteRequestController::store()` — public, no quality gate |
+| Admin quote list | Filtered by `status` only (sales workflow: new/reviewed/quoted/closed) |
+| Quote email | `QuoteRequestReceived` mailable → `QUOTE_EMAIL` env; no quality differentiation |
+| Contact form | `ContactController` — only logs to file, no email at all |
+| No spam gate | Any text, including "test", "asdf", "111111111" accepted and emailed |
+
+### What was built
+
+#### 1. Migration — quality fields on `quote_requests`
+
+`database/migrations/2026_05_29_000002_add_quality_fields_to_quote_requests_table.php`
+
+| Column | Type | Purpose |
+|---|---|---|
+| `quality_score` | TINYINT UNSIGNED nullable | 0–100 score from InquiryQualityService |
+| `quality_flags` | JSON nullable | Array of string flags explaining score |
+| `review_status` | ENUM DEFAULT `new` | Quality gate status |
+| `reviewed_by` | FK → admin_users nullable | Admin who reviewed |
+| `reviewed_at` | TIMESTAMP nullable | When reviewed |
+| `rejection_reason` | TEXT nullable | Admin rejection note |
+
+`review_status` values: `new`, `needs_review`, `qualified`, `rejected`, `spam`
+
+Note: `review_status` is separate from the existing `status` column (sales workflow: new/reviewed/quoted/closed). Both coexist.
+
+#### 2. InquiryQualityService (`app/Services/InquiryQualityService.php`)
+
+Two-layer approach — hard spam check first, then signal scoring.
+
+**Hard spam flags (any flag → `review_status=spam`):**
+
+| Flag | Condition |
+|---|---|
+| `message_too_short` | notes < 8 chars |
+| `repeated_chars` | single char > 70% of non-whitespace content |
+| `keyboard_smash` | notes contains known sequence (asdf/qwerty/zxcv) AND length < 25 or > 55% similarity |
+| `only_numbers_symbols` | notes contains only digits/punctuation |
+| `url_spam` | 2+ URLs in notes |
+| `disposable_email` | email domain in known disposable list (28 domains) |
+
+**Positive signals (add to score):**
+
+| Signal | Points |
+|---|---|
+| Tyre size pattern (205/55R16 etc.) in notes or tyre_size | +20 |
+| Tyre keyword (tire/tyre/TBR/PCR/brand name) without specific size | +10 |
+| Quantity detected in notes or quantity field | +15 |
+| Country field present | +15 |
+| Destination detected in notes (country/city from list) | +12 |
+| Buying intent keyword (need/quote/order/looking for/etc.) | +10 |
+| Brand name in notes or brand_preference field | +10 |
+| company_name present | +10 |
+| phone present | +10 |
+| Notes > 60 chars | +5 |
+| Business email domain | +5 |
+| VAT number present | +5 |
+
+**Negative signals:**
+
+| Signal | Points |
+|---|---|
+| No tyre details at all | -15 |
+| No destination/country anywhere | -10 |
+| Free email domain (gmail/yahoo/etc.) | -5 |
+
+**Score bands:**
+
+| Score | review_status | Admin email |
+|---|---|---|
+| 60–100 | `qualified` | Normal email: "New quote request — ref" |
+| 0–59 | `needs_review` | Tagged email: "[Needs Review] New quote request — ref" |
+| Hard spam flags | `spam` | No email — spam stored for audit only |
+
+#### 3. Public submission behavior change
+
+`QuoteRequestController::store()`:
+- Runs `InquiryQualityService::score()` before saving
+- **Spam path:** saves to DB (review_status=spam, for audit) → returns HTTP 422:
+  ```json
+  {
+    "message": "Please provide a clear business inquiry including tire size, quantity, destination country, and your contact details.",
+    "code": "low_quality_inquiry",
+    "flags": ["message_too_short"]
+  }
+  ```
+- **needs_review path:** saves → returns 201 "Your inquiry has been received and will be reviewed by our team." → sends [Needs Review] admin email
+- **qualified path:** saves → returns 201 "Quote request received. Our team will respond within 1 business day." → sends normal admin email
+- 201 response now includes `review_status` field
+
+#### 4. QuoteRequestReceived mailable update
+
+`app/Mail/QuoteRequestReceived.php`:
+- New `$isNeedsReview` constructor param (default false)
+- Subject changes to `[Needs Review] New quote request — ref` when `$isNeedsReview=true`
+- Template receives `$isNeedsReview` variable for optional banner
+
+#### 5. Admin review actions
+
+New endpoints under `permission:quotes.manage`:
+
+| Endpoint | Controller method | Description |
+|---|---|---|
+| `POST /admin/quote-requests/{id}/qualify` | `qualify()` | Sets review_status=qualified, logs reviewed_by/at |
+| `POST /admin/quote-requests/{id}/reject` | `rejectInquiry()` | Sets review_status=rejected, accepts optional `reason` |
+| `POST /admin/quote-requests/{id}/spam` | `markSpam()` | Sets review_status=spam |
+
+All three log the action with `[quote_review_*]` prefix for searchable log entries.
+
+#### 6. Admin quote list improvements
+
+`GET /admin/quote-requests` now supports `?review_status=new|needs_review|qualified|rejected|spam` filter.
+
+Both `formatList` and `formatDetail` now include:
+- `review_status`
+- `quality_score`
+- `quality_flags` (array)
+- `reviewed_by`, `reviewed_at`, `rejection_reason`
+
+#### 7. System health — inquiry queue checks
+
+`GET /admin/system/health` → new `inquiries` group:
+
+| Check | Status | Condition |
+|---|---|---|
+| `pending_review_inquiries` | pass / warning / fail | 0 = pass, 1-9 = warning, 10+ = fail |
+| `spam_inquiries` | pass / warning | >20 spam in last 7 days = warning |
+
+### Test case verification
+
+| Input | Expected | Hard flag | Score |
+|---|---|---|---|
+| "test" | spam | `message_too_short` | 0 |
+| "asdfasdf" | spam | `keyboard_smash` | 0 |
+| "111111111" | spam | `repeated_chars` | 0 |
+| "hello" | spam | `message_too_short` | 0 |
+| "........" | spam | `repeated_chars` | 0 |
+| "buy now http://spam.com http://spam2.com" | spam | `url_spam` | 0 |
+| "Need 200 Michelin 205/55R16 to Ghana" | qualified | — | ~65 |
+| "We are a tire dealer in Lagos. Please quote 500 summer tires, 205/55R16." | qualified | — | ~65 |
+| "Looking for TBR tires for fleet use in Uganda. Quantity 120." | needs_review | — | ~55 |
+
+### Email notification summary
+
+| review_status | Admin email | Subject |
+|---|---|---|
+| `qualified` | ✅ sent | `New quote request — OKL-QR-...` |
+| `needs_review` | ✅ sent (tagged) | `[Needs Review] New quote request — OKL-QR-...` |
+| `spam` | ❌ not sent | — |
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `database/migrations/2026_05_29_000002_add_quality_fields_to_quote_requests_table.php` | New — quality fields |
+| `app/Services/InquiryQualityService.php` | New — scoring engine |
+| `app/Models/QuoteRequest.php` | Added quality fields to fillable + casts |
+| `app/Http/Controllers/QuoteRequestController.php` | Integrated quality scoring; spam→422; review_status in response |
+| `app/Mail/QuoteRequestReceived.php` | Added `$isNeedsReview` flag; subject prefix |
+| `app/Http/Controllers/Admin/AdminQuoteRequestController.php` | qualify/rejectInquiry/markSpam methods; review_status filter; quality fields in formatters |
+| `routes/api.php` | 3 new review action routes |
+| `app/Http/Controllers/Admin/SystemHealthController.php` | inquiries group: pending_review + spam count checks |
+
+### Deploy steps
+
+```bash
+cd /home/u978121777/domains/okelcor.com/public_html/okelcor-api
+git fetch origin && git reset --hard origin/main
+composer install --no-dev
+/opt/alt/php83/usr/bin/php artisan migrate --force
+/opt/alt/php83/usr/bin/php artisan config:clear
+/opt/alt/php83/usr/bin/php artisan config:cache
+/opt/alt/php83/usr/bin/php artisan route:cache
+/opt/alt/php83/usr/bin/php artisan view:clear
+```
+
+**Migration that will run:** `2026_05_29_000002_add_quality_fields_to_quote_requests_table`
+— additive ALTER TABLE on `quote_requests`. No data loss. Existing rows get `review_status=new` (DEFAULT).
+
+### Admin workflow after deploy
+
+```
+GET /api/v1/admin/quote-requests?review_status=needs_review
+→ Review each inquiry
+→ POST /api/v1/admin/quote-requests/{id}/qualify  (good inquiry)
+→ POST /api/v1/admin/quote-requests/{id}/reject   { reason: "..." }
+→ POST /api/v1/admin/quote-requests/{id}/spam     (obvious spam)
+
+GET /api/v1/admin/system/health → inquiries.pending_review_inquiries
+→ shows how many need attention
+```
 
 ---
 

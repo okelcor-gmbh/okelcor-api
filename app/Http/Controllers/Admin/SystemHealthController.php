@@ -23,6 +23,7 @@ class SystemHealthController extends Controller
             'backups'     => $this->checkBackups(),
             'mail'        => $this->checkMail(),
             'security'    => $this->checkSecurity(),
+            'inquiries'   => $this->checkInquiryQueue(),
             'endpoints'   => $this->checkEndpoints(),
         ];
 
@@ -425,6 +426,55 @@ class SystemHealthController extends Controller
                     'fix_hint' => $without > 0
                         ? 'Affected admins must log in to complete mandatory 2FA setup' : null,
                 ];
+            }),
+        ];
+    }
+
+    /** @return array<int, array> */
+    public function checkInquiryQueue(): array
+    {
+        return [
+            $this->check('pending_review_inquiries', 'Pending Review Inquiries', function () {
+                try {
+                    $count = DB::table('quote_requests')
+                        ->where('review_status', 'needs_review')
+                        ->count();
+
+                    $status  = match (true) {
+                        $count === 0 => 'pass',
+                        $count < 10  => 'warning',
+                        default      => 'fail',
+                    };
+
+                    return [
+                        'status'   => $status,
+                        'severity' => $count >= 10 ? 'medium' : 'low',
+                        'message'  => $count === 0
+                            ? 'No inquiries pending review'
+                            : "{$count} inquiry/inquiries need admin review",
+                        'fix_hint' => $count > 0
+                            ? 'Review at GET /api/v1/admin/quote-requests?review_status=needs_review' : null,
+                    ];
+                } catch (\Throwable) {
+                    return ['status' => 'warning', 'severity' => 'low', 'message' => 'Could not query inquiry queue'];
+                }
+            }),
+            $this->check('spam_inquiries', 'Spam Inquiry Count', function () {
+                try {
+                    $count = DB::table('quote_requests')
+                        ->where('review_status', 'spam')
+                        ->whereDate('created_at', '>=', now()->subDays(7))
+                        ->count();
+
+                    return [
+                        'status'   => $count > 20 ? 'warning' : 'pass',
+                        'severity' => 'low',
+                        'message'  => "{$count} spam inquiry/inquiries in the last 7 days",
+                        'fix_hint' => $count > 20 ? 'High spam volume — consider additional rate limiting' : null,
+                    ];
+                } catch (\Throwable) {
+                    return ['status' => 'pass', 'severity' => 'low', 'message' => 'Spam count unavailable'];
+                }
             }),
         ];
     }

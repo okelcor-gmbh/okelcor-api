@@ -444,6 +444,10 @@ Route::prefix('v1')->group(function () {
             Route::put('quote-requests/{id}', [AdminQuoteRequestController::class, 'update']);
             Route::patch('quote-requests/{id}/status', [AdminQuoteRequestController::class, 'updateStatus']);
             Route::post('quote-requests/{id}/convert-to-order', [AdminQuoteRequestController::class, 'convertToOrder']);
+            // Quality review actions (CRM-2)
+            Route::post('quote-requests/{id}/qualify', [AdminQuoteRequestController::class, 'qualify']);
+            Route::post('quote-requests/{id}/reject', [AdminQuoteRequestController::class, 'rejectInquiry']);
+            Route::post('quote-requests/{id}/spam', [AdminQuoteRequestController::class, 'markSpam']);
             // Attachments streamed through controller — never via public URL
             Route::get('quote-attachments/{id}/download', [AdminQuoteAttachmentController::class, 'download']);
         });

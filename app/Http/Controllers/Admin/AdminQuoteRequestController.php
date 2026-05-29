@@ -31,6 +31,10 @@ class AdminQuoteRequestController extends Controller
             $query->where('status', $request->status);
         }
 
+        if ($request->filled('review_status')) {
+            $query->where('review_status', $request->review_status);
+        }
+
         if ($request->filled('customer_id')) {
             $query->where('customer_id', $request->integer('customer_id'));
         }
@@ -316,6 +320,85 @@ class AdminQuoteRequestController extends Controller
         ], 201);
     }
 
+    // ── POST /admin/quote-requests/{id}/qualify ──────────────────────────────
+
+    public function qualify(Request $request, int $id): JsonResponse
+    {
+        $quote = QuoteRequest::findOrFail($id);
+
+        $quote->update([
+            'review_status' => 'qualified',
+            'reviewed_by'   => $request->user()?->id,
+            'reviewed_at'   => now(),
+            'rejection_reason' => null,
+        ]);
+
+        Log::info('[quote_review_qualify] Admin qualified inquiry', [
+            'quote_ref' => $quote->ref_number,
+            'admin_id'  => $request->user()?->id,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'data'    => $this->formatDetail($quote->fresh()->load('order')),
+            'message' => 'Inquiry marked as qualified.',
+        ]);
+    }
+
+    // ── POST /admin/quote-requests/{id}/reject ───────────────────────────────
+
+    public function rejectInquiry(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate([
+            'reason' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $quote = QuoteRequest::findOrFail($id);
+
+        $quote->update([
+            'review_status'    => 'rejected',
+            'reviewed_by'      => $request->user()?->id,
+            'reviewed_at'      => now(),
+            'rejection_reason' => $data['reason'] ?? null,
+        ]);
+
+        Log::info('[quote_review_reject] Admin rejected inquiry', [
+            'quote_ref' => $quote->ref_number,
+            'admin_id'  => $request->user()?->id,
+            'reason'    => $data['reason'] ?? null,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'data'    => $this->formatDetail($quote->fresh()->load('order')),
+            'message' => 'Inquiry marked as rejected.',
+        ]);
+    }
+
+    // ── POST /admin/quote-requests/{id}/spam ─────────────────────────────────
+
+    public function markSpam(Request $request, int $id): JsonResponse
+    {
+        $quote = QuoteRequest::findOrFail($id);
+
+        $quote->update([
+            'review_status' => 'spam',
+            'reviewed_by'   => $request->user()?->id,
+            'reviewed_at'   => now(),
+        ]);
+
+        Log::info('[quote_review_spam] Admin marked inquiry as spam', [
+            'quote_ref' => $quote->ref_number,
+            'admin_id'  => $request->user()?->id,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'data'    => $this->formatDetail($quote->fresh()->load('order')),
+            'message' => 'Inquiry marked as spam.',
+        ]);
+    }
+
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
@@ -383,6 +466,7 @@ class AdminQuoteRequestController extends Controller
             'contact_person'           => $r->contact_person,
             'company_name'             => $r->company_name,
             'email'                    => $r->email,
+            'phone'                    => $r->phone,
             'tyre_category'            => $r->tyre_category,
             'tyre_condition'           => $r->tyre_condition,
             'country'                  => $r->country,
@@ -393,6 +477,12 @@ class AdminQuoteRequestController extends Controller
             'delivery_city'            => $r->delivery_city,
             'delivery_postal_code'     => $r->delivery_postal_code,
             'status'                   => $r->status,
+            // Quality / review
+            'review_status'            => $r->review_status ?? 'new',
+            'quality_score'            => $r->quality_score,
+            'quality_flags'            => $r->quality_flags ?? [],
+            'reviewed_at'              => $r->reviewed_at?->toIso8601String(),
+            'rejection_reason'         => $r->rejection_reason,
             'created_at'               => $r->created_at?->toIso8601String(),
             'order_id'                 => $r->order_id,
             'has_attachment'           => (bool) $r->attachment_path,
@@ -453,6 +543,14 @@ class AdminQuoteRequestController extends Controller
             // Notes
             'notes'                => $r->notes,
             'admin_notes'          => $r->admin_notes,
+
+            // Quality / review
+            'review_status'        => $r->review_status ?? 'new',
+            'quality_score'        => $r->quality_score,
+            'quality_flags'        => $r->quality_flags ?? [],
+            'reviewed_by'          => $r->reviewed_by,
+            'reviewed_at'          => $r->reviewed_at?->toIso8601String(),
+            'rejection_reason'     => $r->rejection_reason,
 
             // Linked order
             'order_id'             => $r->order_id,

@@ -7,6 +7,7 @@ use App\Mail\QuoteRequestAcknowledgement;
 use App\Mail\QuoteRequestReceived;
 use App\Models\Customer;
 use App\Models\QuoteRequest;
+use App\Services\InquiryQualityService;
 use App\Services\TaxService;
 use App\Services\VatValidationService;
 use Illuminate\Http\JsonResponse;
@@ -22,12 +23,47 @@ class QuoteRequestController extends Controller
     public function __construct(
         private VatValidationService $vatService,
         private TaxService $taxService,
+        private InquiryQualityService $qualityService,
     ) {}
 
     public function store(StoreQuoteRequestRequest $request): JsonResponse
     {
-        $refNumber = $this->generateRef();
         $validated = $request->validated();
+
+        // ── Quality gate ─────────────────────────────────────────────────────
+        $quality = $this->qualityService->score($validated);
+
+        // Hard spam: save record for audit trail, then reject the submission
+        if ($quality['review_status'] === 'spam') {
+            // Persist spam record (for pattern analysis) — generate minimal ref
+            try {
+                QuoteRequest::create(array_merge($validated, [
+                    'customer_id'    => null,
+                    'ref_number'     => $this->generateRef(),
+                    'status'         => 'new',
+                    'review_status'  => 'spam',
+                    'quality_score'  => $quality['quality_score'],
+                    'quality_flags'  => $quality['quality_flags'],
+                    'ip_address'     => $request->ip(),
+                    'vat_number'     => null,
+                    'vat_valid'      => null,
+                ]));
+            } catch (\Throwable $e) {
+                Log::warning('[quote_spam_save_failed] Could not persist spam submission', [
+                    'error' => $e->getMessage(),
+                    'flags' => $quality['quality_flags'],
+                ]);
+            }
+
+            return response()->json([
+                'message' => 'Please provide a clear business inquiry including tire size, quantity, destination country, and your contact details.',
+                'code'    => 'low_quality_inquiry',
+                'flags'   => $quality['quality_flags'],
+            ], 422);
+        }
+
+        // ── Continue with normal submission ───────────────────────────────────
+        $refNumber = $this->generateRef();
 
         // Resolve customer from auth token (optional — quote submission is public)
         $customer = $this->resolveCustomerFromToken($request);
@@ -69,12 +105,15 @@ class QuoteRequestController extends Controller
         $quote = QuoteRequest::create(array_merge(
             $validated,
             [
-                'customer_id' => $customer?->id,
-                'ref_number'  => $refNumber,
-                'status'      => 'new',
-                'ip_address'  => $request->ip(),
-                'vat_number'  => $vatNumber,
-                'vat_valid'   => $vatValid,
+                'customer_id'   => $customer?->id,
+                'ref_number'    => $refNumber,
+                'status'        => 'new',
+                'review_status' => $quality['review_status'],
+                'quality_score' => $quality['quality_score'],
+                'quality_flags' => $quality['quality_flags'],
+                'ip_address'    => $request->ip(),
+                'vat_number'    => $vatNumber,
+                'vat_valid'     => $vatValid,
             ]
         ));
 
@@ -93,20 +132,24 @@ class QuoteRequestController extends Controller
             ]);
         }
 
-        // Admin notification
-        $quoteEmail = config('mail.quote_email');
+        // Admin notification — send for both qualified and needs_review; never for spam
+        $quoteEmail   = config('mail.quote_email');
+        $isNeedsReview = $quality['review_status'] === 'needs_review';
+
         if ($quoteEmail) {
             try {
                 Log::info('[quote_email_sending] Dispatching admin notification', [
-                    'event' => 'quote_email_sending',
-                    'ref'   => $refNumber,
-                    'to'    => $quoteEmail,
+                    'event'          => 'quote_email_sending',
+                    'ref'            => $refNumber,
+                    'to'             => $quoteEmail,
+                    'review_status'  => $quality['review_status'],
+                    'quality_score'  => $quality['quality_score'],
                 ]);
-                Mail::to($quoteEmail)->send(new QuoteRequestReceived($quote));
+                Mail::to($quoteEmail)->send(new QuoteRequestReceived($quote, $isNeedsReview));
                 Log::info('[quote_email_sent] Admin notification delivered', [
-                    'event' => 'quote_email_sent',
-                    'ref'   => $refNumber,
-                    'to'    => $quoteEmail,
+                    'event'         => 'quote_email_sent',
+                    'ref'           => $refNumber,
+                    'needs_review'  => $isNeedsReview,
                 ]);
             } catch (\Throwable $e) {
                 Log::error('[quote_email_failed] Admin notification failed', [
@@ -143,10 +186,15 @@ class QuoteRequestController extends Controller
             ]);
         }
 
+        $responseMessage = $isNeedsReview
+            ? 'Your inquiry has been received and will be reviewed by our team. We will be in touch shortly.'
+            : 'Quote request received. Our team will respond within 1 business day.';
+
         return response()->json([
             'data' => [
-                'ref_number' => $refNumber,
-                'message'    => 'Quote request received. Our team will respond within 1 business day.',
+                'ref_number'    => $refNumber,
+                'message'       => $responseMessage,
+                'review_status' => $quality['review_status'],
             ],
         ], 201);
     }

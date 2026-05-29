@@ -52,11 +52,21 @@ class QuoteRequest extends Model
         'customer_accepted_ip',
         'customer_accepted_user_agent',
         'customer_acceptance_note',
+        // Quality / review
+        'quality_score',
+        'quality_flags',
+        'review_status',
+        'reviewed_by',
+        'reviewed_at',
+        'rejection_reason',
     ];
 
     protected $casts = [
         'tyre_items'           => 'array',
+        'quality_flags'        => 'array',
         'customer_accepted_at' => 'datetime',
+        'reviewed_at'          => 'datetime',
+        'quality_score'        => 'integer',
     ];
 
     protected $hidden = [
