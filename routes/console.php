@@ -25,3 +25,9 @@ Schedule::command('ebay:sync-orders --days=30')
     ->withoutOverlapping()
     ->onOneServer()
     ->appendOutputTo(storage_path('logs/ebay-order-sync.log'));
+
+Schedule::command('crm:follow-ups-digest')
+    ->dailyAt('08:00')
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/crm-digest.log'));

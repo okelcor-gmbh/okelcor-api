@@ -66,6 +66,10 @@ class AdminPermissions
         'quotes.view'             => ['super_admin', 'admin', 'order_manager', 'sales_manager'],
         'quotes.update'           => ['super_admin', 'admin', 'order_manager'],
 
+        // ── CRM (follow-ups, communications, email templates) ─────────────
+        'crm.view'                => ['super_admin', 'admin', 'order_manager', 'sales_manager'],
+        'crm.update'              => ['super_admin', 'admin', 'order_manager'],
+
         // ── Contacts ──────────────────────────────────────────────────────
         'contacts.view'           => ['super_admin', 'admin', 'order_manager', 'support'],
 

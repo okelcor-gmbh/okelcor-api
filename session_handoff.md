@@ -1,5 +1,201 @@
 # Session Handoff — Okelcor API
-Last updated: 2026-05-29 (session 36 — CRM-5 customer data quality & deduplication)
+Last updated: 2026-05-29 (session 37 — CRM-6 customer communication & follow-up automation)
+
+---
+
+## Session 37 — CRM-6: Customer Communication & Follow-up Automation (complete)
+
+### Migrations
+
+**`2026_05_29_000007_create_customer_communications_table`** — new `customer_communications` table:
+
+| Column | Type | Purpose |
+|---|---|---|
+| `customer_id` | FK nullable | Linked customer |
+| `quote_request_id` | FK nullable | Linked quote/lead |
+| `order_id` | FK nullable | Linked order |
+| `admin_user_id` | FK nullable | Admin who created the entry |
+| `type` | ENUM(email/call/whatsapp/note/system) | Communication channel |
+| `direction` | ENUM(inbound/outbound/internal) | Flow direction |
+| `subject` | VARCHAR(300) nullable | Email subject / call subject |
+| `body` | TEXT nullable | Full content |
+| `status` | ENUM(planned/sent/failed/completed/skipped) | Outcome |
+| `scheduled_at` | TIMESTAMP nullable | For future planned comms |
+| `completed_at` | TIMESTAMP nullable | When completed/sent |
+| `metadata` | JSON nullable | Template key, error message, previous dates |
+
+**`2026_05_29_000008_add_follow_up_completed_at_to_quote_requests_table`** — adds:
+- `follow_up_completed_at` — when admin last completed a follow-up (follow_up_at → null + this set)
+- `follow_up_completed_by` — FK admin_users, who completed it
+
+### Follow-up status (computed dynamically)
+
+No extra DB column needed. Computed from `follow_up_at` + `qualification_status`:
+
+| Condition | follow_up_status |
+|---|---|
+| `qualification_status` in closed set | `none` |
+| `follow_up_at IS NULL` + `follow_up_completed_at IS NULL` | `none` |
+| `follow_up_at IS NULL` + `follow_up_completed_at IS NOT NULL` | `completed` |
+| `follow_up_at.isToday()` | `due` |
+| `follow_up_at < now()` | `overdue` |
+| `follow_up_at > now()` | `scheduled` |
+
+### Admin endpoints
+
+**Follow-up management (`crm.view` / `crm.update`):**
+
+| Endpoint | Description |
+|---|---|
+| `GET /admin/crm/follow-ups` | Follow-up list with `follow_up_status` computed. Filters: `due=today\|overdue\|upcoming`, `assigned_to`, `qualification_status`, `customer_id` |
+| `POST /admin/crm/follow-ups/{id}/complete` | Clears `follow_up_at`, sets `follow_up_completed_at`, logs communication note |
+| `POST /admin/crm/follow-ups/{id}/reschedule` | Updates `follow_up_at`, logs communication note |
+
+**Communication log (`crm.view` / `crm.update`):**
+
+| Endpoint | Description |
+|---|---|
+| `GET /admin/customers/{id}/communications` | All comms for a customer |
+| `POST /admin/customers/{id}/communications` | Log new comm (call/note/email/whatsapp) |
+| `GET /admin/quote-requests/{id}/communications` | All comms for a quote/lead |
+| `POST /admin/quote-requests/{id}/communications` | Log new comm for a quote |
+
+**Email templates (`crm.view` / `crm.update`):**
+
+| Endpoint | Description |
+|---|---|
+| `GET /admin/crm/email-templates` | List 6 templates (key, name, subject, body) |
+| `POST /admin/quote-requests/{id}/send-follow-up-email` | Send template email to lead. Body: `{ template, message?, custom_subject? }` |
+
+### Email templates (static, in-code)
+
+| Key | Name |
+|---|---|
+| `follow_up_quote` | Follow Up on Quote |
+| `request_more_information` | Request More Information |
+| `invite_to_register` | Invite to Register |
+| `quote_ready` | Quote Ready |
+| `payment_reminder` | Payment Reminder |
+| `document_available` | Document Available |
+
+Templates have `{ref}` and `{name}` placeholders replaced at send time. Admin can add a custom `message` that appends after the template body. All sends logged to `customer_communications` regardless of success/failure (`status=sent` or `failed`).
+
+### `crm:follow-ups-digest` Artisan command
+
+```bash
+php artisan crm:follow-ups-digest             # run digest + log
+php artisan crm:follow-ups-digest --dry-run   # print summary only
+```
+
+- Counts overdue + due-today follow-ups, groups by `assigned_to`
+- Logs structured `[crm_followup_digest]` entry
+- Creates `system` type `CustomerCommunication` row for audit trail
+- If `CRM_DIGEST_EMAIL` env is set, emails digest to that address (not customer emails)
+- Scheduled: daily at 08:00 via `routes/console.php`
+
+Add to `.env` if desired:
+```
+CRM_DIGEST_EMAIL=sales@okelcor.com
+```
+
+### Permissions
+
+| Permission | Roles | Access |
+|---|---|---|
+| `crm.view` | super_admin, admin, order_manager, sales_manager | Read follow-ups + communications + templates |
+| `crm.update` | super_admin, admin, order_manager | Write comms, complete/reschedule, send emails |
+
+### System health — CRM group
+
+New `crm` group in `GET /admin/system/health`:
+- `crm_overdue_followups`: warning if any overdue follow-ups exist
+- `crm_due_today`: warning if any due today
+- `crm_unassigned_qualified`: warning if qualified leads have no owner
+- `crm_failed_emails`: warning if any `status=failed` emails in last 7 days
+
+### Audit log events
+
+All use structured `Log::info('[event_name]', ...)`:
+- `follow_up_completed` — `POST /crm/follow-ups/{id}/complete`
+- `follow_up_rescheduled` — `POST /crm/follow-ups/{id}/reschedule`
+- `communication_logged` — `POST /customers/{id}/communications` or `/quote-requests/{id}/communications`
+- `crm_email_sent` — email delivered successfully
+- `crm_email_failed` — email failed (still logged in CustomerCommunication)
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `database/migrations/2026_05_29_000007_*` | New — customer_communications table |
+| `database/migrations/2026_05_29_000008_*` | New — follow_up_completed_at/by on quote_requests |
+| `app/Models/CustomerCommunication.php` | New model |
+| `app/Models/Customer.php` | communications() HasMany relation |
+| `app/Models/QuoteRequest.php` | follow_up_completed_at/by fillable/casts + communications() relation |
+| `app/Http/Controllers/Admin/AdminCrmFollowUpController.php` | New — follow-ups list/complete/reschedule |
+| `app/Http/Controllers/Admin/AdminCommunicationController.php` | New — per-customer + per-quote communication log |
+| `app/Http/Controllers/Admin/AdminCrmEmailController.php` | New — templates + send follow-up email |
+| `app/Mail/CrmFollowUpEmail.php` | New mailable |
+| `resources/views/emails/crm-follow-up.blade.php` | New HTML template |
+| `resources/views/emails/crm-follow-up-text.blade.php` | New plain-text template |
+| `app/Console/Commands/CrmFollowUpsDigest.php` | New — daily digest command |
+| `routes/console.php` | Added daily digest schedule |
+| `app/Support/AdminPermissions.php` | Added crm.view + crm.update |
+| `app/Http/Controllers/Admin/SystemHealthController.php` | crm group: 4 new checks |
+| `config/mail.php` | Added crm_digest_email key |
+| `routes/api.php` | 10 new CRM routes |
+
+### Deploy steps
+
+```bash
+cd /home/u978121777/domains/okelcor.com/public_html/okelcor-api
+git fetch origin && git reset --hard origin/main
+composer install --no-dev
+/opt/alt/php83/usr/bin/php artisan migrate --force
+/opt/alt/php83/usr/bin/php artisan config:clear
+/opt/alt/php83/usr/bin/php artisan config:cache
+/opt/alt/php83/usr/bin/php artisan route:cache
+/opt/alt/php83/usr/bin/php artisan view:clear
+```
+
+**2 migrations:** communications table (new) + follow_up_completed_at/by on quote_requests (additive).
+
+Optional — add to `.env`:
+```
+CRM_DIGEST_EMAIL=sales@okelcor.com
+```
+
+### Test checklist
+
+```
+# Assign follow-up for yesterday → overdue
+PATCH /admin/quote-requests/{id}/qualification { follow_up_at: "yesterday" }
+GET /admin/crm/follow-ups?due=overdue → appears with follow_up_status=overdue
+
+# Complete follow-up
+POST /admin/crm/follow-ups/{id}/complete { note: "Called customer, confirmed quantity" }
+→ follow_up_at=null, follow_up_completed_at=now, communication log entry created
+
+# Reschedule
+POST /admin/crm/follow-ups/{id}/reschedule { follow_up_at: "next week", note: "Follow up next week" }
+→ follow_up_at updated, communication note logged
+
+# Add internal note
+POST /admin/customers/{id}/communications { type: "note", direction: "internal", body: "VIP customer" }
+GET /admin/customers/{id}/communications → note visible, not exposed to customer portal
+
+# Send follow-up email
+POST /admin/quote-requests/{id}/send-follow-up-email { template: "request_more_information" }
+→ email sent to quote.email
+GET /admin/quote-requests/{id}/communications → communication entry status=sent
+
+# Email failure logged
+(break SMTP config)
+POST /admin/quote-requests/{id}/send-follow-up-email → 502, but CustomerCommunication status=failed
+
+# Daily digest (no customer emails)
+php artisan crm:follow-ups-digest --dry-run → prints overdue/due-today counts
+php artisan crm:follow-ups-digest → logs entry, system communication row created
+```
 
 ---
 

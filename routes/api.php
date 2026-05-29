@@ -38,6 +38,9 @@ use App\Http\Controllers\Admin\ProductImportController;
 use App\Http\Controllers\Admin\SupplierController;
 use App\Http\Controllers\Admin\AdminCustomerController;
 use App\Http\Controllers\Admin\AdminCustomerDataQualityController;
+use App\Http\Controllers\Admin\AdminCrmFollowUpController;
+use App\Http\Controllers\Admin\AdminCommunicationController;
+use App\Http\Controllers\Admin\AdminCrmEmailController;
 use App\Http\Controllers\Admin\CustomerImportController;
 use App\Http\Controllers\Admin\EbayListingController;
 use App\Http\Controllers\Admin\EbayOrderController;
@@ -467,6 +470,33 @@ Route::prefix('v1')->group(function () {
         // Convert to customer — customers.manage required
         Route::middleware('permission:customers.manage')->group(function () {
             Route::post('quote-requests/{id}/convert-to-customer', [AdminQuoteRequestController::class, 'convertToCustomer']);
+        });
+
+        // -----------------------------------------------------------------
+        // CRM — follow-ups, communications, email (CRM-6)
+        // -----------------------------------------------------------------
+
+        // Follow-up management — crm.view (read) / crm.update (write)
+        Route::middleware('permission:crm.view')->group(function () {
+            Route::get('crm/follow-ups', [AdminCrmFollowUpController::class, 'index']);
+            Route::get('crm/email-templates', [AdminCrmEmailController::class, 'templates']);
+        });
+
+        Route::middleware('permission:crm.update')->group(function () {
+            Route::post('crm/follow-ups/{id}/complete', [AdminCrmFollowUpController::class, 'complete']);
+            Route::post('crm/follow-ups/{id}/reschedule', [AdminCrmFollowUpController::class, 'reschedule']);
+            Route::post('quote-requests/{id}/send-follow-up-email', [AdminCrmEmailController::class, 'sendFollowUpEmail']);
+        });
+
+        // Communication log — per customer (crm.view / crm.update)
+        Route::middleware('permission:crm.view')->group(function () {
+            Route::get('customers/{id}/communications', [AdminCommunicationController::class, 'indexForCustomer']);
+            Route::get('quote-requests/{id}/communications', [AdminCommunicationController::class, 'indexForQuote']);
+        });
+
+        Route::middleware('permission:crm.update')->group(function () {
+            Route::post('customers/{id}/communications', [AdminCommunicationController::class, 'storeForCustomer']);
+            Route::post('quote-requests/{id}/communications', [AdminCommunicationController::class, 'storeForQuote']);
         });
 
         // -----------------------------------------------------------------

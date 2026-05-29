@@ -64,6 +64,8 @@ class QuoteRequest extends Model
         'assigned_to',
         'assigned_at',
         'follow_up_at',
+        'follow_up_completed_at',
+        'follow_up_completed_by',
         'lead_priority',
         'lead_source',
         'lead_customer_type',
@@ -77,8 +79,9 @@ class QuoteRequest extends Model
         'quality_flags'        => 'array',
         'customer_accepted_at' => 'datetime',
         'reviewed_at'          => 'datetime',
-        'assigned_at'          => 'datetime',
-        'follow_up_at'         => 'datetime',
+        'assigned_at'             => 'datetime',
+        'follow_up_at'            => 'datetime',
+        'follow_up_completed_at'  => 'datetime',
         'quality_score'        => 'integer',
     ];
 
@@ -99,5 +102,10 @@ class QuoteRequest extends Model
     public function assignedTo(): BelongsTo
     {
         return $this->belongsTo(\App\Models\AdminUser::class, 'assigned_to');
+    }
+
+    public function communications(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(CustomerCommunication::class)->orderByDesc('created_at');
     }
 }

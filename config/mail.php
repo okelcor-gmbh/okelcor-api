@@ -120,4 +120,6 @@ return [
 
     'order_email' => env('ORDER_EMAIL'),
 
+    'crm_digest_email' => env('CRM_DIGEST_EMAIL'),
+
 ];

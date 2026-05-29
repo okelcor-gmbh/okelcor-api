@@ -118,4 +118,9 @@ class Customer extends Authenticatable
     {
         return $this->belongsTo(Customer::class, 'possible_duplicate_of');
     }
+
+    public function communications(): HasMany
+    {
+        return $this->hasMany(CustomerCommunication::class)->orderByDesc('created_at');
+    }
 }

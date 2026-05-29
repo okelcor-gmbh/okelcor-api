@@ -25,6 +25,7 @@ class SystemHealthController extends Controller
             'security'      => $this->checkSecurity(),
             'inquiries'     => $this->checkInquiryQueue(),
             'data_quality'  => $this->checkDataQuality(),
+            'crm'           => $this->checkCrmPipeline(),
             'endpoints'     => $this->checkEndpoints(),
         ];
 
@@ -517,6 +518,100 @@ class SystemHealthController extends Controller
                     ];
                 } catch (\Throwable) {
                     return ['status' => 'pass', 'severity' => 'low', 'message' => 'Score check unavailable'];
+                }
+            }),
+        ];
+    }
+
+    /** @return array<int, array> */
+    public function checkCrmPipeline(): array
+    {
+        $closed = ['converted', 'closed', 'spam', 'rejected'];
+        $now    = now();
+        $today  = $now->toDateString();
+
+        return [
+            $this->check('crm_overdue_followups', 'Overdue Follow-ups', function () use ($now, $today, $closed) {
+                try {
+                    $count = DB::table('quote_requests')
+                        ->whereNotNull('follow_up_at')
+                        ->where('follow_up_at', '<', $now)
+                        ->whereDate('follow_up_at', '!=', $today)
+                        ->whereNotIn('qualification_status', $closed)
+                        ->count();
+
+                    return [
+                        'status'   => $count > 0 ? 'warning' : 'pass',
+                        'severity' => 'low',
+                        'message'  => $count === 0
+                            ? 'No overdue follow-ups'
+                            : "{$count} follow-up(s) are overdue",
+                        'fix_hint' => $count > 0
+                            ? 'Review at GET /api/v1/admin/crm/follow-ups?due=overdue' : null,
+                    ];
+                } catch (\Throwable) {
+                    return ['status' => 'pass', 'severity' => 'low', 'message' => 'Follow-up check unavailable'];
+                }
+            }),
+            $this->check('crm_due_today', 'Follow-ups Due Today', function () use ($today, $closed) {
+                try {
+                    $count = DB::table('quote_requests')
+                        ->whereNotNull('follow_up_at')
+                        ->whereDate('follow_up_at', $today)
+                        ->whereNotIn('qualification_status', $closed)
+                        ->count();
+
+                    return [
+                        'status'   => $count > 0 ? 'warning' : 'pass',
+                        'severity' => 'low',
+                        'message'  => $count === 0
+                            ? 'No follow-ups due today'
+                            : "{$count} follow-up(s) due today",
+                        'fix_hint' => $count > 0
+                            ? 'Review at GET /api/v1/admin/crm/follow-ups?due=today' : null,
+                    ];
+                } catch (\Throwable) {
+                    return ['status' => 'pass', 'severity' => 'low', 'message' => 'Due-today check unavailable'];
+                }
+            }),
+            $this->check('crm_unassigned_qualified', 'Unassigned Qualified Leads', function () use ($closed) {
+                try {
+                    $count = DB::table('quote_requests')
+                        ->where('qualification_status', 'qualified')
+                        ->whereNull('assigned_to')
+                        ->count();
+
+                    return [
+                        'status'   => $count > 0 ? 'warning' : 'pass',
+                        'severity' => 'low',
+                        'message'  => $count === 0
+                            ? 'All qualified leads are assigned'
+                            : "{$count} qualified lead(s) are unassigned",
+                        'fix_hint' => $count > 0
+                            ? 'Review at GET /api/v1/admin/quote-requests?qualification_status=qualified&unassigned=true' : null,
+                    ];
+                } catch (\Throwable) {
+                    return ['status' => 'pass', 'severity' => 'low', 'message' => 'Unassigned check unavailable'];
+                }
+            }),
+            $this->check('crm_failed_emails', 'Failed CRM Emails (7 days)', function () {
+                try {
+                    $count = DB::table('customer_communications')
+                        ->where('type', 'email')
+                        ->where('status', 'failed')
+                        ->where('created_at', '>=', now()->subDays(7))
+                        ->count();
+
+                    return [
+                        'status'   => $count > 0 ? 'warning' : 'pass',
+                        'severity' => 'low',
+                        'message'  => $count === 0
+                            ? 'No failed CRM emails in the last 7 days'
+                            : "{$count} CRM email(s) failed in the last 7 days",
+                        'fix_hint' => $count > 0 ? 'Check MAIL_MAILER + SMTP credentials' : null,
+                    ];
+                } catch (\Throwable) {
+                    return ['status' => 'pass', 'severity' => 'low', 'message' => 'Failed email check unavailable'];
                 }
             }),
         ];
