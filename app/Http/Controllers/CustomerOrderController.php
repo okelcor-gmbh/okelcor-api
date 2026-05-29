@@ -22,6 +22,15 @@ class CustomerOrderController extends Controller
     {
         $customer = $request->user();
 
+        // Access guard — checkout requires explicit approval (CRM-4)
+        if (! ($customer->approved_for_checkout ?? false)) {
+            return response()->json([
+                'message'               => 'Checkout access is pending approval. Please contact Okelcor.',
+                'code'                  => 'checkout_not_approved',
+                'approved_for_checkout' => false,
+            ], 403);
+        }
+
         $order = Order::where('ref', $ref)->first();
 
         if (! $order) {

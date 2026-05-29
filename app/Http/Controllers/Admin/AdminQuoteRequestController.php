@@ -537,19 +537,33 @@ class AdminQuoteRequestController extends Controller
         // Create new customer from quote data (pending_review — admin must invite separately)
         [$firstName, $lastName] = $this->splitFullName($quote->full_name);
 
+        // Map lead_customer_type → customer_segment
+        $segmentMap = [
+            'private_buyer' => 'private_buyer',
+            'dealer'        => 'dealer',
+            'workshop'      => 'workshop',
+            'fleet'         => 'fleet',
+            'exporter'      => 'exporter',
+        ];
+        $segment = $segmentMap[$quote->lead_customer_type ?? 'unknown'] ?? 'unknown';
+
         $customer = Customer::create([
-            'first_name'        => $firstName,
-            'last_name'         => $lastName,
-            'email'             => $quote->email,
-            'password'          => Hash::make(Str::random(32)),
-            'phone'             => $quote->phone,
-            'country'           => $quote->country,
-            'company_name'      => $quote->company_name,
-            'vat_number'        => $quote->vat_number,
-            'customer_type'     => $quote->company_name ? 'b2b' : 'b2c',
-            'onboarding_status' => 'pending_review',
-            'is_active'         => false,
+            'first_name'          => $firstName,
+            'last_name'           => $lastName,
+            'email'               => $quote->email,
+            'password'            => Hash::make(Str::random(32)),
+            'phone'               => $quote->phone,
+            'country'             => $quote->country,
+            'company_name'        => $quote->company_name,
+            'vat_number'          => $quote->vat_number,
+            'customer_type'       => $quote->company_name ? 'b2b' : 'b2c',
+            'onboarding_status'   => 'pending_review',
+            'is_active'           => false,
             'must_reset_password' => true,
+            // CRM-4: default access — inquiry_only until admin explicitly upgrades
+            'customer_segment'    => $segment,
+            'access_level'        => 'inquiry_only',
+            'approved_for_quotes' => true,
         ]);
 
         $quote->update([

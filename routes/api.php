@@ -557,6 +557,9 @@ Route::prefix('v1')->group(function () {
             Route::post('customers/{id}/invite', [AdminCustomerController::class, 'invite']);
             Route::post('customers/{id}/resend-invite', [AdminCustomerController::class, 'resendInvite']);
             Route::post('customers/{id}/block', [AdminCustomerController::class, 'blockOnboarding']);
+
+            // Segmentation & access control (CRM-4)
+            Route::patch('customers/{id}/access', [AdminCustomerController::class, 'updateAccess']);
         });
 
         // Customer CSV import — customers.import (super_admin only)

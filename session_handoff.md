@@ -1,5 +1,149 @@
 # Session Handoff — Okelcor API
-Last updated: 2026-05-29 (session 34 — CRM-3 lead qualification & sales ownership pipeline)
+Last updated: 2026-05-29 (session 35 — CRM-4 customer segmentation & access control)
+
+---
+
+## Session 35 — CRM-4: Customer Segmentation & Access Control (complete)
+
+### Migration — `customers` table
+
+`database/migrations/2026_05_29_000004_add_segmentation_fields_to_customers_table.php`
+
+| Column | Type | Default | Purpose |
+|---|---|---|---|
+| `customer_segment` | ENUM | `unknown` | Buyer classification (admin-set) |
+| `access_level` | ENUM | `inquiry_only` | What the customer is allowed to do |
+| `market_region` | ENUM | `unknown` | Primary trade region |
+| `approved_for_checkout` | BOOLEAN | `false` | Can initiate Stripe checkout |
+| `approved_for_quotes` | BOOLEAN | `true` | Can submit/view quote requests |
+| `approved_for_wholesale_pricing` | BOOLEAN | `false` | Reserved for wholesale tier |
+| `approved_for_documents` | BOOLEAN | `false` | Can list/download trade documents |
+
+**`customer_segment` values:** `private_buyer`, `dealer`, `workshop`, `fleet`, `exporter`, `distributor`, `partner`, `unknown`
+
+**`access_level` values:** `inquiry_only`, `quote_only`, `approved_buyer`, `wholesale_buyer`, `restricted`, `blocked`
+
+**`market_region` values:** `eu`, `africa`, `middle_east`, `global`, `unknown`
+
+**Backfill (non-destructive):** existing `onboarding_status=active` + `is_active=true` customers → `access_level=approved_buyer`, `approved_for_checkout=true`, `approved_for_quotes=true`, `approved_for_documents=true`. All others keep defaults (inquiry_only, no checkout/docs).
+
+### Access rules
+
+| Endpoint | Guard | Error on fail |
+|---|---|---|
+| Any auth.customer route | `access_level != blocked` | 403 `code:access_blocked` |
+| `POST /auth/orders/{ref}/checkout` | `approved_for_checkout=true` | 403 `code:checkout_not_approved` |
+| `GET /auth/orders/{ref}/trade-documents` | `approved_for_documents=true` | 403 `code:documents_not_approved` |
+| `GET /auth/trade-documents/{id}/download` | `approved_for_documents=true` | 403 `code:documents_not_approved` |
+
+`restricted` access_level: customer can log in and view their account, but `approved_for_checkout` and `approved_for_documents` will be false — these individual flags gate the actions. No middleware-level block for restricted.
+
+### Customer auth/me response (new fields)
+
+`GET /api/v1/auth/me` and login response now include:
+```json
+{
+  "customer_segment": "unknown",
+  "access_level": "inquiry_only",
+  "market_region": "unknown",
+  "approved_for_checkout": false,
+  "approved_for_quotes": true,
+  "approved_for_wholesale_pricing": false,
+  "approved_for_documents": false
+}
+```
+Frontend uses these to conditionally show/hide checkout button, documents section, etc.
+
+### Admin access control endpoint
+
+`PATCH /api/v1/admin/customers/{id}/access` — permission: `customers.manage`
+
+```json
+{
+  "customer_segment": "dealer",
+  "access_level": "approved_buyer",
+  "market_region": "africa",
+  "approved_for_checkout": true,
+  "approved_for_quotes": true,
+  "approved_for_wholesale_pricing": false,
+  "approved_for_documents": true
+}
+```
+All fields optional — only updates what's sent. Setting `access_level=blocked` automatically revokes all customer tokens. Logs via SecurityEventService.
+
+### Convert-to-customer segment mapping (CRM-3 integration)
+
+`POST /admin/quote-requests/{id}/convert-to-customer` now maps `lead_customer_type` → `customer_segment`:
+
+| lead_customer_type | customer_segment |
+|---|---|
+| private_buyer | private_buyer |
+| dealer | dealer |
+| workshop | workshop |
+| fleet | fleet |
+| exporter | exporter |
+| unknown | unknown |
+
+New customers from conversion default to `access_level=inquiry_only`, `approved_for_quotes=true`. Admin must explicitly upgrade via `PATCH /customers/{id}/access`.
+
+### Admin customer list/detail
+
+`formatSummary()` now includes all 7 new fields. Frontend can show segment + access badges on the customer list and a dedicated "Access Control" card on detail.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `database/migrations/2026_05_29_000004_add_segmentation_fields_to_customers_table.php` | New |
+| `app/Models/Customer.php` | 7 new fillable fields + 4 boolean casts |
+| `app/Http/Middleware/CustomerAuth.php` | Block `access_level=blocked` at middleware level |
+| `app/Http/Controllers/CustomerAuthController.php` | `formatCustomer()` exposes all 7 new fields |
+| `app/Http/Controllers/CustomerOrderController.php` | Checkout guard: `approved_for_checkout` check |
+| `app/Http/Controllers/TradeDocumentController.php` | Document list + download guard: `approved_for_documents` check |
+| `app/Http/Controllers/Admin/AdminCustomerController.php` | `updateAccess()` method; `formatSummary()` includes new fields |
+| `app/Http/Controllers/Admin/AdminQuoteRequestController.php` | `convertToCustomer()` maps `lead_customer_type` → `customer_segment` |
+| `routes/api.php` | Added `PATCH customers/{id}/access` |
+
+### Deploy steps
+
+```bash
+cd /home/u978121777/domains/okelcor.com/public_html/okelcor-api
+git fetch origin && git reset --hard origin/main
+composer install --no-dev
+/opt/alt/php83/usr/bin/php artisan migrate --force
+/opt/alt/php83/usr/bin/php artisan config:clear
+/opt/alt/php83/usr/bin/php artisan config:cache
+/opt/alt/php83/usr/bin/php artisan route:cache
+/opt/alt/php83/usr/bin/php artisan view:clear
+```
+
+**Migration:** `2026_05_29_000004` — additive ALTER TABLE + backfill UPDATE. Existing active customers unaffected.
+
+### Test checklist
+
+```
+# Existing active customer can still checkout:
+GET /api/v1/auth/me → approved_for_checkout=true, approved_for_documents=true
+
+# New pending_review customer cannot checkout:
+POST /api/v1/auth/orders/{ref}/checkout → 403, code=checkout_not_approved
+
+# Admin upgrades access:
+PATCH /api/v1/admin/customers/{id}/access { access_level: "approved_buyer", approved_for_checkout: true, approved_for_documents: true }
+→ 200, approved_for_checkout=true
+
+# Customer can now checkout:
+POST /api/v1/auth/orders/{ref}/checkout → proceeds to Stripe
+
+# Blocked customer cannot use any authenticated endpoint:
+PATCH /admin/customers/{id}/access { access_level: "blocked" } → tokens revoked
+GET /api/v1/auth/me → 403, code=access_blocked
+
+# Convert-to-customer maps segment:
+Quote with lead_customer_type=dealer
+POST /admin/quote-requests/{id}/convert-to-customer
+→ Customer created with customer_segment=dealer, access_level=inquiry_only
+```
 
 ---
 

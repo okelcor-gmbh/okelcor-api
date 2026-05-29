@@ -21,6 +21,15 @@ class TradeDocumentController extends Controller
     {
         $customer = $request->user();
 
+        // Access guard — documents require explicit approval (CRM-4)
+        if (! ($customer->approved_for_documents ?? false)) {
+            return response()->json([
+                'message'                => 'Document access is not yet enabled for your account. Please contact Okelcor.',
+                'code'                   => 'documents_not_approved',
+                'approved_for_documents' => false,
+            ], 403);
+        }
+
         $order = Order::where('ref', $ref)->first();
 
         if (! $order || strtolower($order->customer_email) !== strtolower($customer->email)) {
@@ -61,6 +70,16 @@ class TradeDocumentController extends Controller
     public function download(Request $request, int $id): BinaryFileResponse|JsonResponse
     {
         $customer = $request->user();
+
+        // Access guard — documents require explicit approval (CRM-4)
+        if (! ($customer->approved_for_documents ?? false)) {
+            return response()->json([
+                'message'                => 'Document access is not yet enabled for your account. Please contact Okelcor.',
+                'code'                   => 'documents_not_approved',
+                'approved_for_documents' => false,
+            ], 403);
+        }
+
         $document = TradeDocument::findOrFail($id);
 
         // Verify the document's order belongs to the customer

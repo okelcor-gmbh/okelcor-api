@@ -745,20 +745,28 @@ class CustomerAuthController extends Controller
     private function formatCustomer(Customer $c): array
     {
         return [
-            'id'                => $c->id,
-            'customer_type'     => $c->customer_type,
-            'first_name'        => $c->first_name,
-            'last_name'         => $c->last_name,
-            'full_name'         => $c->full_name,
-            'email'             => $c->email,
-            'phone'             => $c->phone,
-            'country'           => $c->country,
-            'company_name'      => $c->company_name,
-            'vat_number'        => $c->vat_number,
-            'vat_verified'      => $c->vat_verified,
-            'industry'          => $c->industry,
-            'email_verified'    => (bool) $c->email_verified_at,
-            'onboarding_status' => $c->onboarding_status ?? 'active',
+            'id'                             => $c->id,
+            'customer_type'                  => $c->customer_type,
+            'first_name'                     => $c->first_name,
+            'last_name'                      => $c->last_name,
+            'full_name'                      => $c->full_name,
+            'email'                          => $c->email,
+            'phone'                          => $c->phone,
+            'country'                        => $c->country,
+            'company_name'                   => $c->company_name,
+            'vat_number'                     => $c->vat_number,
+            'vat_verified'                   => $c->vat_verified,
+            'industry'                       => $c->industry,
+            'email_verified'                 => (bool) $c->email_verified_at,
+            'onboarding_status'              => $c->onboarding_status ?? 'active',
+            // Segmentation & access (CRM-4) — frontend uses these for conditional UI
+            'customer_segment'               => $c->customer_segment ?? 'unknown',
+            'access_level'                   => $c->access_level ?? 'inquiry_only',
+            'market_region'                  => $c->market_region ?? 'unknown',
+            'approved_for_checkout'          => (bool) ($c->approved_for_checkout ?? false),
+            'approved_for_quotes'            => (bool) ($c->approved_for_quotes ?? true),
+            'approved_for_wholesale_pricing' => (bool) ($c->approved_for_wholesale_pricing ?? false),
+            'approved_for_documents'         => (bool) ($c->approved_for_documents ?? false),
         ];
     }
 }

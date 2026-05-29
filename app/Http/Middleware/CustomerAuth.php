@@ -42,6 +42,15 @@ class CustomerAuth
             ], 403);
         }
 
+        // Access level gate — fully blocked customers cannot use any authenticated endpoint
+        if (($customer->access_level ?? 'inquiry_only') === 'blocked') {
+            return response()->json([
+                'message'      => 'Your account access has been restricted. Please contact Okelcor.',
+                'code'         => 'access_blocked',
+                'access_level' => 'blocked',
+            ], 403);
+        }
+
         $request->setUserResolver(fn () => $customer);
 
         return $next($request);

@@ -35,6 +35,14 @@ class Customer extends Authenticatable
         'last_login_location',
         'failed_login_count',
         'admin_notes',
+        // Segmentation & access (CRM-4)
+        'customer_segment',
+        'access_level',
+        'market_region',
+        'approved_for_checkout',
+        'approved_for_quotes',
+        'approved_for_wholesale_pricing',
+        'approved_for_documents',
     ];
 
     protected $hidden = [
@@ -49,7 +57,11 @@ class Customer extends Authenticatable
         'is_active'            => 'boolean',
         'imported_from_wix'    => 'boolean',
         'failed_login_count'   => 'integer',
-        'onboarding_status'    => 'string',
+        'onboarding_status'              => 'string',
+        'approved_for_checkout'          => 'boolean',
+        'approved_for_quotes'            => 'boolean',
+        'approved_for_wholesale_pricing' => 'boolean',
+        'approved_for_documents'         => 'boolean',
     ];
 
     public function getFullNameAttribute(): string

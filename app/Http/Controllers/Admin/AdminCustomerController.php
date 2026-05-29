@@ -549,31 +549,82 @@ class AdminCustomerController extends Controller
         ]);
     }
 
+    // ── PATCH /admin/customers/{id}/access ───────────────────────────────────
+
+    public function updateAccess(Request $request, int $id): JsonResponse
+    {
+        $customer = Customer::findOrFail($id);
+
+        $data = $request->validate([
+            'customer_segment'               => ['nullable', 'in:private_buyer,dealer,workshop,fleet,exporter,distributor,partner,unknown'],
+            'access_level'                   => ['nullable', 'in:inquiry_only,quote_only,approved_buyer,wholesale_buyer,restricted,blocked'],
+            'market_region'                  => ['nullable', 'in:eu,africa,middle_east,global,unknown'],
+            'approved_for_checkout'          => ['nullable', 'boolean'],
+            'approved_for_quotes'            => ['nullable', 'boolean'],
+            'approved_for_wholesale_pricing' => ['nullable', 'boolean'],
+            'approved_for_documents'         => ['nullable', 'boolean'],
+        ]);
+
+        // Only update fields that were explicitly sent
+        $update = array_filter($data, fn ($v) => $v !== null);
+
+        if (empty($update)) {
+            return response()->json(['message' => 'No changes provided.'], 422);
+        }
+
+        // If blocking, also revoke tokens
+        if (isset($update['access_level']) && $update['access_level'] === 'blocked') {
+            $customer->tokens()->delete();
+        }
+
+        $customer->update($update);
+
+        SecurityEventService::log(
+            'account_changes', $customer->id,
+            $request->ip(), $request->userAgent(),
+            'Access control updated by admin: ' . implode(', ', array_keys($update)), 'info'
+        );
+
+        return response()->json([
+            'success' => true,
+            'data'    => $this->formatSummary($customer->fresh()),
+            'message' => 'Access control updated.',
+        ]);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private function formatSummary(Customer $c): array
     {
         return [
-            'id'                   => $c->id,
-            'first_name'           => $c->first_name,
-            'last_name'            => $c->last_name,
-            'email'                => $c->email,
-            'phone'                => $c->phone,
-            'country'              => $c->country,
-            'company_name'         => $c->company_name,
-            'vat_number'           => $c->vat_number,
-            'customer_type'        => $c->customer_type,
-            'status'               => $c->status ?? 'active',
-            'onboarding_status'    => $c->onboarding_status ?? 'active',
-            'last_login_at'        => $c->last_login_at?->toIso8601String(),
-            'last_login_ip'        => $c->last_login_ip,
-            'last_login_location'  => $c->last_login_location,
-            'failed_login_count'   => (int) ($c->failed_login_count ?? 0),
-            'is_locked'            => $c->status === 'locked',
-            'is_active'            => (bool) $c->is_active,
-            'email_verified'       => (bool) $c->email_verified_at,
-            'imported_from_wix'    => (bool) $c->imported_from_wix,
-            'created_at'           => $c->created_at?->toIso8601String(),
+            'id'                             => $c->id,
+            'first_name'                     => $c->first_name,
+            'last_name'                      => $c->last_name,
+            'email'                          => $c->email,
+            'phone'                          => $c->phone,
+            'country'                        => $c->country,
+            'company_name'                   => $c->company_name,
+            'vat_number'                     => $c->vat_number,
+            'customer_type'                  => $c->customer_type,
+            'status'                         => $c->status ?? 'active',
+            'onboarding_status'              => $c->onboarding_status ?? 'active',
+            'last_login_at'                  => $c->last_login_at?->toIso8601String(),
+            'last_login_ip'                  => $c->last_login_ip,
+            'last_login_location'            => $c->last_login_location,
+            'failed_login_count'             => (int) ($c->failed_login_count ?? 0),
+            'is_locked'                      => $c->status === 'locked',
+            'is_active'                      => (bool) $c->is_active,
+            'email_verified'                 => (bool) $c->email_verified_at,
+            'imported_from_wix'              => (bool) $c->imported_from_wix,
+            'created_at'                     => $c->created_at?->toIso8601String(),
+            // Segmentation & access (CRM-4)
+            'customer_segment'               => $c->customer_segment ?? 'unknown',
+            'access_level'                   => $c->access_level ?? 'inquiry_only',
+            'market_region'                  => $c->market_region ?? 'unknown',
+            'approved_for_checkout'          => (bool) ($c->approved_for_checkout ?? false),
+            'approved_for_quotes'            => (bool) ($c->approved_for_quotes ?? true),
+            'approved_for_wholesale_pricing' => (bool) ($c->approved_for_wholesale_pricing ?? false),
+            'approved_for_documents'         => (bool) ($c->approved_for_documents ?? false),
         ];
     }
 
