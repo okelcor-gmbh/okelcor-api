@@ -14,14 +14,14 @@ class CrmFollowUpEmail extends Mailable
 
     public function __construct(
         public readonly string $recipientName,
-        public readonly string $subject,
+        public readonly string $emailSubject,  // 'subject' conflicts with Mailable::$subject (non-readonly parent property)
         public readonly string $body,
         public readonly string $ref,
     ) {}
 
     public function envelope(): Envelope
     {
-        return new Envelope(subject: $this->subject);
+        return new Envelope(subject: $this->emailSubject);
     }
 
     public function content(): Content

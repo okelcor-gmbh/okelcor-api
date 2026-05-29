@@ -52,7 +52,8 @@ class AdminCrmEmailController extends Controller
     {
         $list = collect(self::TEMPLATES)->map(fn ($t, $key) => [
             'key'     => $key,
-            'name'    => $t['name'],
+            'label'   => $t['name'],   // 'label' is what frontend dropdowns expect
+            'name'    => $t['name'],   // kept for backwards-compat
             'subject' => $t['subject'],
             'body'    => $t['body'],
         ])->values();
@@ -65,28 +66,53 @@ class AdminCrmEmailController extends Controller
     public function sendFollowUpEmail(Request $request, int $id): JsonResponse
     {
         $data = $request->validate([
-            'template'       => ['required', 'string', 'in:' . implode(',', array_keys(self::TEMPLATES))],
+            'template'       => ['required', 'string'],
             'message'        => ['nullable', 'string', 'max:5000'],
             'custom_subject' => ['nullable', 'string', 'max:300'],
         ]);
 
+        // Explicit key check gives a structured error instead of a generic validation message
+        if (! array_key_exists($data['template'], self::TEMPLATES)) {
+            return response()->json([
+                'message' => 'Please select a valid email template.',
+                'code'    => 'invalid_email_template',
+                'valid_templates' => array_keys(self::TEMPLATES),
+            ], 422);
+        }
+
         $quote    = QuoteRequest::findOrFail($id);
         $template = self::TEMPLATES[$data['template']];
 
-        // Resolve recipient
-        $recipientEmail = $quote->email;
+        // Resolve recipient + sender context
+        $recipientEmail = $quote->email ?? '';
         $recipientName  = $quote->full_name ?? 'valued customer';
+        $companyName    = $quote->company_name ?? '';
         $ref            = $quote->ref_number;
+        $adminName      = $request->user()?->first_name
+            ? trim($request->user()->first_name . ' ' . ($request->user()->last_name ?? ''))
+            : 'The Okelcor Team';
 
-        // Render subject + body with placeholders
-        $subject = str_replace(['{ref}', '{name}'], [$ref, $recipientName],
+        if (empty($recipientEmail)) {
+            return response()->json([
+                'message' => 'This quote has no recipient email address.',
+                'code'    => 'missing_recipient_email',
+            ], 422);
+        }
+
+        // Placeholder substitution: {name} {company} {ref} {admin_name} {message}
+        $placeholders = ['{name}', '{company}', '{ref}', '{admin_name}', '{message}'];
+        $values       = [$recipientName, $companyName, $ref, $adminName, $data['message'] ?? ''];
+
+        $resolvedSubject = str_replace(
+            $placeholders, $values,
             $data['custom_subject'] ?? $template['subject']
         );
 
-        $body = str_replace(['{ref}', '{name}'], [$ref, $recipientName], $template['body']);
+        $resolvedBody = str_replace($placeholders, $values, $template['body']);
 
-        if (! empty($data['message'])) {
-            $body .= "\n\n---\n" . $data['message'];
+        // Append custom message as a separate block if provided (and not already substituted via {message})
+        if (! empty($data['message']) && ! str_contains($template['body'], '{message}')) {
+            $resolvedBody .= "\n\n---\n" . $data['message'];
         }
 
         // Send
@@ -96,8 +122,8 @@ class AdminCrmEmailController extends Controller
         try {
             Mail::to($recipientEmail)->send(new CrmFollowUpEmail(
                 recipientName: $recipientName,
-                subject: $subject,
-                body: $body,
+                emailSubject: $resolvedSubject,
+                body: $resolvedBody,
                 ref: $ref,
             ));
 
@@ -129,8 +155,8 @@ class AdminCrmEmailController extends Controller
             'admin_user_id'    => $request->user()?->id,
             'type'             => 'email',
             'direction'        => 'outbound',
-            'subject'          => $subject,
-            'body'             => $body,
+            'subject'          => $resolvedSubject,
+            'body'             => $resolvedBody,
             'status'           => $status,
             'completed_at'     => $status === 'sent' ? now() : null,
             'metadata'         => [
@@ -143,14 +169,16 @@ class AdminCrmEmailController extends Controller
         if ($status === 'failed') {
             return response()->json([
                 'success' => false,
-                'message' => 'Email failed to send but the attempt has been logged.',
+                'message' => 'Email could not be sent. Communication was logged.',
+                'code'    => 'email_send_failed',
                 'error'   => $error,
             ], 502);
         }
 
         return response()->json([
             'success' => true,
-            'message' => "Follow-up email ({$data['template']}) sent to {$recipientEmail}.",
+            'message' => "Follow-up email sent to {$recipientEmail}.",
+            'template' => $data['template'],
         ]);
     }
 }
