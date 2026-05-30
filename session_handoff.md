@@ -1,5 +1,173 @@
 # Session Handoff — Okelcor API
-Last updated: 2026-05-29 (session 37 — CRM-6 customer communication & follow-up automation)
+Last updated: 2026-05-30 (session 38 — CRM-6 fix + full CRM pipeline complete)
+
+---
+
+## CRM Pipeline — Status Summary (as of 2026-05-30)
+
+All 6 CRM phases deployed to production on `main`. Deploy command:
+
+```bash
+cd /home/u978121777/domains/okelcor.com/public_html/okelcor-api
+git fetch origin && git reset --hard origin/main
+composer install --no-dev
+/opt/alt/php83/usr/bin/php artisan migrate --force
+/opt/alt/php83/usr/bin/php artisan config:clear && config:cache && route:cache && view:clear
+```
+
+Post-deploy backfill (run once):
+```bash
+/opt/alt/php83/usr/bin/php artisan customers:recalculate-data-quality --all
+```
+
+| Phase | Description | Commit | Status |
+|---|---|---|---|
+| CRM-1 | Controlled customer onboarding (onboarding_status, invite flow, admin actions) | `98c2333` | ✅ Live |
+| CRM-2 | Inquiry quality scoring + spam gate (InquiryQualityService, review_status) | `e3b3dbf` | ✅ Live |
+| CRM-3 | Lead qualification & sales pipeline (qualification_status, assign, convert-to-customer) | `67c54c0` | ✅ Live |
+| CRM-3 fix | convert-to-customer 409 structured response with customer data | `a188755` | ✅ Live |
+| CRM-4 | Customer segmentation & access control (customer_segment, access_level, checkout/doc guards) | `8d0f17a` | ✅ Live |
+| CRM-5 | Customer data quality & deduplication (scoring, normalization, duplicate detection) | `02e773a` | ✅ Live |
+| CRM-6 | Communication log + follow-up automation + email templates | `3bb7ae1` | ✅ Live |
+| CRM-6 fix | 500 on send-follow-up-email (Mailable::$subject conflict) + blank dropdown (name→label) | `45ff5fc` | ✅ Live |
+
+### Key .env variables added across CRM phases
+
+```
+# CRM-4: access control
+# (no new env vars — behavior driven by DB fields)
+
+# CRM-6: digest email (optional)
+CRM_DIGEST_EMAIL=support@okelcor.com
+```
+
+### Artisan commands added
+
+| Command | Description |
+|---|---|
+| `customers:recalculate-data-quality --all` | Bulk CRM-5 quality scoring backfill |
+| `customers:recalculate-data-quality --id=N` | Single customer re-score |
+| `customers:recalculate-data-quality --unscored` | Score only unscored customers |
+| `crm:follow-ups-digest` | Daily follow-up digest (scheduled 08:00) |
+| `crm:follow-ups-digest --dry-run` | Preview without logging |
+
+### New permission keys (AdminPermissions.php)
+
+| Permission | Roles | Purpose |
+|---|---|---|
+| `quotes.view` | super_admin, admin, order_manager, sales_manager | Read-only quote access |
+| `quotes.update` | super_admin, admin, order_manager | Mutate quotes/pipeline |
+| `crm.view` | super_admin, admin, order_manager, sales_manager | Read follow-ups/comms/templates |
+| `crm.update` | super_admin, admin, order_manager | Write comms, send emails, complete follow-ups |
+
+### New DB tables (all CRM phases)
+
+| Table | Added in | Purpose |
+|---|---|---|
+| `customer_communications` | CRM-6 | Communication log (calls, emails, notes, system events) |
+
+### Customer model — all new columns since CRM-1
+
+| Column | Phase | Purpose |
+|---|---|---|
+| `onboarding_status` | CRM-1 | Account lifecycle (pending_review → invited → active) |
+| `customer_segment` | CRM-4 | Buyer type (dealer/fleet/exporter/etc.) |
+| `access_level` | CRM-4 | What customer can do (inquiry_only/approved_buyer/etc.) |
+| `market_region` | CRM-4 | Trade region |
+| `approved_for_checkout` | CRM-4 | Gates Stripe checkout |
+| `approved_for_quotes` | CRM-4 | Gates quote submission |
+| `approved_for_wholesale_pricing` | CRM-4 | Reserved for wholesale tier |
+| `approved_for_documents` | CRM-4 | Gates trade document access |
+| `data_quality_score` | CRM-5 | 0-100 completeness score |
+| `data_quality_flags` | CRM-5 | Array of flag strings |
+| `normalized_email` | CRM-5 | Lowercase/trimmed email for dedup |
+| `normalized_company_name` | CRM-5 | Normalized company for dedup |
+| `duplicate_group_id` | CRM-5 | Groups related duplicate records |
+| `possible_duplicate_of` | CRM-5 | FK to most likely duplicate |
+| `data_review_status` | CRM-5 | clean/needs_review/duplicate_suspected/merged/ignored |
+
+### quote_requests model — all new columns since CRM-2
+
+| Column | Phase | Purpose |
+|---|---|---|
+| `review_status` | CRM-2 | Quality gate (new/needs_review/qualified/rejected/spam) |
+| `quality_score` | CRM-2 | 0-100 quality score |
+| `quality_flags` | CRM-2 | Array of quality flag strings |
+| `reviewed_by` | CRM-2 | Admin who reviewed |
+| `reviewed_at` | CRM-2 | When reviewed |
+| `rejection_reason` | CRM-2 | Admin rejection note |
+| `assigned_to` | CRM-3 | Sales owner (admin_user FK) |
+| `assigned_at` | CRM-3 | When assigned |
+| `follow_up_at` | CRM-3 | Scheduled follow-up date |
+| `lead_priority` | CRM-3 | low/normal/high/urgent |
+| `lead_source` | CRM-3 | website_quote/ebay/phone/email/referral |
+| `lead_customer_type` | CRM-3 | Admin buyer classification |
+| `qualification_status` | CRM-3 | Sales pipeline stage (9 values) |
+| `qualification_reason` | CRM-3 | Reason for status |
+| `internal_notes` | CRM-3 | Admin-only notes |
+| `possible_customer_id` | CRM-5 | Guest quote email match to existing customer |
+| `follow_up_completed_at` | CRM-6 | When last follow-up was completed |
+| `follow_up_completed_by` | CRM-6 | Admin who completed it |
+
+---
+
+## Session 38 — CRM-6 Fix: send-follow-up-email 500 + blank template dropdown (complete)
+
+### Root causes
+
+**Bug 1 — HTTP 500 on POST /admin/quote-requests/{id}/send-follow-up-email**
+
+`CrmFollowUpEmail` declared `public readonly string $subject` in its constructor. Laravel's `Mailable` base class already has `public $subject;` (non-readonly, untyped). PHP 8.1+ throws a **Fatal Error** when a child class tries to redeclare an inherited non-readonly property as readonly:
+> *"Cannot redeclare non-readonly property Illuminate\Mail\Mailable::$subject as readonly"*
+
+This error fires at class instantiation — before the `try/catch` in `sendFollowUpEmail()` — so it surfaced as an uncaught 500 instead of being handled.
+
+**Fix:** Renamed `$subject` → `$emailSubject` in `CrmFollowUpEmail` constructor and `envelope()` method. Updated the call site in `AdminCrmEmailController`.
+
+**Bug 2 — Blank template dropdown**
+
+`templates()` returned the field as `name`. Frontend dropdown bound to `label`. Added `label` field to the response (identical value to `name`; both now returned for compatibility).
+
+### Additional improvements in this fix
+
+- Added `{company}`, `{admin_name}`, `{message}` placeholder substitution (was only doing `{name}` and `{ref}`)
+- `{admin_name}` resolves from `$request->user()->first_name + last_name`, falls back to "The Okelcor Team"
+- Invalid template key now returns structured `422 code:invalid_email_template` instead of generic Laravel validation error
+- Empty recipient email returns `422 code:missing_recipient_email`
+- Mail failure returns `502 code:email_send_failed` (was already there, now has `code` field)
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `app/Mail/CrmFollowUpEmail.php` | Renamed `$subject` → `$emailSubject` |
+| `app/Http/Controllers/Admin/AdminCrmEmailController.php` | `label` field in templates(); all 5 placeholders; structured errors; emailSubject in Mailable call |
+
+### Final template response shape
+
+```json
+{
+  "data": [
+    {
+      "key": "follow_up_quote",
+      "label": "Follow Up on Quote",
+      "name": "Follow Up on Quote",
+      "subject": "Following up on your tyre inquiry — {ref}",
+      "body": "Dear {name},\n\n..."
+    }
+  ]
+}
+```
+
+### Placeholder reference
+
+| Placeholder | Resolves to |
+|---|---|
+| `{name}` | `quote.full_name` or "valued customer" |
+| `{company}` | `quote.company_name` or empty string |
+| `{ref}` | `quote.ref_number` |
+| `{admin_name}` | Logged-in admin's name or "The Okelcor Team" |
+| `{message}` | Optional custom message body from request |
 
 ---
 
