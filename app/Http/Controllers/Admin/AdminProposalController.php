@@ -426,36 +426,55 @@ class AdminProposalController extends Controller
     // -------------------------------------------------------------------------
 
     /**
-     * Auto-build proposal line items from the quote's stored tyre data.
+     * Auto-build proposal line items from the quote's stored data.
      *
-     * Priority:
-     *   1. quote.tyre_items JSON array (multi-row structured items)
-     *   2. Legacy quote.tyre_size + quote.quantity (single-row)
+     * Priority (highest to lowest):
+     *   1. quote_request_items table rows (admin-curated, may have unit_price)
+     *   2. quote.tyre_items JSON array (multi-row, no price)
+     *   3. Legacy quote.tyre_size + quote.quantity (single-row, no price)
      *
-     * unit_price defaults to 0.00 — admin fills in pricing before mark-ready.
-     * Returns an empty array if no usable item data exists.
+     * unit_price defaults to 0.00 when not set — proposal total will be 0
+     * and admin should update prices before mark-ready.
      *
      * @return array<int, array>
      */
     private function buildItemsFromQuote(QuoteRequest $quote): array
     {
+        // 1. Admin-curated items from quote_request_items table (preferred)
+        $quote->loadMissing('items');
+
+        if ($quote->items->isNotEmpty()) {
+            return $quote->items->map(function ($item) {
+                $label = trim(implode(' ', array_filter([
+                    $item->brand,
+                    $item->model,
+                    $item->size,
+                ])));
+
+                return [
+                    'name'       => $label ?: ($item->size ?? $item->brand ?? 'Tyre'),
+                    'brand'      => $item->brand,
+                    'sku'        => null,
+                    'size'       => $item->size,
+                    'quantity'   => $item->quantity,
+                    'unit_price' => $item->unit_price !== null ? (float) $item->unit_price : 0.00,
+                ];
+            })->all();
+        }
+
         $brand = $quote->brand_preference ?: null;
 
-        // 1. Structured multi-row items (preferred)
+        // 2. tyre_items JSON (multi-row, no price)
         if (! empty($quote->tyre_items) && is_array($quote->tyre_items)) {
             $items = [];
             foreach ($quote->tyre_items as $row) {
-                $size     = trim((string) ($row['size'] ?? ''));
-                $qty      = max(1, (int) ($row['quantity'] ?? 1));
-
+                $size = trim((string) ($row['size'] ?? ''));
                 if ($size === '') {
                     continue;
                 }
-
-                $name = $brand ? "{$brand} {$size}" : $size;
-
+                $qty    = max(1, (int) ($row['quantity'] ?? 1));
                 $items[] = [
-                    'name'       => $name,
+                    'name'       => $brand ? "{$brand} {$size}" : $size,
                     'brand'      => $brand,
                     'sku'        => null,
                     'size'       => $size,
@@ -463,22 +482,19 @@ class AdminProposalController extends Controller
                     'unit_price' => 0.00,
                 ];
             }
-
             if (! empty($items)) {
                 return $items;
             }
         }
 
-        // 2. Legacy single-row tyre_size + quantity
+        // 3. Legacy single-row tyre_size + quantity
         $legacySize = trim((string) ($quote->tyre_size ?? ''));
         if ($legacySize !== '') {
-            // quantity may be a free-text string like "200" or "200 pieces" — extract leading integer
             preg_match('/^(\d+)/', (string) ($quote->quantity ?? '1'), $qtyMatch);
-            $qty  = max(1, (int) ($qtyMatch[1] ?? 1));
-            $name = $brand ? "{$brand} {$legacySize}" : $legacySize;
+            $qty = max(1, (int) ($qtyMatch[1] ?? 1));
 
             return [[
-                'name'       => $name,
+                'name'       => $brand ? "{$brand} {$legacySize}" : $legacySize,
                 'brand'      => $brand,
                 'sku'        => null,
                 'size'       => $legacySize,

@@ -1,5 +1,154 @@
 # Session Handoff — Okelcor API
-Last updated: 2026-06-03 (session 39 — CRM-7 Sales Pipeline & Proposal Management)
+Last updated: 2026-06-03 (session 39 — CRM-7 + Fix 1 + Fix 2: Quote Items + Proposal Management)
+
+---
+
+## Session 39c — CRM-7 Fix 2: Quote Request Item Editor (complete)
+
+### Root cause
+
+`quote_requests` had no structured item table. `tyre_items` JSON (shape: `[{size, quantity}]`) contains no pricing and was empty for many quotes submitted before the RFQ upgrade. Admin clicking "Create Draft Proposal" got `proposal_items_missing` because neither `tyre_items` nor legacy `tyre_size` was set.
+
+### What was built
+
+New `quote_request_items` table giving admin a proper line-item editor on every quote, decoupled from the inquiry submission form.
+
+### Migration
+
+**`2026_06_03_000001_create_quote_request_items_table`**
+
+| Column | Type | Purpose |
+|---|---|---|
+| `quote_request_id` | FK → quote_requests CASCADE | Parent quote |
+| `product_id` | FK → products nullable | Optional catalogue link |
+| `brand` | VARCHAR(100) nullable | Tyre brand |
+| `model` | VARCHAR(200) nullable | Tyre model name |
+| `size` | VARCHAR(100) nullable | e.g. 315/80R22.5 |
+| `season` | VARCHAR(50) nullable | Summer / Winter / All Season |
+| `load_index` | VARCHAR(20) nullable | |
+| `speed_index` | VARCHAR(10) nullable | |
+| `condition` | VARCHAR(30) nullable | new / used |
+| `quantity` | UNSIGNED INT default 1 | |
+| `unit_price` | DECIMAL(10,2) nullable | Admin sets before mark-ready |
+| `currency` | VARCHAR(3) default EUR | |
+| `notes` | VARCHAR(500) nullable | Line-level admin note |
+| `sort_order` | UNSIGNED SMALLINT default 0 | Display order |
+
+### New admin endpoints (permission: quotes.update)
+
+| Endpoint | Description |
+|---|---|
+| `GET /admin/quote-requests/{id}/items` | List all items for the quote |
+| `POST /admin/quote-requests/{id}/items` | Add a single item. At least one of brand/model/size required. |
+| `POST /admin/quote-requests/{id}/items/import-from-inquiry` | Auto-parse `tyre_items` JSON or legacy `tyre_size` into rows. `?dry_run=true` previews. `?force=true` appends even if items exist. |
+| `PATCH /admin/quote-requests/{id}/items/{itemId}` | Update a single item |
+| `DELETE /admin/quote-requests/{id}/items/{itemId}` | Remove a single item |
+
+### Updated buildItemsFromQuote priority (AdminProposalController)
+
+When `POST /proposal/draft` is called without explicit items:
+
+1. **`quote_request_items` table** (admin-curated, may have prices) ← NEW primary source
+2. `tyre_items` JSON field (multi-row, no price) ← fallback
+3. Legacy `tyre_size` + `quantity` fields (single-row, no price) ← fallback
+4. Empty → `422 code:proposal_items_missing`
+
+### formatList / formatDetail changes
+
+- `formatList()` now includes `quote_items_count` (integer)
+- `formatDetail()` now includes `quote_items` (full array) and `quote_items_count`
+
+### import-from-inquiry behavior
+
+- Parses `tyre_items` JSON array rows (size + quantity)
+- Falls back to legacy `tyre_size` + `quantity` if tyre_items empty
+- Sets `unit_price = null` — admin must enter pricing
+- `?dry_run=true` — returns preview without writing
+- `?force=true` — appends even if items already exist
+- Without force: returns `409 code:items_already_exist` if rows exist
+- Skips rows with empty size
+
+### Audit log events
+
+- `quote_item_added` — POST /items
+- `quote_item_updated` — PATCH /items/{id}
+- `quote_item_deleted` — DELETE /items/{id}
+- `quote_items_imported` — POST /items/import-from-inquiry
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `database/migrations/2026_06_03_000001_create_quote_request_items_table.php` | New table |
+| `app/Models/QuoteRequestItem.php` | New model with `line_total` accessor |
+| `app/Models/QuoteRequest.php` | Added `items()` HasMany relation |
+| `app/Http/Controllers/Admin/AdminQuoteRequestItemController.php` | New — index/store/update/destroy/importFromInquiry |
+| `app/Http/Controllers/Admin/AdminProposalController.php` | `buildItemsFromQuote()` now checks DB table first |
+| `app/Http/Controllers/Admin/AdminQuoteRequestController.php` | `formatList()` includes `quote_items_count`; `formatDetail()` includes full `quote_items`; `show()` eager-loads items |
+| `routes/api.php` | 5 new item routes + use import |
+
+### Deploy steps
+
+```bash
+cd /home/u978121777/domains/okelcor.com/public_html/okelcor-api
+git fetch origin && git reset --hard origin/main
+composer install --no-dev
+/opt/alt/php83/usr/bin/php artisan migrate --force
+/opt/alt/php83/usr/bin/php artisan config:clear
+/opt/alt/php83/usr/bin/php artisan config:cache
+/opt/alt/php83/usr/bin/php artisan route:cache
+/opt/alt/php83/usr/bin/php artisan view:clear
+```
+
+**1 migration:** `2026_06_03_000001_create_quote_request_items_table` — new table, no data loss.
+
+### Test checklist
+
+```
+# Quote with no items → import from inquiry
+POST /admin/quote-requests/{id}/items/import-from-inquiry?dry_run=true
+→ shows parsed items without saving
+
+POST /admin/quote-requests/{id}/items/import-from-inquiry
+→ items created from tyre_items JSON or legacy tyre_size
+
+# Add item manually
+POST /admin/quote-requests/{id}/items
+  { brand: "Michelin", size: "315/80R22.5", quantity: 200, unit_price: 49.50 }
+→ 201, item created
+
+# Update price
+PATCH /admin/quote-requests/{id}/items/{itemId}
+  { unit_price: 55.00 }
+→ 200, line_total = 55.00 * 200 = 11000
+
+# Create draft proposal (no items in body)
+POST /admin/quote-requests/{id}/proposal/draft
+→ 201, proposal_items built from quote_request_items, total calculated
+
+# Quote with no items anywhere → clear error
+POST /admin/quote-requests/{id}/proposal/draft (fresh quote, no items)
+→ 422 code:proposal_items_missing
+
+# GET detail includes items
+GET /admin/quote-requests/{id}
+→ quote_items: [{id, brand, size, quantity, unit_price, line_total, ...}]
+→ quote_items_count: 1
+
+# GET list includes count
+GET /admin/quote-requests
+→ each row has quote_items_count: N
+```
+
+---
+
+## Session 39b — CRM-7 Fix 1: Proposal draft auto-builds from quote data (complete)
+
+**Root cause:** `items` field was `required` — frontend sent no items because quote already contains tyre data.
+
+**Fix:** Made `items` optional. When omitted, `buildItemsFromQuote()` derives items from `tyre_items` JSON → legacy `tyre_size` → 422 if nothing found.
+
+**File changed:** `app/Http/Controllers/Admin/AdminProposalController.php`
 
 ---
 

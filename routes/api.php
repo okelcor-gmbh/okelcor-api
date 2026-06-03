@@ -64,6 +64,7 @@ use App\Http\Controllers\DocumentVerificationController;
 use App\Http\Controllers\CustomerQuoteAcceptanceController;
 use App\Http\Controllers\ProposalController;
 use App\Http\Controllers\Admin\AdminProposalController;
+use App\Http\Controllers\Admin\AdminQuoteRequestItemController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
@@ -507,6 +508,18 @@ Route::prefix('v1')->group(function () {
         Route::middleware('permission:crm.update')->group(function () {
             Route::post('customers/{id}/communications', [AdminCommunicationController::class, 'storeForCustomer']);
             Route::post('quote-requests/{id}/communications', [AdminCommunicationController::class, 'storeForQuote']);
+        });
+
+        // -----------------------------------------------------------------
+        // Quote request items — CRM-7 Fix 2 (quotes.update)
+        // -----------------------------------------------------------------
+        Route::middleware('permission:quotes.update')->group(function () {
+            Route::get('quote-requests/{id}/items',                              [AdminQuoteRequestItemController::class, 'index']);
+            Route::post('quote-requests/{id}/items',                             [AdminQuoteRequestItemController::class, 'store']);
+            // import-from-inquiry must be before {itemId} to avoid route conflict
+            Route::post('quote-requests/{id}/items/import-from-inquiry',         [AdminQuoteRequestItemController::class, 'importFromInquiry']);
+            Route::patch('quote-requests/{id}/items/{itemId}',                   [AdminQuoteRequestItemController::class, 'update']);
+            Route::delete('quote-requests/{id}/items/{itemId}',                  [AdminQuoteRequestItemController::class, 'destroy']);
         });
 
         // -----------------------------------------------------------------

@@ -135,6 +135,11 @@ class QuoteRequest extends Model
         return $this->belongsTo(\App\Models\AdminUser::class, 'assigned_to');
     }
 
+    public function items(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(QuoteRequestItem::class)->orderBy('sort_order')->orderBy('id');
+    }
+
     public function communications(): \Illuminate\Database\Eloquent\Relations\HasMany
     {
         return $this->hasMany(CustomerCommunication::class)->orderByDesc('created_at');

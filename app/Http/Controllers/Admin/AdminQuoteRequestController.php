@@ -98,7 +98,7 @@ class AdminQuoteRequestController extends Controller
         }
 
         $perPage   = min((int) $request->input('per_page', 25), 100);
-        $paginated = $query->paginate($perPage);
+        $paginated = $query->withCount('items')->paginate($perPage);
 
         return response()->json([
             'data'    => $paginated->map(fn ($r) => $this->formatList($r))->values(),
@@ -114,7 +114,7 @@ class AdminQuoteRequestController extends Controller
 
     public function show(int $id): JsonResponse
     {
-        $quote = QuoteRequest::with('order')->findOrFail($id);
+        $quote = QuoteRequest::with('order', 'items')->findOrFail($id);
 
         return response()->json([
             'data'    => $this->formatDetail($quote),
@@ -825,6 +825,8 @@ class AdminQuoteRequestController extends Controller
             'attachment_original_name' => $r->attachment_original_name,
             'attachment_size'          => $r->attachment_size,
             'attachment_mime'          => $r->attachment_mime,
+            // Quote items (CRM-7 Fix 2)
+            'quote_items_count'        => $r->items_count ?? $r->items()->count(),
             // Proposal (CRM-7)
             'proposal_status'          => $r->proposal_status ?? 'none',
             'proposal_number'          => $r->proposal_number,
@@ -922,6 +924,14 @@ class AdminQuoteRequestController extends Controller
             'attachment_size'          => $r->attachment_size,
             'attachment_mime'          => $r->attachment_mime,
 
+            // Quote items (CRM-7 Fix 2) — admin-curated line items for proposals/orders
+            'quote_items'                => $r->relationLoaded('items')
+                ? $r->items->map(fn ($i) => $this->formatQuoteItem($i))->values()
+                : [],
+            'quote_items_count'          => $r->relationLoaded('items')
+                ? $r->items->count()
+                : ($r->items_count ?? 0),
+
             // Proposal (CRM-7)
             'proposal_status'            => $r->proposal_status ?? 'none',
             'proposal_number'            => $r->proposal_number,
@@ -953,6 +963,26 @@ class AdminQuoteRequestController extends Controller
         $firstName = $parts[0] ?? $fullName;
         $lastName  = $parts[1] ?? '-';
         return [$firstName, $lastName];
+    }
+
+    private function formatQuoteItem(\App\Models\QuoteRequestItem $i): array
+    {
+        return [
+            'id'          => $i->id,
+            'brand'       => $i->brand,
+            'model'       => $i->model,
+            'size'        => $i->size,
+            'season'      => $i->season,
+            'load_index'  => $i->load_index,
+            'speed_index' => $i->speed_index,
+            'condition'   => $i->condition,
+            'quantity'    => $i->quantity,
+            'unit_price'  => $i->unit_price !== null ? (float) $i->unit_price : null,
+            'line_total'  => $i->line_total,
+            'currency'    => $i->currency,
+            'notes'       => $i->notes,
+            'sort_order'  => $i->sort_order,
+        ];
     }
 
     private function formatCustomerSummary(Customer $c): array
