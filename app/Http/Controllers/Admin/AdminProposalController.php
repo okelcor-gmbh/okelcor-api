@@ -20,9 +20,15 @@ class AdminProposalController extends Controller
     /**
      * POST /admin/quote-requests/{id}/proposal/draft
      *
-     * Create or update a proposal draft from provided line items.
-     * Generates proposal_number if not already set.
-     * Sets proposal_status = 'draft'.
+     * Create or update a proposal draft.
+     *
+     * If `items` are provided in the request, they are used as-is.
+     * If omitted, items are auto-built from the quote's existing tyre_items or
+     * legacy tyre_size/quantity fields — unit_price defaults to 0.00 (admin fills
+     * in pricing before marking ready).
+     *
+     * Returns 422 code:proposal_items_missing only when the quote has no item
+     * data at all and no items were provided.
      */
     public function draft(Request $request, int $id): JsonResponse
     {
@@ -31,31 +37,46 @@ class AdminProposalController extends Controller
         $this->guardNotConverted($quote);
 
         $data = $request->validate([
-            'items'    => ['required', 'array', 'min:1'],
-            'items.*.name'       => ['required', 'string', 'max:300'],
+            'items'              => ['sometimes', 'nullable', 'array'],
+            'items.*.name'       => ['required_with:items', 'string', 'max:300'],
             'items.*.brand'      => ['sometimes', 'nullable', 'string', 'max:100'],
             'items.*.sku'        => ['sometimes', 'nullable', 'string', 'max:100'],
             'items.*.size'       => ['sometimes', 'nullable', 'string', 'max:100'],
-            'items.*.quantity'   => ['required', 'integer', 'min:1'],
-            'items.*.unit_price' => ['required', 'numeric', 'min:0'],
+            'items.*.quantity'   => ['required_with:items', 'integer', 'min:1'],
+            'items.*.unit_price' => ['required_with:items', 'numeric', 'min:0'],
             'currency'           => ['sometimes', 'string', 'size:3'],
             'expires_days'       => ['sometimes', 'integer', 'min:1', 'max:365'],
             'notes'              => ['sometimes', 'nullable', 'string', 'max:3000'],
         ]);
 
+        // Resolve line items — use provided items or fall back to quote data
+        $rawItems = ! empty($data['items']) ? $data['items'] : null;
+
+        if ($rawItems === null) {
+            $rawItems = $this->buildItemsFromQuote($quote);
+        }
+
+        if (empty($rawItems)) {
+            return response()->json([
+                'message' => 'This quote request has no items to create a proposal from. Add quote items first.',
+                'code'    => 'proposal_items_missing',
+            ], 422);
+        }
+
         // Build line items with computed line_total
         $lineItems = array_map(function (array $item) {
-            $lineTotal = round((float) $item['unit_price'] * (int) $item['quantity'], 2);
+            $unitPrice = (float) ($item['unit_price'] ?? 0);
+            $lineTotal = round($unitPrice * (int) $item['quantity'], 2);
             return [
                 'name'       => $item['name'],
                 'brand'      => $item['brand'] ?? null,
                 'sku'        => $item['sku'] ?? null,
                 'size'       => $item['size'] ?? null,
                 'quantity'   => (int) $item['quantity'],
-                'unit_price' => (float) $item['unit_price'],
+                'unit_price' => $unitPrice,
                 'line_total' => $lineTotal,
             ];
-        }, $data['items']);
+        }, $rawItems);
 
         $total = round(array_sum(array_column($lineItems, 'line_total')), 2);
 
@@ -403,6 +424,71 @@ class AdminProposalController extends Controller
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * Auto-build proposal line items from the quote's stored tyre data.
+     *
+     * Priority:
+     *   1. quote.tyre_items JSON array (multi-row structured items)
+     *   2. Legacy quote.tyre_size + quote.quantity (single-row)
+     *
+     * unit_price defaults to 0.00 — admin fills in pricing before mark-ready.
+     * Returns an empty array if no usable item data exists.
+     *
+     * @return array<int, array>
+     */
+    private function buildItemsFromQuote(QuoteRequest $quote): array
+    {
+        $brand = $quote->brand_preference ?: null;
+
+        // 1. Structured multi-row items (preferred)
+        if (! empty($quote->tyre_items) && is_array($quote->tyre_items)) {
+            $items = [];
+            foreach ($quote->tyre_items as $row) {
+                $size     = trim((string) ($row['size'] ?? ''));
+                $qty      = max(1, (int) ($row['quantity'] ?? 1));
+
+                if ($size === '') {
+                    continue;
+                }
+
+                $name = $brand ? "{$brand} {$size}" : $size;
+
+                $items[] = [
+                    'name'       => $name,
+                    'brand'      => $brand,
+                    'sku'        => null,
+                    'size'       => $size,
+                    'quantity'   => $qty,
+                    'unit_price' => 0.00,
+                ];
+            }
+
+            if (! empty($items)) {
+                return $items;
+            }
+        }
+
+        // 2. Legacy single-row tyre_size + quantity
+        $legacySize = trim((string) ($quote->tyre_size ?? ''));
+        if ($legacySize !== '') {
+            // quantity may be a free-text string like "200" or "200 pieces" — extract leading integer
+            preg_match('/^(\d+)/', (string) ($quote->quantity ?? '1'), $qtyMatch);
+            $qty  = max(1, (int) ($qtyMatch[1] ?? 1));
+            $name = $brand ? "{$brand} {$legacySize}" : $legacySize;
+
+            return [[
+                'name'       => $name,
+                'brand'      => $brand,
+                'sku'        => null,
+                'size'       => $legacySize,
+                'quantity'   => $qty,
+                'unit_price' => 0.00,
+            ]];
+        }
+
+        return [];
+    }
 
     private function guardNotConverted(QuoteRequest $quote): void
     {
