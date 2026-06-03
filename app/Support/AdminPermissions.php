@@ -70,6 +70,9 @@ class AdminPermissions
         'crm.view'                => ['super_admin', 'admin', 'order_manager', 'sales_manager'],
         'crm.update'              => ['super_admin', 'admin', 'order_manager'],
 
+        // ── Proposals (CRM-7 proposal lifecycle) ──────────────────────────
+        'proposals.manage'        => ['super_admin', 'admin', 'order_manager', 'sales_manager'],
+
         // ── Contacts ──────────────────────────────────────────────────────
         'contacts.view'           => ['super_admin', 'admin', 'order_manager', 'support'],
 

@@ -21,6 +21,7 @@ class TradeDocumentService
         'commercial_invoice' => 'CI',
         'packing_list'       => 'PL',
         'delivery_note'      => 'DN',
+        'proposal'           => 'QT',
     ];
 
     /**
@@ -352,6 +353,57 @@ class TradeDocumentService
         ]);
 
         return $document;
+    }
+
+    // ── Proposal (CRM-7) ─────────────────────────────────────────────────────
+
+    /**
+     * Generate the next sequential proposal number (QT-YYYY-XXXX).
+     * Uses a separate counter against quote_requests.proposal_number so proposal
+     * numbers are independent of trade_documents sequences.
+     */
+    public function generateProposalNumber(): string
+    {
+        return DB::transaction(function () {
+            $year = now()->year;
+            $base = "QT-{$year}-";
+
+            $last = \App\Models\QuoteRequest::where('proposal_number', 'like', "{$base}%")
+                ->lockForUpdate()
+                ->orderByDesc('proposal_number')
+                ->value('proposal_number');
+
+            $seq = $last ? (int) substr($last, strlen($base)) + 1 : 1;
+
+            return $base . str_pad($seq, 4, '0', STR_PAD_LEFT);
+        });
+    }
+
+    /**
+     * Generate and store the proposal PDF for a quote request.
+     * Stores to proposals/QT-YYYY-XXXX.pdf on the local (private) disk.
+     * Returns the relative path, or null on failure (non-blocking).
+     */
+    public function generateProposalPdf(QuoteRequest $quote): ?string
+    {
+        try {
+            $pdfContent = Pdf::loadView('pdf.proposal', [
+                'quote' => $quote,
+            ])->output();
+
+            $pdfPath = 'proposals/' . $quote->proposal_number . '.pdf';
+            Storage::disk('local')->put($pdfPath, $pdfContent);
+
+            return $pdfPath;
+        } catch (\Throwable $e) {
+            Log::warning('Proposal PDF generation failed', [
+                'quote_ref'       => $quote->ref_number,
+                'proposal_number' => $quote->proposal_number,
+                'error'           => $e->getMessage(),
+            ]);
+
+            return null;
+        }
     }
 
     // -------------------------------------------------------------------------

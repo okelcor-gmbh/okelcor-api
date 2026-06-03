@@ -26,6 +26,7 @@ class SystemHealthController extends Controller
             'inquiries'     => $this->checkInquiryQueue(),
             'data_quality'  => $this->checkDataQuality(),
             'crm'           => $this->checkCrmPipeline(),
+            'proposals'     => $this->checkProposals(),
             'endpoints'     => $this->checkEndpoints(),
         ];
 
@@ -612,6 +613,53 @@ class SystemHealthController extends Controller
                     ];
                 } catch (\Throwable) {
                     return ['status' => 'pass', 'severity' => 'low', 'message' => 'Failed email check unavailable'];
+                }
+            }),
+        ];
+    }
+
+    /** @return array<int, array> */
+    public function checkProposals(): array
+    {
+        return [
+            $this->check('proposals_expired_unsent', 'Expired Sent Proposals', function () {
+                try {
+                    $count = DB::table('quote_requests')
+                        ->where('proposal_status', 'sent')
+                        ->where('proposal_expires_at', '<', now())
+                        ->count();
+
+                    return [
+                        'status'   => $count > 0 ? 'warning' : 'pass',
+                        'severity' => 'low',
+                        'message'  => $count === 0
+                            ? 'No expired proposals awaiting customer response'
+                            : "{$count} sent proposal(s) have passed their expiry date with no response",
+                        'fix_hint' => $count > 0
+                            ? 'Review at GET /api/v1/admin/quote-requests?proposal_status=sent — auto-expire on next customer token load' : null,
+                    ];
+                } catch (\Throwable) {
+                    return ['status' => 'pass', 'severity' => 'low', 'message' => 'Proposal expiry check unavailable'];
+                }
+            }),
+            $this->check('proposals_pending_conversion', 'Accepted Proposals Not Yet Converted', function () {
+                try {
+                    $count = DB::table('quote_requests')
+                        ->where('proposal_status', 'accepted')
+                        ->whereNull('order_id')
+                        ->count();
+
+                    return [
+                        'status'   => $count > 0 ? 'warning' : 'pass',
+                        'severity' => 'low',
+                        'message'  => $count === 0
+                            ? 'No accepted proposals pending order conversion'
+                            : "{$count} accepted proposal(s) have not yet been converted to orders",
+                        'fix_hint' => $count > 0
+                            ? 'Review at GET /api/v1/admin/quote-requests?proposals_pending_conversion=true' : null,
+                    ];
+                } catch (\Throwable) {
+                    return ['status' => 'pass', 'severity' => 'low', 'message' => 'Pending conversion check unavailable'];
                 }
             }),
         ];

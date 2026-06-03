@@ -62,6 +62,8 @@ use App\Http\Controllers\EuDeclarationController;
 use App\Http\Controllers\TradeDocumentController;
 use App\Http\Controllers\DocumentVerificationController;
 use App\Http\Controllers\CustomerQuoteAcceptanceController;
+use App\Http\Controllers\ProposalController;
+use App\Http\Controllers\Admin\AdminProposalController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
@@ -109,6 +111,9 @@ Route::prefix('v1')->group(function () {
         Route::post('quotes/{id}/accept', [CustomerQuoteAcceptanceController::class, 'acceptQuote']);
         Route::post('quotes/{id}/reject', [CustomerQuoteAcceptanceController::class, 'rejectQuote']);
         Route::post('orders/{ref}/accept-order-confirmation', [CustomerQuoteAcceptanceController::class, 'acceptOrderConfirmation']);
+        // CRM-7: Proposal acceptance/rejection by quote ref (authenticated)
+        Route::post('quotes/{ref}/accept-proposal', [CustomerQuoteAcceptanceController::class, 'acceptProposal']);
+        Route::post('quotes/{ref}/reject-proposal', [CustomerQuoteAcceptanceController::class, 'rejectProposal']);
         Route::post('orders/{ref}/reject-order-confirmation', [CustomerQuoteAcceptanceController::class, 'rejectOrderConfirmation']);
 
         // Addresses
@@ -194,6 +199,11 @@ Route::prefix('v1')->group(function () {
         Route::get('documents/acceptance/{token}',         [CustomerQuoteAcceptanceController::class, 'acceptanceInfo']);
         Route::post('documents/acceptance/{token}/accept', [CustomerQuoteAcceptanceController::class, 'acceptByToken']);
         Route::post('documents/acceptance/{token}/reject', [CustomerQuoteAcceptanceController::class, 'rejectByToken']);
+
+        // CRM-7: Public proposal acceptance via token (token = 64-char hex)
+        Route::get('proposals/{token}',         [ProposalController::class, 'show']);
+        Route::post('proposals/{token}/accept', [ProposalController::class, 'accept']);
+        Route::post('proposals/{token}/reject', [ProposalController::class, 'reject']);
 
         // Legacy ref+token routes — kept for backwards compatibility and existing emails
         Route::get('orders/{ref}/accept-confirmation',  [CustomerQuoteAcceptanceController::class, 'confirmationTokenInfo']);
@@ -497,6 +507,18 @@ Route::prefix('v1')->group(function () {
         Route::middleware('permission:crm.update')->group(function () {
             Route::post('customers/{id}/communications', [AdminCommunicationController::class, 'storeForCustomer']);
             Route::post('quote-requests/{id}/communications', [AdminCommunicationController::class, 'storeForQuote']);
+        });
+
+        // -----------------------------------------------------------------
+        // Proposals — CRM-7 (proposals.manage)
+        // -----------------------------------------------------------------
+        Route::middleware('permission:proposals.manage')->group(function () {
+            Route::post('quote-requests/{id}/proposal/draft',         [AdminProposalController::class, 'draft']);
+            Route::post('quote-requests/{id}/proposal/mark-ready',    [AdminProposalController::class, 'markReady']);
+            Route::post('quote-requests/{id}/proposal/send',          [AdminProposalController::class, 'send']);
+            Route::post('quote-requests/{id}/proposal/generate-link', [AdminProposalController::class, 'generateLink']);
+            Route::post('quote-requests/{id}/proposal/void',          [AdminProposalController::class, 'void']);
+            Route::get('quote-requests/{id}/proposal/download',       [AdminProposalController::class, 'download']);
         });
 
         // -----------------------------------------------------------------

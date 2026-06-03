@@ -72,21 +72,52 @@ class QuoteRequest extends Model
         'qualification_status',
         'qualification_reason',
         'internal_notes',
+        // Proposal lifecycle (CRM-7)
+        'proposal_status',
+        'proposal_number',
+        'proposal_items',
+        'proposal_total',
+        'proposal_currency',
+        'proposal_acceptance_token',
+        'proposal_sent_at',
+        'proposal_accepted_at',
+        'proposal_rejected_at',
+        'proposal_expires_at',
+        'proposal_voided_at',
+        'proposal_voided_by',
+        'proposal_void_reason',
+        'proposal_rejection_reason',
+        'proposal_pdf_path',
+        'proposal_accepted_ip',
+        'proposal_accepted_user_agent',
+        'proposal_acceptance_note',
     ];
 
     protected $casts = [
-        'tyre_items'           => 'array',
-        'quality_flags'        => 'array',
-        'customer_accepted_at' => 'datetime',
-        'reviewed_at'          => 'datetime',
-        'assigned_at'             => 'datetime',
-        'follow_up_at'            => 'datetime',
-        'follow_up_completed_at'  => 'datetime',
-        'quality_score'        => 'integer',
+        'tyre_items'               => 'array',
+        'quality_flags'            => 'array',
+        'proposal_items'           => 'array',
+        'proposal_total'           => 'decimal:2',
+        'customer_accepted_at'     => 'datetime',
+        'reviewed_at'              => 'datetime',
+        'assigned_at'              => 'datetime',
+        'follow_up_at'             => 'datetime',
+        'follow_up_completed_at'   => 'datetime',
+        'quality_score'            => 'integer',
+        // Proposal timestamps (CRM-7)
+        'proposal_sent_at'         => 'datetime',
+        'proposal_accepted_at'     => 'datetime',
+        'proposal_rejected_at'     => 'datetime',
+        'proposal_expires_at'      => 'datetime',
+        'proposal_voided_at'       => 'datetime',
     ];
 
     protected $hidden = [
         'ip_address',
+        'proposal_acceptance_token',
+        'proposal_accepted_ip',
+        'proposal_accepted_user_agent',
+        'proposal_pdf_path',
     ];
 
     public function customer(): BelongsTo

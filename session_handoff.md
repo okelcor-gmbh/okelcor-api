@@ -1,5 +1,267 @@
 # Session Handoff — Okelcor API
-Last updated: 2026-05-30 (session 38 — CRM-6 fix + full CRM pipeline complete)
+Last updated: 2026-06-03 (session 39 — CRM-7 Sales Pipeline & Proposal Management)
+
+---
+
+## Session 39 — CRM-7: Sales Pipeline & Proposal Management (complete)
+
+### What was built
+
+A full proposal lifecycle layer on top of the existing quote/lead pipeline, connecting
+qualified leads to orders via a controlled Proposal → Customer Acceptance → Order flow.
+
+### Proposal status flow
+
+```
+Quote Request submitted
+  → qualification_status = qualified (CRM-2/3)
+  → Admin creates proposal draft (proposal_status = draft)
+  → Admin marks ready (proposal_status = ready) — PDF generated
+  → Admin sends proposal (proposal_status = sent) — email sent, token issued
+      Customer accepts (proposal_status = accepted) — via token link or auth portal
+      Customer rejects (proposal_status = rejected) — reason captured
+      Proposal expires (proposal_status = expired) — auto on token load past expiry
+  → Admin converts to order (proposal_status = converted)
+      → Order created → AB auto-generated
+      → Customer accepts AB → Proforma unlocked
+      → PI sent → deposit requested
+```
+
+### Migration
+
+**`2026_06_02_000001_add_proposal_fields_to_quote_requests_table`**
+
+New columns on `quote_requests`:
+
+| Column | Type | Purpose |
+|---|---|---|
+| `proposal_status` | ENUM(none/draft/ready/sent/accepted/rejected/expired/converted) DEFAULT 'none' | Proposal lifecycle stage |
+| `proposal_number` | VARCHAR(50) nullable | QT-YYYY-XXXX sequential number |
+| `proposal_items` | JSON nullable | Snapshot of line items at draft time |
+| `proposal_total` | DECIMAL(10,2) nullable | Total from proposal items |
+| `proposal_currency` | VARCHAR(3) DEFAULT 'EUR' | Currency |
+| `proposal_acceptance_token` | VARCHAR(128) nullable unique | 64-char hex token for public acceptance |
+| `proposal_sent_at` | TIMESTAMP nullable | When sent to customer |
+| `proposal_accepted_at` | TIMESTAMP nullable | When customer accepted |
+| `proposal_rejected_at` | TIMESTAMP nullable | When customer rejected |
+| `proposal_expires_at` | TIMESTAMP nullable | Token expiry (default 30 days from send) |
+| `proposal_voided_at` | TIMESTAMP nullable | When voided by admin |
+| `proposal_voided_by` | FK → admin_users nullable | Admin who voided |
+| `proposal_void_reason` | TEXT nullable | Void reason |
+| `proposal_rejection_reason` | TEXT nullable | Customer rejection reason |
+| `proposal_pdf_path` | VARCHAR(500) nullable | Private disk path to PDF |
+| `proposal_accepted_ip` | VARCHAR(45) nullable | Acceptance IP (hidden from API) |
+| `proposal_accepted_user_agent` | TEXT nullable | Acceptance UA (hidden from API) |
+| `proposal_acceptance_note` | VARCHAR(500) nullable | Optional customer note |
+
+### Proposal number format
+
+`QT-YYYY-XXXX` — sequential per year, locked via `lockForUpdate()` on `quote_requests.proposal_number` column.
+Independent counter from trade document numbers (AB/PI/CI/PL/DN).
+
+### Admin endpoints
+
+All under `permission:proposals.manage` (roles: super_admin, admin, order_manager, sales_manager):
+
+| Endpoint | Description |
+|---|---|
+| `POST /admin/quote-requests/{id}/proposal/draft` | Create/update proposal draft. Body: `{ items[], currency?, expires_days?, notes? }` |
+| `POST /admin/quote-requests/{id}/proposal/mark-ready` | Mark draft as ready; generates PDF |
+| `POST /admin/quote-requests/{id}/proposal/send` | Send proposal email + generate token. Body: `{ recipient_email?, message?, expires_days? }` |
+| `POST /admin/quote-requests/{id}/proposal/generate-link` | Generate/rotate acceptance link without emailing |
+| `POST /admin/quote-requests/{id}/proposal/void` | Void proposal. Body: `{ reason }` (required) |
+| `GET /admin/quote-requests/{id}/proposal/download` | Download proposal PDF |
+
+### Public (token-based) endpoints
+
+Rate limited: `throttle:acceptance-links` (20/min):
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/v1/proposals/{token}` | Safe proposal summary — no PII, no internal notes. Auto-expires if past expiry. |
+| `POST /api/v1/proposals/{token}/accept` | Customer accepts proposal. Body: `{ note? }` |
+| `POST /api/v1/proposals/{token}/reject` | Customer rejects proposal. Body: `{ reason? }` |
+
+Token: 64-char hex (`bin2hex(random_bytes(32))`). Default TTL: 30 days. Token is invalidated (set to null) after accept/reject.
+
+### Authenticated customer endpoints
+
+| Endpoint | Description |
+|---|---|
+| `POST /api/v1/auth/quotes/{ref}/accept-proposal` | Logged-in customer accepts by quote ref_number |
+| `POST /api/v1/auth/quotes/{ref}/reject-proposal` | Logged-in customer rejects by quote ref_number |
+
+### Convert-to-order guard (CRM-7)
+
+`POST /admin/quote-requests/{id}/convert-to-order` now enforces:
+
+| Condition | Behaviour |
+|---|---|
+| `proposal_status = 'none'` (pre-CRM-7 quote) | Allowed — backwards compatible |
+| `proposal_status = 'accepted'` | Allowed — normal flow |
+| Any other status + non-super_admin | 409 `code: proposal_not_accepted` |
+| Any other status + super_admin | Allowed with warning log entry |
+
+On successful conversion: `proposal_status` is set to `'converted'`.
+
+### formatList / formatDetail new proposal fields
+
+Both admin quote list and detail responses now include:
+- `proposal_status`, `proposal_number`, `proposal_total`, `proposal_currency`
+- `proposal_sent_at`, `proposal_accepted_at`, `proposal_rejected_at`, `proposal_expires_at`
+- `proposal_voided_at`, `proposal_voided_by`, `proposal_void_reason`
+- `proposal_rejection_reason`, `proposal_acceptance_note`
+- `has_proposal_pdf` (bool), `proposal_expired` (computed bool), `proposal_download_url`
+- `proposal_items` (detail only)
+
+### summary() new counts
+
+`GET /admin/quote-requests/summary` now returns:
+- `proposals_draft_count`, `proposals_ready_count`, `proposals_sent_count`
+- `proposals_accepted_count`, `proposals_rejected_count`, `proposals_expired_count`
+- `proposals_pending_conversion` — accepted proposals not yet converted to order
+
+### index() new filter
+
+`GET /admin/quote-requests?proposal_status=accepted` — filter by proposal_status
+`GET /admin/quote-requests?proposals_pending_conversion=true` — accepted, no order yet
+
+### Email template
+
+`ProposalEmail` mailable:
+- Subject: `Proposal from Okelcor — {proposal_number}`
+- HTML + plain text views
+- Includes: customer name/company, line items table, total, valid-until date
+- Accept + Decline CTA buttons pointing to `{FRONTEND_URL}/proposals/accept/{token}`
+- Reply-To: sender admin email
+
+### Proposal PDF
+
+`resources/views/pdf/proposal.blade.php` — DomPDF template:
+- Matching Okelcor brand style (orange accent, partials reused)
+- Bill-to block, proposal details table, sequential items table with totals
+- Delivery terms (incoterm), lead time, payment terms, bank block
+- Validity disclaimer
+- Stored at `proposals/QT-YYYY-XXXX.pdf` on local (private) disk
+
+### Communication log
+
+All proposal actions automatically log to `customer_communications`:
+- `proposal_drafted`, `proposal_ready`, `proposal_sent` (type: system/email)
+- `proposal_voided` (type: system)
+- `proposal_accepted`, `proposal_rejected` (type: system, direction: inbound, from public/customer controllers)
+
+### System health — proposals group
+
+New `proposals` group in `GET /admin/system/health`:
+- `proposals_expired_unsent`: warning if any sent proposals are past expiry with no response
+- `proposals_pending_conversion`: warning if any accepted proposals not yet converted to order
+
+### Audit log events
+
+All via `Log::info('[event_name]', [...])`:
+- `proposal_drafted` — `POST /proposal/draft`
+- `proposal_ready` — `POST /proposal/mark-ready`
+- `proposal_sent` — `POST /proposal/send` (includes email success/failure flag)
+- `proposal_send_failed` — email failure in send (error level)
+- `proposal_voided` — `POST /proposal/void`
+- `proposal_accepted` — both public token and authenticated routes
+- `proposal_rejected` — both public token and authenticated routes
+- `proposal_expired` — auto-expire on token load
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `database/migrations/2026_06_02_000001_add_proposal_fields_to_quote_requests_table.php` | New — 18 proposal columns |
+| `app/Models/QuoteRequest.php` | Added all proposal_* to `$fillable`, `$casts`, and `$hidden` |
+| `app/Services/TradeDocumentService.php` | Added `'proposal' => 'QT'` to PREFIXES; added `generateProposalNumber()` and `generateProposalPdf()` |
+| `app/Http/Controllers/Admin/AdminProposalController.php` | New — draft/markReady/send/generateLink/void/download |
+| `app/Http/Controllers/ProposalController.php` | New — public show/accept/reject (token-based) |
+| `app/Http/Controllers/CustomerQuoteAcceptanceController.php` | Added `acceptProposal()` and `rejectProposal()` (auth customer, by ref) |
+| `app/Mail/ProposalEmail.php` | New mailable |
+| `resources/views/emails/proposal-email.blade.php` | New HTML email template |
+| `resources/views/emails/proposal-email-text.blade.php` | New plain-text email template |
+| `resources/views/pdf/proposal.blade.php` | New DomPDF proposal template |
+| `app/Http/Controllers/Admin/AdminQuoteRequestController.php` | CRM-7 guard in `convertToOrder()`; proposal fields in `formatList()`/`formatDetail()`/`summary()`; `proposal_status` + `proposals_pending_conversion` filters in `index()` |
+| `app/Support/AdminPermissions.php` | Added `proposals.manage` permission |
+| `app/Http/Controllers/Admin/SystemHealthController.php` | Added `proposals` group: `proposals_expired_unsent` + `proposals_pending_conversion` checks |
+| `routes/api.php` | 11 new proposal routes (2 use imports + 6 admin + 3 public + 2 auth customer) |
+
+### Deploy steps
+
+```bash
+cd /home/u978121777/domains/okelcor.com/public_html/okelcor-api
+git fetch origin && git reset --hard origin/main
+composer install --no-dev
+/opt/alt/php83/usr/bin/php artisan migrate --force
+/opt/alt/php83/usr/bin/php artisan config:clear
+/opt/alt/php83/usr/bin/php artisan config:cache
+/opt/alt/php83/usr/bin/php artisan route:cache
+/opt/alt/php83/usr/bin/php artisan view:clear
+```
+
+**1 migration:** `2026_06_02_000001_add_proposal_fields_to_quote_requests_table`
+— additive ALTER TABLE on `quote_requests`. No data loss.
+All existing rows default to `proposal_status = 'none'` (backwards compatible).
+
+### Test checklist
+
+```
+# 1. Draft proposal
+POST /admin/quote-requests/{id}/proposal/draft
+  { "items": [{"name":"Michelin 205/55R16","brand":"Michelin","quantity":200,"unit_price":49.50}] }
+→ 201, proposal_number=QT-2026-0001, proposal_status=draft
+
+# 2. Mark ready (generates PDF)
+POST /admin/quote-requests/{id}/proposal/mark-ready
+→ 200, proposal_status=ready, has_proposal_pdf=true
+
+# 3. Send proposal
+POST /admin/quote-requests/{id}/proposal/send
+→ 200, proposal_status=sent, qualification_status=proposal_sent
+→ ProposalEmail sent to quote.email with accept/reject links
+→ CustomerCommunication row created (type=email, status=sent)
+
+# 4. Public token preview
+GET /api/v1/proposals/{token}
+→ 200, safe proposal info (no internal_notes, no admin data)
+→ expires_at, proposal_total, proposal_items
+
+# 5. Customer accepts via token
+POST /api/v1/proposals/{token}/accept
+→ 200, proposal_status=accepted, token nulled
+
+# 6. Admin convert-to-order now allowed
+POST /admin/quote-requests/{id}/convert-to-order { items, payment_method, ... }
+→ 201, order created, proposal_status=converted
+
+# 7. Rejected proposal blocks non-super_admin conversion
+POST /admin/quote-requests/{id}/proposal/send → send
+(Customer rejects)
+POST /admin/quote-requests/{id}/convert-to-order (as admin, not super_admin)
+→ 409, code=proposal_not_accepted
+
+# 8. Super admin override
+POST /admin/quote-requests/{id}/convert-to-order (as super_admin, proposal_status=rejected)
+→ 201 (warning logged), order created
+
+# 9. Void proposal
+POST /admin/quote-requests/{id}/proposal/void { "reason": "Pricing to be revised" }
+→ 200, proposal_status=none, token cleared
+
+# 10. Health check shows pending conversion
+GET /admin/system/health
+→ proposals.proposals_pending_conversion: warning if accepted proposals not yet ordered
+
+# 11. Auth customer accepts
+POST /api/v1/auth/quotes/{ref}/accept-proposal
+→ 200, proposal_status=accepted
+
+# 12. Old quote (proposal_status=none) converts as before
+POST /admin/quote-requests/{id}/convert-to-order (proposal_status=none)
+→ 201 — no proposal check applied
+```
 
 ---
 

@@ -74,6 +74,15 @@ class AdminQuoteRequestController extends Controller
             $query->where('customer_id', $request->integer('customer_id'));
         }
 
+        // CRM-7 proposal filters
+        if ($request->filled('proposal_status')) {
+            $query->where('proposal_status', $request->proposal_status);
+        }
+
+        if ($request->boolean('proposals_pending_conversion')) {
+            $query->where('proposal_status', 'accepted')->whereNull('order_id');
+        }
+
         if ($request->filled('customer_email')) {
             $query->where('email', $request->customer_email);
         }
@@ -153,6 +162,28 @@ class AdminQuoteRequestController extends Controller
             return response()->json([
                 'message' => 'Only quotes with status "quoted" can be converted to an order.',
             ], 422);
+        }
+
+        // CRM-7 Guard: proposal must be accepted (unless pre-CRM-7 quote or super_admin override)
+        $proposalStatus = $quote->proposal_status ?? 'none';
+        $isSuperAdmin   = $request->user()?->role === 'super_admin';
+
+        if ($proposalStatus !== 'none' && $proposalStatus !== 'accepted') {
+            if (! $isSuperAdmin) {
+                return response()->json([
+                    'message'          => 'Customer must accept the proposal before this lead can become an order.',
+                    'code'             => 'proposal_not_accepted',
+                    'proposal_status'  => $proposalStatus,
+                    'proposal_number'  => $quote->proposal_number,
+                ], 409);
+            }
+
+            // super_admin override — log it and continue
+            Log::warning('Super admin converting quote to order without proposal acceptance', [
+                'quote_ref'       => $quote->ref_number,
+                'proposal_status' => $proposalStatus,
+                'by_admin'        => $request->user()?->id,
+            ]);
         }
 
         // Guard: prevent duplicate conversion
@@ -275,8 +306,13 @@ class AdminQuoteRequestController extends Controller
                 'is_reverse_charge' => $tax['is_reverse_charge'],
             ]);
 
-            // Link quote to order
-            $quote->update(['order_id' => $order->id]);
+            // Link quote to order and mark proposal as converted (CRM-7)
+            $quote->update([
+                'order_id'        => $order->id,
+                'proposal_status' => $quote->proposal_status && $quote->proposal_status !== 'none'
+                    ? 'converted'
+                    : $quote->proposal_status,
+            ]);
 
             // Audit log
             $this->writeConversionLog($request, $order, $quote->ref_number);
@@ -366,24 +402,35 @@ class AdminQuoteRequestController extends Controller
 
         return response()->json([
             'data' => [
-                'new_count'           => (clone $base)->where('qualification_status', 'new')->count(),
-                'needs_review_count'  => (clone $base)->where('qualification_status', 'needs_review')->count(),
-                'qualified_count'     => (clone $base)->where('qualification_status', 'qualified')->count(),
-                'proposal_sent_count' => (clone $base)->where('qualification_status', 'proposal_sent')->count(),
-                'converted_count'     => (clone $base)->where('qualification_status', 'converted')->count(),
-                'spam_count'          => (clone $base)->where('qualification_status', 'spam')->count(),
-                'follow_up_due_count' => (clone $base)
+                'new_count'                    => (clone $base)->where('qualification_status', 'new')->count(),
+                'needs_review_count'           => (clone $base)->where('qualification_status', 'needs_review')->count(),
+                'qualified_count'              => (clone $base)->where('qualification_status', 'qualified')->count(),
+                'proposal_sent_count'          => (clone $base)->where('qualification_status', 'proposal_sent')->count(),
+                'converted_count'              => (clone $base)->where('qualification_status', 'converted')->count(),
+                'spam_count'                   => (clone $base)->where('qualification_status', 'spam')->count(),
+                'follow_up_due_count'          => (clone $base)
                     ->whereNotNull('follow_up_at')
                     ->where('follow_up_at', '<=', $now)
                     ->whereNotIn('qualification_status', $active)
                     ->count(),
-                'unassigned_count'    => (clone $base)
+                'unassigned_count'             => (clone $base)
                     ->whereNull('assigned_to')
                     ->whereNotIn('qualification_status', $active)
                     ->count(),
-                'high_priority_count' => (clone $base)
+                'high_priority_count'          => (clone $base)
                     ->whereIn('lead_priority', ['high', 'urgent'])
                     ->whereNotIn('qualification_status', $active)
+                    ->count(),
+                // CRM-7 proposal counts
+                'proposals_draft_count'        => (clone $base)->where('proposal_status', 'draft')->count(),
+                'proposals_ready_count'        => (clone $base)->where('proposal_status', 'ready')->count(),
+                'proposals_sent_count'         => (clone $base)->where('proposal_status', 'sent')->count(),
+                'proposals_accepted_count'     => (clone $base)->where('proposal_status', 'accepted')->count(),
+                'proposals_rejected_count'     => (clone $base)->where('proposal_status', 'rejected')->count(),
+                'proposals_expired_count'      => (clone $base)->where('proposal_status', 'expired')->count(),
+                'proposals_pending_conversion' => (clone $base)
+                    ->where('proposal_status', 'accepted')
+                    ->whereNull('order_id')
                     ->count(),
             ],
             'message' => 'success',
@@ -778,6 +825,15 @@ class AdminQuoteRequestController extends Controller
             'attachment_original_name' => $r->attachment_original_name,
             'attachment_size'          => $r->attachment_size,
             'attachment_mime'          => $r->attachment_mime,
+            // Proposal (CRM-7)
+            'proposal_status'          => $r->proposal_status ?? 'none',
+            'proposal_number'          => $r->proposal_number,
+            'proposal_total'           => $r->proposal_total ? (float) $r->proposal_total : null,
+            'proposal_currency'        => $r->proposal_currency ?? 'EUR',
+            'proposal_sent_at'         => $r->proposal_sent_at?->toIso8601String(),
+            'proposal_accepted_at'     => $r->proposal_accepted_at?->toIso8601String(),
+            'proposal_rejected_at'     => $r->proposal_rejected_at?->toIso8601String(),
+            'proposal_expires_at'      => $r->proposal_expires_at?->toIso8601String(),
         ];
     }
 
@@ -865,6 +921,28 @@ class AdminQuoteRequestController extends Controller
             'attachment_original_name' => $r->attachment_original_name,
             'attachment_size'          => $r->attachment_size,
             'attachment_mime'          => $r->attachment_mime,
+
+            // Proposal (CRM-7)
+            'proposal_status'            => $r->proposal_status ?? 'none',
+            'proposal_number'            => $r->proposal_number,
+            'proposal_items'             => $r->proposal_items ?? [],
+            'proposal_total'             => $r->proposal_total ? (float) $r->proposal_total : null,
+            'proposal_currency'          => $r->proposal_currency ?? 'EUR',
+            'proposal_sent_at'           => $r->proposal_sent_at?->toIso8601String(),
+            'proposal_accepted_at'       => $r->proposal_accepted_at?->toIso8601String(),
+            'proposal_rejected_at'       => $r->proposal_rejected_at?->toIso8601String(),
+            'proposal_expires_at'        => $r->proposal_expires_at?->toIso8601String(),
+            'proposal_voided_at'         => $r->proposal_voided_at?->toIso8601String(),
+            'proposal_voided_by'         => $r->proposal_voided_by,
+            'proposal_void_reason'       => $r->proposal_void_reason,
+            'proposal_rejection_reason'  => $r->proposal_rejection_reason,
+            'proposal_acceptance_note'   => $r->proposal_acceptance_note,
+            'has_proposal_pdf'           => (bool) $r->getRawOriginal('proposal_pdf_path'),
+            'proposal_expired'           => $r->proposal_expires_at && $r->proposal_expires_at->isPast()
+                                            && ($r->proposal_status ?? 'none') === 'sent',
+            'proposal_download_url'      => $r->getRawOriginal('proposal_pdf_path')
+                                            ? url('/api/v1/admin/quote-requests/' . $r->id . '/proposal/download')
+                                            : null,
         ];
     }
 

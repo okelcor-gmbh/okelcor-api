@@ -502,6 +502,139 @@ class CustomerQuoteAcceptanceController extends Controller
         ]);
     }
 
+    // ── CRM-7: Proposal acceptance for logged-in customers ───────────────────
+
+    /**
+     * POST /api/v1/auth/quotes/{ref}/accept-proposal
+     *
+     * Authenticated customer accepts a CRM-7 proposal by quote ref_number.
+     * Sets proposal_status = 'accepted'.
+     * Does NOT auto-create an order — admin controls that step.
+     */
+    public function acceptProposal(Request $request, string $ref): JsonResponse
+    {
+        $customer = $request->user();
+
+        $quote = QuoteRequest::where('ref_number', $ref)->first();
+
+        if (! $quote || ! $this->customerOwnsQuote($customer, $quote)) {
+            return response()->json(['message' => 'Quote not found.'], 404);
+        }
+
+        if (! in_array($quote->proposal_status, ['sent', 'ready'], true)) {
+            return response()->json([
+                'message' => 'No active proposal is available for acceptance.',
+                'code'    => 'no_active_proposal',
+                'proposal_status' => $quote->proposal_status ?? 'none',
+            ], 422);
+        }
+
+        if ($quote->proposal_status === 'accepted') {
+            return response()->json([
+                'message' => 'Proposal has already been accepted.',
+                'data'    => ['proposal_status' => 'accepted'],
+            ], 409);
+        }
+
+        if ($quote->proposal_expires_at && $quote->proposal_expires_at->isPast()) {
+            $quote->update(['proposal_status' => 'expired', 'proposal_acceptance_token' => null]);
+            return response()->json([
+                'message' => 'This proposal has expired. Please contact Okelcor for an updated proposal.',
+                'code'    => 'proposal_expired',
+            ], 410);
+        }
+
+        $request->validate([
+            'note' => ['sometimes', 'nullable', 'string', 'max:1000'],
+        ]);
+
+        $quote->update([
+            'proposal_status'              => 'accepted',
+            'proposal_accepted_at'         => now(),
+            'proposal_accepted_ip'         => $request->ip(),
+            'proposal_accepted_user_agent' => $request->userAgent(),
+            'proposal_acceptance_note'     => $request->input('note'),
+            'proposal_acceptance_token'    => null,
+        ]);
+
+        Log::info('[proposal_accepted] Customer accepted proposal (authenticated)', [
+            'event'           => 'proposal_accepted',
+            'quote_ref'       => $quote->ref_number,
+            'proposal_number' => $quote->proposal_number,
+            'customer_id'     => $customer->id,
+        ]);
+
+        return response()->json([
+            'data'    => ['proposal_status' => 'accepted'],
+            'message' => 'Proposal accepted. Okelcor will proceed to create your order.',
+        ]);
+    }
+
+    /**
+     * POST /api/v1/auth/quotes/{ref}/reject-proposal
+     *
+     * Authenticated customer rejects a CRM-7 proposal by quote ref_number.
+     */
+    public function rejectProposal(Request $request, string $ref): JsonResponse
+    {
+        $customer = $request->user();
+
+        $quote = QuoteRequest::where('ref_number', $ref)->first();
+
+        if (! $quote || ! $this->customerOwnsQuote($customer, $quote)) {
+            return response()->json(['message' => 'Quote not found.'], 404);
+        }
+
+        if ($quote->proposal_status === 'accepted') {
+            return response()->json([
+                'message' => 'Proposal has already been accepted and cannot be rejected.',
+            ], 409);
+        }
+
+        if ($quote->proposal_status === 'rejected') {
+            return response()->json([
+                'message' => 'Proposal has already been rejected.',
+                'data'    => ['proposal_status' => 'rejected'],
+            ], 409);
+        }
+
+        if ($quote->proposal_status === 'converted') {
+            return response()->json([
+                'message' => 'This proposal has been converted to an order and cannot be rejected.',
+            ], 409);
+        }
+
+        if (! in_array($quote->proposal_status, ['sent', 'ready'], true)) {
+            return response()->json([
+                'message' => 'No active proposal is available for rejection.',
+                'code'    => 'no_active_proposal',
+            ], 422);
+        }
+
+        $request->validate([
+            'reason' => ['sometimes', 'nullable', 'string', 'max:1000'],
+        ]);
+
+        $quote->update([
+            'proposal_status'           => 'rejected',
+            'proposal_rejected_at'      => now(),
+            'proposal_rejection_reason' => $request->input('reason'),
+            'proposal_acceptance_token' => null,
+        ]);
+
+        Log::info('[proposal_rejected] Customer rejected proposal (authenticated)', [
+            'event'           => 'proposal_rejected',
+            'quote_ref'       => $quote->ref_number,
+            'proposal_number' => $quote->proposal_number,
+            'customer_id'     => $customer->id,
+            'reason'          => $request->input('reason'),
+        ]);
+
+        return response()->json([
+            'message' => 'Proposal rejected. Okelcor will be in touch shortly.',
+        ]);
+    }
+
     // -------------------------------------------------------------------------
 
     /**
