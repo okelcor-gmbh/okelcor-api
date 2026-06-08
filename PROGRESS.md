@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-06-03 | Branch: `main` | Latest commit: `5e5d3dd`
+Last updated: 2026-06-08 | Branch: `main` | Latest commit: `ca765a3`
 
 ---
 
@@ -126,6 +126,7 @@ Last updated: 2026-06-03 | Branch: `main` | Latest commit: `5e5d3dd`
 | Authenticated customer acceptance (auth/quotes/{ref}/accept-proposal) | 🔧 | |
 | Convert-to-order guard (must be accepted, super_admin override) | 🔧 | |
 | Proposal health checks in system health | 🔧 | |
+| Fix 3 — `[proposal_items_missing]` diagnostic log on draft | 🔧 | Confirmed draft reads persisted `quote_request_items`; logs request-vs-persisted item counts |
 
 ---
 
@@ -148,7 +149,10 @@ Last updated: 2026-06-03 | Branch: `main` | Latest commit: `5e5d3dd`
 | Customer portal access requests (`/auth/customer/access-requests`) | 🔧 | no internal risk/health exposed |
 | Timeline hooks in convert-to-customer + proposal acceptance | 🔧 | |
 | Buyer lifecycle health checks in system health | 🔧 | pending approvals / high-risk / pending access requests |
-| Backend feature tests (12, MySQL) | ✅ | `Crm8BuyerLifecycleTest` — 12 passed / 57 assertions |
+| **Fix** — approval unlocks customer login | 🔧 | Granting profiles now set onboarding_status=active + is_active + status=active (self-registered); lead-converted stay in invite flow |
+| **Fix** — approval email (`ApprovedAccountEmail`) | 🔧 | Sent on approve/approval-profile for approved_buyer/wholesale_buyer only; logs + timelines sent/failed; never rolls back approval |
+| **Fix** — `/auth/me` + login return fresh CRM-8 fields | 🔧 | is_active, buyer_tier, verification_status; presenter adds login_ready / pending_email_verification / pending_invitation |
+| Backend feature tests (15, MySQL) | ✅ | `Crm8BuyerLifecycleTest` — 15 passed / 75 assertions (incl. end-to-end login after approval) |
 
 ---
 
