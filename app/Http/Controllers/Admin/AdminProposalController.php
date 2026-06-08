@@ -49,7 +49,12 @@ class AdminProposalController extends Controller
             'notes'              => ['sometimes', 'nullable', 'string', 'max:3000'],
         ]);
 
-        // Resolve line items — use provided items or fall back to quote data
+        // Resolve line items — use provided items or fall back to persisted quote items.
+        // `items` relationship => quote_request_items table (the same table the
+        // AdminQuoteRequestItemController editor writes to).
+        $requestItemsCount   = is_array($data['items'] ?? null) ? count($data['items']) : 0;
+        $persistedItemsCount = $quote->items()->count();
+
         $rawItems = ! empty($data['items']) ? $data['items'] : null;
 
         if ($rawItems === null) {
@@ -57,6 +62,20 @@ class AdminProposalController extends Controller
         }
 
         if (empty($rawItems)) {
+            // TEMP DIAGNOSTIC (CRM-7 Fix 3): reveals request-vs-persisted mismatch.
+            // Remove once the proposal/items source-of-truth issue is confirmed resolved.
+            Log::warning('[proposal_items_missing] No items resolved for proposal draft', [
+                'event'                  => 'proposal_items_missing',
+                'quote_request_id'       => $quote->id,
+                'quote_ref'              => $quote->ref_number,
+                'request_items_count'    => $requestItemsCount,
+                'persisted_items_count'  => $persistedItemsCount,
+                'relationship_name_used' => 'items', // QuoteRequest::items() => quote_request_items
+                'tyre_items_count'       => is_array($quote->tyre_items) ? count($quote->tyre_items) : 0,
+                'has_legacy_tyre_size'   => filled($quote->tyre_size),
+                'by_admin'               => $request->user()?->id,
+            ]);
+
             return response()->json([
                 'message' => 'This quote request has no items to create a proposal from. Add quote items first.',
                 'code'    => 'proposal_items_missing',
