@@ -10,6 +10,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\OrderLog;
 use App\Models\QuoteRequest;
+use App\Services\CustomerTimelineService;
 use App\Services\PromoCodeService;
 use App\Services\SecurityEventService;
 use App\Services\StripeService;
@@ -572,6 +573,14 @@ class AdminQuoteRequestController extends Controller
                 'by_admin'    => $request->user()?->id,
             ]);
 
+            // CRM-8 timeline
+            CustomerTimelineService::record(
+                $existing->id, 'lead_converted', 'Lead linked to customer',
+                "Lead {$quote->ref_number} linked to this existing customer.",
+                ['quote_ref' => $quote->ref_number, 'quote_request_id' => $quote->id],
+                $request->user()?->id
+            );
+
             return response()->json([
                 'success'     => true,
                 'action'      => 'linked',
@@ -631,6 +640,20 @@ class AdminQuoteRequestController extends Controller
             'action'      => 'created',
             'by_admin'    => $request->user()?->id,
         ]);
+
+        // CRM-8 timeline — new buyer enters the lifecycle pending approval.
+        CustomerTimelineService::record(
+            $customer->id, 'customer_created', 'Customer created',
+            "Customer account created from lead {$quote->ref_number} (pending review).",
+            ['quote_ref' => $quote->ref_number, 'source' => 'lead_conversion'],
+            $request->user()?->id
+        );
+        CustomerTimelineService::record(
+            $customer->id, 'lead_converted', 'Lead converted to customer',
+            "Lead {$quote->ref_number} converted to a customer account.",
+            ['quote_ref' => $quote->ref_number, 'quote_request_id' => $quote->id],
+            $request->user()?->id
+        );
 
         return response()->json([
             'success'     => true,

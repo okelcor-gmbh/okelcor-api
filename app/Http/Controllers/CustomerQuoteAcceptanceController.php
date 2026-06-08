@@ -6,6 +6,7 @@ use App\Models\Order;
 use App\Models\OrderLog;
 use App\Models\QuoteRequest;
 use App\Models\TradeDocument;
+use App\Services\CustomerTimelineService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -563,6 +564,13 @@ class CustomerQuoteAcceptanceController extends Controller
             'proposal_number' => $quote->proposal_number,
             'customer_id'     => $customer->id,
         ]);
+
+        // CRM-8 timeline — a key lifecycle milestone toward buyer approval.
+        CustomerTimelineService::record(
+            $customer->id, 'proposal_accepted', 'Proposal accepted',
+            "Customer accepted proposal {$quote->proposal_number} (quote {$quote->ref_number}).",
+            ['quote_ref' => $quote->ref_number, 'proposal_number' => $quote->proposal_number]
+        );
 
         return response()->json([
             'data'    => ['proposal_status' => 'accepted'],

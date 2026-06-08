@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Customer;
 use App\Models\CustomerCommunication;
 use App\Models\QuoteRequest;
+use App\Services\CustomerTimelineService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -108,6 +110,17 @@ class ProposalController extends Controller
         $this->logCommunication($quote, 'system', 'inbound',
             "Proposal {$quote->proposal_number} accepted",
             'Customer accepted the proposal via the acceptance link.');
+
+        // CRM-8 timeline — resolve the customer this quote belongs to.
+        $customerId = $quote->customer_id
+            ?? Customer::where('email', $quote->email)->value('id');
+        if ($customerId) {
+            CustomerTimelineService::record(
+                $customerId, 'proposal_accepted', 'Proposal accepted',
+                "Customer accepted proposal {$quote->proposal_number} (quote {$quote->ref_number}) via link.",
+                ['quote_ref' => $quote->ref_number, 'proposal_number' => $quote->proposal_number]
+            );
+        }
 
         return response()->json([
             'data'    => ['proposal_status' => 'accepted'],

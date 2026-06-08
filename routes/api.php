@@ -38,6 +38,10 @@ use App\Http\Controllers\Admin\ProductImportController;
 use App\Http\Controllers\Admin\SupplierController;
 use App\Http\Controllers\Admin\AdminCustomerController;
 use App\Http\Controllers\Admin\AdminCustomerDataQualityController;
+use App\Http\Controllers\Admin\AdminCustomerApprovalController;
+use App\Http\Controllers\Admin\AdminCustomerVerificationController;
+use App\Http\Controllers\Admin\AdminCustomerAccessRequestController;
+use App\Http\Controllers\CustomerAccessRequestController;
 use App\Http\Controllers\Admin\AdminCrmFollowUpController;
 use App\Http\Controllers\Admin\AdminCommunicationController;
 use App\Http\Controllers\Admin\AdminCrmEmailController;
@@ -116,6 +120,10 @@ Route::prefix('v1')->group(function () {
         Route::post('quotes/{ref}/accept-proposal', [CustomerQuoteAcceptanceController::class, 'acceptProposal']);
         Route::post('quotes/{ref}/reject-proposal', [CustomerQuoteAcceptanceController::class, 'rejectProposal']);
         Route::post('orders/{ref}/reject-order-confirmation', [CustomerQuoteAcceptanceController::class, 'rejectOrderConfirmation']);
+
+        // CRM-8: Customer-initiated access requests (portal)
+        Route::get('customer/access-requests', [CustomerAccessRequestController::class, 'index']);
+        Route::post('customer/access-requests', [CustomerAccessRequestController::class, 'store']);
 
         // Addresses
         Route::get('addresses', [CustomerAddressController::class, 'index']);
@@ -637,6 +645,32 @@ Route::prefix('v1')->group(function () {
             Route::post('customers/{id}/data-quality/ignore-duplicate', [AdminCustomerDataQualityController::class, 'ignoreDuplicate']);
             Route::post('customers/{id}/data-quality/link-duplicate', [AdminCustomerDataQualityController::class, 'linkDuplicate']);
             Route::post('customers/{id}/data-quality/merge-preview', [AdminCustomerDataQualityController::class, 'mergePreview']);
+        });
+
+        // -----------------------------------------------------------------
+        // CRM-8 Buyer lifecycle — reads (customers.view), writes (customers.manage)
+        // -----------------------------------------------------------------
+        Route::middleware('permission:customers.view')->group(function () {
+            Route::get('customer-approvals', [AdminCustomerApprovalController::class, 'index']);
+            Route::get('customers/{id}/timeline', [AdminCustomerApprovalController::class, 'timeline']);
+            Route::get('customers/{id}/verifications', [AdminCustomerVerificationController::class, 'index']);
+            Route::get('customer-access-requests', [AdminCustomerAccessRequestController::class, 'index']);
+        });
+
+        Route::middleware('permission:customers.manage')->group(function () {
+            // Approval profiles, tier, risk, health
+            Route::post('customers/{id}/approval-profile', [AdminCustomerApprovalController::class, 'applyProfile']);
+            Route::post('customers/{id}/set-tier', [AdminCustomerApprovalController::class, 'setTier']);
+            Route::post('customers/{id}/risk', [AdminCustomerApprovalController::class, 'setRisk']);
+            Route::post('customers/{id}/health/recalculate', [AdminCustomerApprovalController::class, 'recalculateHealth']);
+
+            // Verifications
+            Route::post('customers/{id}/verifications', [AdminCustomerVerificationController::class, 'store']);
+            Route::patch('customers/{id}/verifications/{verificationId}', [AdminCustomerVerificationController::class, 'update']);
+
+            // Access requests review
+            Route::post('customer-access-requests/{id}/approve', [AdminCustomerAccessRequestController::class, 'approve']);
+            Route::post('customer-access-requests/{id}/reject', [AdminCustomerAccessRequestController::class, 'reject']);
         });
 
         // Customer CSV import — customers.import (super_admin only)

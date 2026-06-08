@@ -51,6 +51,15 @@ class Customer extends Authenticatable
         'duplicate_group_id',
         'possible_duplicate_of',
         'data_review_status',
+        // Buyer lifecycle (CRM-8)
+        'buyer_tier',
+        'verification_status',
+        'health_score',
+        'risk_level',
+        'approved_by',
+        'approved_at',
+        'approval_notes',
+        'rejection_reason',
     ];
 
     protected $hidden = [
@@ -72,6 +81,9 @@ class Customer extends Authenticatable
         'approved_for_documents'         => 'boolean',
         'data_quality_score'             => 'integer',
         'data_quality_flags'             => 'array',
+        // Buyer lifecycle (CRM-8)
+        'health_score'                   => 'integer',
+        'approved_at'                    => 'datetime',
     ];
 
     public function getFullNameAttribute(): string
@@ -122,5 +134,27 @@ class Customer extends Authenticatable
     public function communications(): HasMany
     {
         return $this->hasMany(CustomerCommunication::class)->orderByDesc('created_at');
+    }
+
+    // ── Buyer lifecycle (CRM-8) ──────────────────────────────────────────────
+
+    public function verifications(): HasMany
+    {
+        return $this->hasMany(CustomerVerification::class)->orderByDesc('created_at');
+    }
+
+    public function timelineEvents(): HasMany
+    {
+        return $this->hasMany(CustomerTimelineEvent::class)->orderByDesc('created_at')->orderByDesc('id');
+    }
+
+    public function accessRequests(): HasMany
+    {
+        return $this->hasMany(CustomerAccessRequest::class)->orderByDesc('created_at');
+    }
+
+    public function approvedBy(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(AdminUser::class, 'approved_by');
     }
 }

@@ -129,6 +129,29 @@ Last updated: 2026-06-03 | Branch: `main` | Latest commit: `5e5d3dd`
 
 ---
 
+## CRM-8 — Buyer Approval & Customer Lifecycle (Session 40)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Buyer lifecycle fields on `customers` (tier, verification, health, risk, approval audit) | 🔧 | Additive; existing active customers backfilled verified/low-risk |
+| `customer_verifications` table + CRUD | 🔧 | company_registration / vat_number / website / import_license / business_address / other |
+| `customer_timeline_events` table (append-only) | 🔧 | created/converted/proposal_accepted/approved/tier/risk/block etc. |
+| `customer_access_requests` table (customer→admin) | 🔧 | checkout / documents / wholesale_pricing / higher_tier |
+| Approval profiles (CustomerApprovalService) | 🔧 | inquiry_only / approved_buyer / wholesale_buyer / restricted / blocked |
+| Health scoring + risk bands (CustomerHealthService) | 🔧 | 80+/60+/40+/<40 → low/medium/high/critical |
+| `GET /admin/customer-approvals` (queues + cards + filters) | 🔧 | |
+| `GET /admin/customers/{id}/timeline` | 🔧 | |
+| `POST /admin/customers/{id}/approval-profile` / `approve` / `reject` / `set-tier` / `risk` | 🔧 | approve/reject reuse existing routes, backward-compatible |
+| `POST /admin/customers/{id}/health/recalculate` | 🔧 | |
+| Verifications endpoints (GET/POST/PATCH) | 🔧 | rolls up customer verification_status + recomputes health |
+| Admin access-request review (`/admin/customer-access-requests` + approve/reject) | 🔧 | approve grants the concrete CRM-4 flag |
+| Customer portal access requests (`/auth/customer/access-requests`) | 🔧 | no internal risk/health exposed |
+| Timeline hooks in convert-to-customer + proposal acceptance | 🔧 | |
+| Buyer lifecycle health checks in system health | 🔧 | pending approvals / high-risk / pending access requests |
+| Backend feature tests (12, MySQL) | ✅ | `Crm8BuyerLifecycleTest` — 12 passed / 57 assertions |
+
+---
+
 ## eBay Integration (Sessions 15–25)
 
 | Phase | Feature | Status |
@@ -235,6 +258,9 @@ Last updated: 2026-06-03 | Branch: `main` | Latest commit: `5e5d3dd`
 | `eu_declarations` | Gelangensbestätigung records |
 | `quote_requests` | B2B tyre inquiries / leads |
 | `quote_request_items` | Admin-curated line items per quote 🔧 |
+| `customer_verifications` | CRM-8 buyer verification records 🔧 |
+| `customer_timeline_events` | CRM-8 append-only buyer lifecycle timeline 🔧 |
+| `customer_access_requests` | CRM-8 customer-initiated access requests 🔧 |
 | `customer_communications` | CRM communication log |
 | `ebay_tokens` | Encrypted eBay OAuth tokens |
 | `ebay_listing_logs` | eBay listing action audit |
@@ -320,3 +346,7 @@ composer install --no-dev
 **Pending migrations (not yet run on production):**
 1. `2026_06_02_000001_add_proposal_fields_to_quote_requests_table`
 2. `2026_06_03_000001_create_quote_request_items_table`
+3. `2026_06_08_000001_add_buyer_lifecycle_fields_to_customers_table` (CRM-8)
+4. `2026_06_08_000002_create_customer_verifications_table` (CRM-8)
+5. `2026_06_08_000003_create_customer_timeline_events_table` (CRM-8)
+6. `2026_06_08_000004_create_customer_access_requests_table` (CRM-8)

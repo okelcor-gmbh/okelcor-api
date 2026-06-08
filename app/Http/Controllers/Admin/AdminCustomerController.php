@@ -7,7 +7,10 @@ use App\Mail\CustomerInvitation;
 use App\Mail\CustomerPasswordReset;
 use App\Models\BlockedEntity;
 use App\Models\Customer;
+use App\Services\CustomerApprovalService;
+use App\Services\CustomerTimelineService;
 use App\Services\SecurityEventService;
+use App\Support\CustomerLifecyclePresenter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -360,6 +363,39 @@ class AdminCustomerController extends Controller
     {
         $customer = Customer::findOrFail($id);
 
+        // CRM-8 buyer approval — triggered when a `profile` is supplied.
+        // Applies an access profile, stamps approval audit fields, sets tier,
+        // and records a timeline event. Backward compatible: requests without a
+        // `profile` fall through to the original CRM-1 onboarding behaviour.
+        if ($request->filled('profile')) {
+            $data = $request->validate([
+                'profile'    => ['required', \Illuminate\Validation\Rule::in(CustomerApprovalService::PROFILES)],
+                'buyer_tier' => ['nullable', \Illuminate\Validation\Rule::in(CustomerApprovalService::TIERS)],
+                'notes'      => ['nullable', 'string', 'max:2000'],
+            ]);
+
+            $customer = app(CustomerApprovalService::class)->approveBuyer(
+                $customer,
+                $data['profile'],
+                $data['buyer_tier'] ?? null,
+                $request->user(),
+                $data['notes'] ?? null
+            );
+
+            SecurityEventService::log(
+                'customer_approved', $customer->id,
+                $request->ip(), $request->userAgent(),
+                "Buyer approved by admin (profile: {$data['profile']})", 'info'
+            );
+
+            return response()->json([
+                'success' => true,
+                'data'    => $this->formatSummary($customer->fresh()->load('approvedBy')),
+                'message' => "Buyer approved as {$data['profile']}.",
+            ]);
+        }
+
+        // ── Legacy CRM-1 onboarding approval (unchanged) ──────────────────────
         if (! in_array($customer->onboarding_status ?? 'active', ['pending_review', 'rejected'], true)) {
             return response()->json(['message' => 'Customer is not in a reviewable state.'], 422);
         }
@@ -392,12 +428,24 @@ class AdminCustomerController extends Controller
         $customer->update([
             'onboarding_status' => 'rejected',
             'is_active'         => false,
+            // CRM-8 — persist the structured rejection reason alongside admin_notes.
+            'rejection_reason'  => $data['reason'] ?? $customer->rejection_reason,
             'admin_notes'       => $customer->admin_notes
                 ? $customer->admin_notes . "\n[Rejected] " . ($data['reason'] ?? '')
                 : '[Rejected] ' . ($data['reason'] ?? ''),
         ]);
 
         $customer->tokens()->delete();
+
+        // CRM-8 timeline
+        CustomerTimelineService::record(
+            $customer->id,
+            'customer_rejected',
+            'Customer rejected',
+            $data['reason'] ?? 'Customer rejected by admin.',
+            ['reason' => $data['reason'] ?? null],
+            $request->user()?->id
+        );
 
         SecurityEventService::log(
             'customer_rejected', $customer->id,
@@ -625,7 +673,7 @@ class AdminCustomerController extends Controller
             'approved_for_quotes'            => (bool) ($c->approved_for_quotes ?? true),
             'approved_for_wholesale_pricing' => (bool) ($c->approved_for_wholesale_pricing ?? false),
             'approved_for_documents'         => (bool) ($c->approved_for_documents ?? false),
-        ];
+        ] + CustomerLifecyclePresenter::fields($c); // Buyer lifecycle (CRM-8)
     }
 
     private function sendInvitationEmail(Customer $customer): void

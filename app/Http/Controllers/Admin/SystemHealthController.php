@@ -27,6 +27,7 @@ class SystemHealthController extends Controller
             'data_quality'  => $this->checkDataQuality(),
             'crm'           => $this->checkCrmPipeline(),
             'proposals'     => $this->checkProposals(),
+            'buyer_lifecycle' => $this->checkBuyerLifecycle(),
             'endpoints'     => $this->checkEndpoints(),
         ];
 
@@ -660,6 +661,77 @@ class SystemHealthController extends Controller
                     ];
                 } catch (\Throwable) {
                     return ['status' => 'pass', 'severity' => 'low', 'message' => 'Pending conversion check unavailable'];
+                }
+            }),
+        ];
+    }
+
+    /** @return array<int, array> */
+    public function checkBuyerLifecycle(): array
+    {
+        return [
+            $this->check('buyer_pending_approvals', 'Pending Buyer Approvals', function () {
+                try {
+                    $count = DB::table('customers')
+                        ->where(function ($q) {
+                            $q->where('onboarding_status', 'pending_review')
+                                ->orWhere('verification_status', 'pending_review');
+                        })
+                        ->count();
+
+                    return [
+                        'status'   => match (true) {
+                            $count === 0 => 'pass',
+                            $count < 20  => 'warning',
+                            default      => 'fail',
+                        },
+                        'severity' => $count >= 20 ? 'medium' : 'low',
+                        'message'  => $count === 0
+                            ? 'No customers awaiting buyer approval'
+                            : "{$count} customer(s) awaiting buyer approval",
+                        'fix_hint' => $count > 0
+                            ? 'Review at GET /api/v1/admin/customer-approvals?status=pending_review' : null,
+                    ];
+                } catch (\Throwable) {
+                    return ['status' => 'pass', 'severity' => 'low', 'message' => 'Buyer approval check unavailable'];
+                }
+            }),
+            $this->check('buyer_high_risk', 'High / Critical Risk Buyers', function () {
+                try {
+                    $count = DB::table('customers')
+                        ->whereIn('risk_level', ['high', 'critical'])
+                        ->count();
+
+                    return [
+                        'status'   => $count > 0 ? 'warning' : 'pass',
+                        'severity' => 'medium',
+                        'message'  => $count === 0
+                            ? 'No high or critical risk buyers'
+                            : "{$count} buyer(s) at high/critical risk",
+                        'fix_hint' => $count > 0
+                            ? 'Review at GET /api/v1/admin/customer-approvals?status=high_risk' : null,
+                    ];
+                } catch (\Throwable) {
+                    return ['status' => 'pass', 'severity' => 'low', 'message' => 'Risk-level check unavailable'];
+                }
+            }),
+            $this->check('buyer_pending_access_requests', 'Pending Access Requests', function () {
+                try {
+                    $count = DB::table('customer_access_requests')
+                        ->where('status', 'pending')
+                        ->count();
+
+                    return [
+                        'status'   => $count > 0 ? 'warning' : 'pass',
+                        'severity' => 'low',
+                        'message'  => $count === 0
+                            ? 'No pending customer access requests'
+                            : "{$count} customer access request(s) pending review",
+                        'fix_hint' => $count > 0
+                            ? 'Review at GET /api/v1/admin/customer-access-requests?status=pending' : null,
+                    ];
+                } catch (\Throwable) {
+                    return ['status' => 'pass', 'severity' => 'low', 'message' => 'Access-request check unavailable'];
                 }
             }),
         ];
