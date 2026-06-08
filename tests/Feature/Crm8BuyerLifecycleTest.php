@@ -11,6 +11,7 @@ use App\Models\CustomerAccessRequest;
 use App\Models\CustomerTimelineEvent;
 use App\Services\CustomerApprovalService;
 use App\Services\CustomerHealthService;
+use App\Support\CustomerLifecyclePresenter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -48,7 +49,7 @@ class Crm8BuyerLifecycleTest extends TestCase
     {
         return AdminUser::create([
             'name'      => 'Approver',
-            'email'     => 'approver@okelcor.test',
+            'email'     => 'approver' . uniqid() . '@okelcor.test',
             'role'      => 'super_admin',
             'password'  => Hash::make('secret-pass-123'),
             'is_active' => true,
@@ -152,9 +153,10 @@ class Crm8BuyerLifecycleTest extends TestCase
         ]);
     }
 
-    public function test_approve_buyer_stamps_audit_and_advances_onboarding(): void
+    public function test_approve_buyer_activates_self_registered_customer(): void
     {
-        $c = $this->customer(); // pending_review
+        // Self-registered: chose own password (must_reset_password=false), email verified.
+        $c = $this->customer(['email_verified_at' => now(), 'must_reset_password' => false]);
         $admin = $this->admin();
 
         $c = app(CustomerApprovalService::class)->approveBuyer($c, 'approved_buyer', 'gold', $admin, 'Approved after proposal.');
@@ -162,12 +164,76 @@ class Crm8BuyerLifecycleTest extends TestCase
         $this->assertSame($admin->id, $c->approved_by);
         $this->assertNotNull($c->approved_at);
         $this->assertSame('gold', $c->buyer_tier); // explicit override beats bronze default
-        $this->assertSame('approved', $c->onboarding_status);
+        // Login state must be unlocked.
+        $this->assertSame('active', $c->onboarding_status);
+        $this->assertTrue((bool) $c->is_active);
+        $this->assertSame('active', $c->status);
         $this->assertNull($c->rejection_reason);
+        $this->assertTrue(CustomerLifecyclePresenter::fields($c)['login_ready']);
         $this->assertDatabaseHas('customer_timeline_events', [
             'customer_id' => $c->id,
             'event_type'  => 'customer_approved',
         ]);
+    }
+
+    public function test_approve_buyer_without_own_password_stays_in_invite_flow(): void
+    {
+        // Lead-converted: random password (must_reset_password=true) — needs invite.
+        $c = $this->customer(['must_reset_password' => true]);
+
+        $c = app(CustomerApprovalService::class)->approveBuyer($c, 'approved_buyer', null, $this->admin());
+
+        $this->assertSame('approved', $c->onboarding_status);
+        $this->assertFalse((bool) $c->is_active);
+        $this->assertFalse(CustomerLifecyclePresenter::fields($c)['login_ready']);
+        $this->assertTrue(CustomerLifecyclePresenter::fields($c)['pending_invitation']);
+    }
+
+    public function test_approval_sends_email_for_granting_profiles_only(): void
+    {
+        \Illuminate\Support\Facades\Mail::fake();
+        $svc = app(CustomerApprovalService::class);
+
+        $granted = $this->customer(['email_verified_at' => now()]);
+        $status  = $svc->sendApprovalEmail($granted, 'approved_buyer', $this->admin());
+        $this->assertTrue($status['attempted']);
+        $this->assertTrue($status['sent']);
+        \Illuminate\Support\Facades\Mail::assertSent(\App\Mail\ApprovedAccountEmail::class, fn ($m) => $m->hasTo($granted->email));
+        $this->assertDatabaseHas('customer_timeline_events', [
+            'customer_id' => $granted->id,
+            'event_type'  => 'approval_email_sent',
+        ]);
+
+        // Restricted / blocked must NOT email.
+        $restricted = $this->customer();
+        $rStatus = $svc->sendApprovalEmail($restricted, 'restricted', $this->admin());
+        $this->assertFalse($rStatus['attempted']);
+        \Illuminate\Support\Facades\Mail::assertSent(\App\Mail\ApprovedAccountEmail::class, 1); // still only the one above
+    }
+
+    public function test_approved_self_registered_customer_can_log_in(): void
+    {
+        // End-to-end: register-like customer, verify email, approve, then hit login.
+        $password = 'super-secret-1';
+        $c = $this->customer([
+            'password'          => Hash::make($password),
+            'email_verified_at' => now(),
+            'must_reset_password' => false,
+            'status'            => 'active',
+        ]);
+
+        app(CustomerApprovalService::class)->approveBuyer($c, 'approved_buyer', null, $this->admin());
+
+        $resp = $this->postJson('/api/v1/auth/login', [
+            'email'    => $c->email,
+            'password' => $password,
+        ]);
+
+        $resp->assertStatus(200)
+            ->assertJsonPath('data.customer.onboarding_status', 'active')
+            ->assertJsonPath('data.customer.access_level', 'approved_buyer')
+            ->assertJsonPath('data.customer.approved_for_checkout', true);
+        $this->assertNotEmpty($resp->json('data.token'));
     }
 
     // ── Health scoring ───────────────────────────────────────────────────────

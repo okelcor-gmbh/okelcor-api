@@ -2,8 +2,11 @@
 
 namespace App\Services;
 
+use App\Mail\ApprovedAccountEmail;
 use App\Models\AdminUser;
 use App\Models\Customer;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 
 /**
  * CRM-8 — Buyer approval & access-profile management.
@@ -101,6 +104,96 @@ class CustomerApprovalService
         ];
     }
 
+    /** Profiles that grant an active buyer login (and trigger an approval email). */
+    public function grantsAccess(string $profile): bool
+    {
+        return in_array($profile, ['approved_buyer', 'wholesale_buyer'], true);
+    }
+
+    /**
+     * Login-state changes applied when a granting profile is set.
+     *
+     * - A customer who set their own password at registration (must_reset_password
+     *   = false) is fully activated and can log in immediately (the login email
+     *   gate still applies if they haven't verified yet).
+     * - A customer with no self-chosen password (e.g. lead-converted, must_reset
+     *   = true) is marked 'approved' only — they still need the invite/password
+     *   flow before they can log in.
+     *
+     * @return array<string, mixed>
+     */
+    private function activationUpdates(Customer $c): array
+    {
+        if ((bool) $c->must_reset_password) {
+            return ['onboarding_status' => 'approved'];
+        }
+
+        $updates = [
+            'onboarding_status' => 'active',
+            'is_active'         => true,
+        ];
+
+        // Never reactivate a banned/suspended account via a profile change.
+        if (! in_array($c->status, ['banned', 'suspended'], true)) {
+            $updates['status'] = 'active';
+        }
+
+        return $updates;
+    }
+
+    /**
+     * Send the approval email for granting profiles only. Never throws — a mail
+     * failure must not roll back the approval. Logs + records a timeline event.
+     *
+     * @return array{attempted: bool, sent: bool, error: ?string}
+     */
+    public function sendApprovalEmail(Customer $customer, string $profile, ?AdminUser $admin = null): array
+    {
+        if (! $this->grantsAccess($profile)) {
+            return ['attempted' => false, 'sent' => false, 'error' => null];
+        }
+
+        $loginUrl     = rtrim(config('app.frontend_url', 'https://okelcor.com'), '/') . '/login';
+        $supportEmail = config('mail.from.address') ?: 'support@okelcor.com';
+        $needsVerify  = $customer->email_verified_at === null;
+
+        try {
+            Mail::to($customer->email)->send(new ApprovedAccountEmail(
+                $customer, $loginUrl, $supportEmail, $needsVerify
+            ));
+
+            Log::info('[customer_approval_email_sent] Approval email sent', [
+                'event'       => 'customer_approval_email_sent',
+                'customer_id' => $customer->id,
+                'email'       => $customer->email,
+                'profile'     => $profile,
+            ]);
+
+            CustomerTimelineService::record(
+                $customer->id, 'approval_email_sent', 'Approval email sent',
+                "Approval email sent to {$customer->email}.",
+                ['profile' => $profile], $admin?->id
+            );
+
+            return ['attempted' => true, 'sent' => true, 'error' => null];
+        } catch (\Throwable $e) {
+            Log::error('[customer_approval_email_failed] Approval email failed', [
+                'event'       => 'customer_approval_email_failed',
+                'customer_id' => $customer->id,
+                'email'       => $customer->email,
+                'error'       => $e->getMessage(),
+            ]);
+
+            CustomerTimelineService::record(
+                $customer->id, 'approval_email_failed', 'Approval email failed',
+                "Approval email to {$customer->email} could not be sent: {$e->getMessage()}",
+                ['profile' => $profile], $admin?->id
+            );
+
+            return ['attempted' => true, 'sent' => false, 'error' => $e->getMessage()];
+        }
+    }
+
     /**
      * Apply an access profile to a customer.
      *
@@ -115,6 +208,13 @@ class CustomerApprovalService
     ): Customer {
         $changes   = $this->profileChanges($profile);
         $wasBlocked = $customer->access_level === 'blocked';
+
+        // Granting profiles (approved_buyer / wholesale_buyer) must also unlock
+        // the account's login state, otherwise the customer stays stuck at the
+        // onboarding gate even though their access flags say "approved".
+        if ($this->grantsAccess($profile)) {
+            $changes = array_merge($changes, $this->activationUpdates($customer));
+        }
 
         $customer->update($changes);
 
@@ -165,6 +265,7 @@ class CustomerApprovalService
         ?AdminUser $admin = null,
         ?string $notes = null
     ): Customer {
+        // applyApprovalProfile already unlocks login state for granting profiles.
         $this->applyApprovalProfile($customer, $profile, $admin, $notes);
         $customer->refresh();
 
@@ -177,12 +278,6 @@ class CustomerApprovalService
 
         if ($buyerTier !== null) {
             $update['buyer_tier'] = $buyerTier;
-        }
-
-        // Advance onboarding so the admin can then invite — without bypassing
-        // the password/invite flow (we never force is_active here).
-        if (in_array($customer->onboarding_status, ['pending_review', 'rejected'], true)) {
-            $update['onboarding_status'] = 'approved';
         }
 
         $customer->update($update);

@@ -142,11 +142,22 @@ class AdminCustomerApprovalController extends Controller
             $customer, $data['profile'], $request->user(), $data['notes'] ?? null
         );
 
+        // Granting profiles unlock login + trigger the approval email.
+        $emailStatus = $this->approval->sendApprovalEmail($customer, $data['profile'], $request->user());
+
+        $message = "Access profile '{$data['profile']}' applied.";
+        if ($emailStatus['attempted']) {
+            $message .= $emailStatus['sent']
+                ? ' Approval email sent.'
+                : ' Approval email failed to send — check mail config.';
+        }
+
         return response()->json([
-            'success' => true,
-            'data'    => $this->detail($customer->fresh()->load('approvedBy')),
-            'preview' => $this->approval->profilePreview($data['profile']),
-            'message' => "Access profile '{$data['profile']}' applied.",
+            'success'        => true,
+            'data'           => $this->detail($customer->fresh()->load('approvedBy')),
+            'preview'        => $this->approval->profilePreview($data['profile']),
+            'approval_email' => $emailStatus,
+            'message'        => $message,
         ]);
     }
 

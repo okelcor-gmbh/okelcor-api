@@ -374,7 +374,8 @@ class AdminCustomerController extends Controller
                 'notes'      => ['nullable', 'string', 'max:2000'],
             ]);
 
-            $customer = app(CustomerApprovalService::class)->approveBuyer(
+            $service  = app(CustomerApprovalService::class);
+            $customer = $service->approveBuyer(
                 $customer,
                 $data['profile'],
                 $data['buyer_tier'] ?? null,
@@ -382,16 +383,29 @@ class AdminCustomerController extends Controller
                 $data['notes'] ?? null
             );
 
+            // Send approval email for granting profiles (does not roll back on failure).
+            $emailStatus = $service->sendApprovalEmail($customer, $data['profile'], $request->user());
+
             SecurityEventService::log(
                 'customer_approved', $customer->id,
                 $request->ip(), $request->userAgent(),
                 "Buyer approved by admin (profile: {$data['profile']})", 'info'
             );
 
+            $message = "Buyer approved as {$data['profile']}.";
+            if ($emailStatus['attempted']) {
+                $message .= $emailStatus['sent']
+                    ? ' Approval email sent.'
+                    : ' Approval email failed to send — check mail config.';
+            }
+
             return response()->json([
                 'success' => true,
-                'data'    => $this->formatSummary($customer->fresh()->load('approvedBy')),
-                'message' => "Buyer approved as {$data['profile']}.",
+                'data'    => array_merge(
+                    $this->formatSummary($customer->fresh()->load('approvedBy')),
+                    ['approval_email' => $emailStatus]
+                ),
+                'message' => $message,
             ]);
         }
 

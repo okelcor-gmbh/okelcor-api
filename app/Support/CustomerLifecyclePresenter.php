@@ -19,6 +19,14 @@ class CustomerLifecyclePresenter
      */
     public static function fields(Customer $c): array
     {
+        $onboardingActive = ($c->onboarding_status ?? 'active') === 'active';
+        $statusActive     = ($c->status ?? 'active') === 'active';
+        $emailVerified    = $c->email_verified_at !== null;
+        $needsPassword    = (bool) $c->must_reset_password;
+
+        $loginReady = $onboardingActive && $statusActive && (bool) $c->is_active
+            && $emailVerified && ! $needsPassword;
+
         return [
             'buyer_tier'          => $c->buyer_tier ?? 'none',
             'verification_status' => $c->verification_status ?? 'not_started',
@@ -29,6 +37,11 @@ class CustomerLifecyclePresenter
             'approved_at'         => $c->approved_at?->toIso8601String(),
             'approval_notes'      => $c->approval_notes,
             'rejection_reason'    => $c->rejection_reason,
+            // Login readiness (CRM-8 fix) — frontend uses these to route the
+            // customer past the "under review" screen.
+            'login_ready'                 => $loginReady,
+            'pending_email_verification'  => $onboardingActive && (bool) $c->is_active && ! $emailVerified && ! $needsPassword,
+            'pending_invitation'          => $needsPassword,
         ];
     }
 }

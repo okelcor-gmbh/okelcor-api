@@ -758,6 +758,7 @@ class CustomerAuthController extends Controller
             'vat_verified'                   => $c->vat_verified,
             'industry'                       => $c->industry,
             'email_verified'                 => (bool) $c->email_verified_at,
+            'is_active'                      => (bool) $c->is_active,
             'onboarding_status'              => $c->onboarding_status ?? 'active',
             // Segmentation & access (CRM-4) — frontend uses these for conditional UI
             'customer_segment'               => $c->customer_segment ?? 'unknown',
@@ -767,6 +768,9 @@ class CustomerAuthController extends Controller
             'approved_for_quotes'            => (bool) ($c->approved_for_quotes ?? true),
             'approved_for_wholesale_pricing' => (bool) ($c->approved_for_wholesale_pricing ?? false),
             'approved_for_documents'         => (bool) ($c->approved_for_documents ?? false),
+            // Buyer lifecycle (CRM-8)
+            'buyer_tier'                     => $c->buyer_tier ?? 'none',
+            'verification_status'            => $c->verification_status ?? 'not_started',
         ];
     }
 }
