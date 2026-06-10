@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-06-08 | Branch: `main` | Latest commit: `ca765a3`
+Last updated: 2026-06-10 | Branch: `main` | Latest commit: `f699ce2`
 
 ---
 
@@ -153,6 +153,21 @@ Last updated: 2026-06-08 | Branch: `main` | Latest commit: `ca765a3`
 | **Fix** — approval email (`ApprovedAccountEmail`) | 🔧 | Sent on approve/approval-profile for approved_buyer/wholesale_buyer only; logs + timelines sent/failed; never rolls back approval |
 | **Fix** — `/auth/me` + login return fresh CRM-8 fields | 🔧 | is_active, buyer_tier, verification_status; presenter adds login_ready / pending_email_verification / pending_invitation |
 | Backend feature tests (15, MySQL) | ✅ | `Crm8BuyerLifecycleTest` — 15 passed / 75 assertions (incl. end-to-end login after approval) |
+
+---
+
+## CRM-9 — Admin "Add Customer" Onboarding (Session 41)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `POST /admin/customers` — admin-driven onboarding | 🔧 | New `customers.create` permission (super_admin / admin / sales_manager) |
+| B2B/B2C, company required for B2B (422 `required_if`) | 🔧 | Field-level errors for the modal |
+| `access_level` → CRM-4 flags via `approveBuyer()` | 🔧 | Defaults to `approved_buyer` (quotes + checkout + documents); stamps approval audit + timeline |
+| No-password create + single-use set-password invite | 🔧 | `send_invitation` toggle; invite sent synchronously, send status returned as `data.invitation_email` |
+| Duplicate email → 422 `errors.email` | 🔧 | `unique:customers,email` |
+| Invitation email failures no longer silent | 🔧 | `sendInvitationEmail()` catches + logs + reports; `invite`/`resend-invite` surface status too |
+| `security_events.type` enum widened (audit-trail fix) | 🔧 | Migration adds customer-lifecycle types the code already logged (were silently blank in non-strict MySQL) |
+| Feature tests (4 new, MySQL) | ✅ | `Crm8BuyerLifecycleTest` — 19 passed / 92 assertions |
 
 ---
 
@@ -354,3 +369,4 @@ composer install --no-dev
 4. `2026_06_08_000002_create_customer_verifications_table` (CRM-8)
 5. `2026_06_08_000003_create_customer_timeline_events_table` (CRM-8)
 6. `2026_06_08_000004_create_customer_access_requests_table` (CRM-8)
+7. `2026_06_10_000001_extend_security_events_type_enum` (CRM-9 — audit-trail fix)

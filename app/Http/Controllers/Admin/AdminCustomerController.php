@@ -322,38 +322,96 @@ class AdminCustomerController extends Controller
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'customer_type' => ['required', 'in:b2c,b2b'],
-            'first_name'    => ['required', 'string', 'max:100'],
-            'last_name'     => ['required', 'string', 'max:100'],
-            'email'         => ['required', 'email', 'max:255', 'unique:customers,email'],
-            'phone'         => ['nullable', 'string', 'max:50'],
-            'country'       => ['nullable', 'string', 'max:100'],
-            'company_name'  => ['nullable', 'string', 'max:200'],
-            'vat_number'    => ['nullable', 'string', 'max:20'],
-            'industry'      => ['nullable', 'string', 'max:100'],
-            'admin_notes'   => ['nullable', 'string'],
+            'customer_type'     => ['required', 'in:b2c,b2b'],
+            'first_name'        => ['required', 'string', 'max:100'],
+            'last_name'         => ['nullable', 'string', 'max:100'],
+            'email'             => ['required', 'email', 'max:255', 'unique:customers,email'],
+            'phone'             => ['nullable', 'string', 'max:50'],
+            'country'           => ['nullable', 'string', 'max:100'],
+            // Company is mandatory for B2B, optional (ignored) for B2C.
+            'company_name'      => ['nullable', 'required_if:customer_type,b2b', 'string', 'max:200'],
+            'vat_number'        => ['nullable', 'string', 'max:20'],
+            'industry'          => ['nullable', 'string', 'max:100'],
+            // CRM-4 portal access — maps to an approval profile (defaults to
+            // approved_buyer = quotes + checkout + documents).
+            'access_level'      => ['nullable', \Illuminate\Validation\Rule::in(CustomerApprovalService::PROFILES)],
+            'send_invitation'   => ['required', 'boolean'],
+            // Accepted from the admin modal but informational only — the backend
+            // derives the real onboarding state itself (created_via is logged).
+            'onboarding_status' => ['nullable', 'string', 'max:30'],
+            'created_via'       => ['nullable', 'string', 'max:50'],
+            // The modal sends `notes` (internal); `admin_notes` accepted as alias.
+            'notes'             => ['nullable', 'string'],
+            'admin_notes'       => ['nullable', 'string'],
+        ], [
+            'company_name.required_if' => 'A company name is required for B2B customers.',
         ]);
 
-        $customer = Customer::create([
-            ...$data,
-            'password'          => Hash::make(Str::random(32)),
-            'onboarding_status' => 'invited',
-            'is_active'         => false,
-            'must_reset_password' => true,
-        ]);
+        $profile        = $data['access_level'] ?? 'approved_buyer';
+        $sendInvitation = (bool) $data['send_invitation'];
+        $notes          = $data['notes'] ?? $data['admin_notes'] ?? null;
+
+        $service = app(CustomerApprovalService::class);
+
+        $customer = DB::transaction(function () use ($data, $profile, $notes, $service, $request) {
+            // No usable password — the customer sets their own via the invitation
+            // link. must_reset_password keeps them in the invite flow, so the
+            // approval profile grants access flags without prematurely flipping
+            // them to a "can log in now" state (CustomerApprovalService respects
+            // this and leaves onboarding_status = 'approved').
+            $customer = Customer::create([
+                'customer_type'       => $data['customer_type'],
+                'first_name'          => $data['first_name'],
+                'last_name'           => $data['last_name'] ?? '',
+                'email'               => $data['email'],
+                'phone'               => $data['phone'] ?? null,
+                'country'             => $data['country'] ?? null,
+                'company_name'        => $data['company_name'] ?? null,
+                'vat_number'          => $data['vat_number'] ?? null,
+                'industry'            => $data['industry'] ?? null,
+                'admin_notes'         => $notes,
+                'password'            => Hash::make(Str::random(40)),
+                'must_reset_password' => true,
+                'is_active'           => false,
+                'onboarding_status'   => 'approved',
+            ]);
+
+            // Apply CRM-4 access flags + CRM-8 approval audit in one auditable
+            // step (stamps approved_by/approved_at, records a timeline event).
+            return $service->approveBuyer($customer, $profile, null, $request->user(), $notes);
+        });
 
         SecurityEventService::log(
-            'customer_invited', $customer->id,
+            'customer_created', $customer->id,
             $request->ip(), $request->userAgent(),
-            'Customer account created and invited by admin', 'info'
+            "Customer account created by admin (access: {$profile}, via: " . ($data['created_via'] ?? 'admin') . ')', 'info'
         );
 
-        $this->sendInvitationEmail($customer);
+        // Invitation email — sent synchronously (CustomerInvitation is not
+        // queued) so a misconfigured mailer surfaces in the response rather than
+        // failing silently. This link is the customer's only way to set a
+        // password and reach the portal.
+        $invite = ['attempted' => false, 'sent' => false, 'error' => null];
+        if ($sendInvitation) {
+            $invite = $this->sendInvitationEmail($customer);
+            if ($invite['sent']) {
+                $customer->update(['onboarding_status' => 'invited', 'must_reset_password' => true]);
+            }
+        }
+
+        $customer = $customer->fresh()->load('approvedBy');
+
+        $message = 'Customer created.';
+        if ($sendInvitation) {
+            $message .= $invite['sent']
+                ? ' Invitation email sent.'
+                : ' Invitation email failed to send — check mail config and use “Resend invite”.';
+        }
 
         return response()->json([
             'success' => true,
-            'data'    => $this->formatSummary($customer->fresh()),
-            'message' => 'Customer account created and invitation email sent.',
+            'data'    => array_merge($this->formatSummary($customer), ['invitation_email' => $invite]),
+            'message' => $message,
         ], 201);
     }
 
@@ -491,7 +549,7 @@ class AdminCustomerController extends Controller
             'must_reset_password' => true,
         ]);
 
-        $this->sendInvitationEmail($customer);
+        $invite = $this->sendInvitationEmail($customer);
 
         SecurityEventService::log(
             'customer_invited', $customer->id,
@@ -501,8 +559,10 @@ class AdminCustomerController extends Controller
 
         return response()->json([
             'success' => true,
-            'data'    => $this->formatSummary($customer->fresh()),
-            'message' => 'Invitation email sent.',
+            'data'    => array_merge($this->formatSummary($customer->fresh()), ['invitation_email' => $invite]),
+            'message' => $invite['sent']
+                ? 'Invitation email sent.'
+                : 'Customer marked invited, but the email failed to send — check mail config and resend.',
         ]);
     }
 
@@ -516,7 +576,7 @@ class AdminCustomerController extends Controller
             return response()->json(['message' => 'Customer does not have a pending invitation.'], 422);
         }
 
-        $this->sendInvitationEmail($customer);
+        $invite = $this->sendInvitationEmail($customer);
 
         SecurityEventService::log(
             'customer_invited', $customer->id,
@@ -526,7 +586,10 @@ class AdminCustomerController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Invitation email resent.',
+            'data'    => ['invitation_email' => $invite],
+            'message' => $invite['sent']
+                ? 'Invitation email resent.'
+                : 'Invitation email failed to send — check mail config.',
         ]);
     }
 
@@ -690,7 +753,16 @@ class AdminCustomerController extends Controller
         ] + CustomerLifecyclePresenter::fields($c); // Buyer lifecycle (CRM-8)
     }
 
-    private function sendInvitationEmail(Customer $customer): void
+    /**
+     * Generate a single-use set-password token and email the activation link.
+     *
+     * Sends synchronously and never throws — a mail failure is captured and
+     * returned so callers can report it instead of failing the whole request
+     * (the customer account + token are already persisted and can be resent).
+     *
+     * @return array{attempted: bool, sent: bool, error: ?string}
+     */
+    private function sendInvitationEmail(Customer $customer): array
     {
         $token = Str::random(64);
 
@@ -708,6 +780,19 @@ class AdminCustomerController extends Controller
         $frontendUrl   = rtrim(config('app.frontend_url', 'https://okelcor.com'), '/');
         $activationUrl = $frontendUrl . '/activate?token=' . $token . '&email=' . urlencode($customer->email);
 
-        Mail::to($customer->email)->send(new CustomerInvitation($customer, $activationUrl));
+        try {
+            Mail::to($customer->email)->send(new CustomerInvitation($customer, $activationUrl));
+
+            return ['attempted' => true, 'sent' => true, 'error' => null];
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('[customer_invitation_email_failed] Invitation email failed', [
+                'event'       => 'customer_invitation_email_failed',
+                'customer_id' => $customer->id,
+                'email'       => $customer->email,
+                'error'       => $e->getMessage(),
+            ]);
+
+            return ['attempted' => true, 'sent' => false, 'error' => $e->getMessage()];
+        }
     }
 }

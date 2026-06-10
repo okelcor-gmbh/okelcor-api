@@ -606,11 +606,20 @@ Route::prefix('v1')->group(function () {
         });
 
         // -----------------------------------------------------------------
+        // Customer onboarding ("Add Customer") — customers.create
+        // (super_admin, admin, sales_manager). Kept separate from
+        // customers.manage so sales managers can onboard buyers without
+        // gaining full customer-management (edit/delete/security) rights.
+        // -----------------------------------------------------------------
+        Route::middleware('permission:customers.create')->group(function () {
+            Route::post('customers', [AdminCustomerController::class, 'store']);
+        });
+
+        // -----------------------------------------------------------------
         // Customer management — customers.manage (super_admin, admin)
         // -----------------------------------------------------------------
         Route::middleware('permission:customers.manage')->group(function () {
             Route::get('customers', [AdminCustomerController::class, 'index']);
-            Route::post('customers', [AdminCustomerController::class, 'store']);
             Route::get('customers/export', [AdminCustomerController::class, 'export']);
 
             // Data quality overview (CRM-5) — static routes before {id} to avoid routing conflict

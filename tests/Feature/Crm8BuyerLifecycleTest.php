@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Http\Controllers\Admin\AdminCustomerAccessRequestController;
+use App\Http\Controllers\Admin\AdminCustomerController;
 use App\Http\Controllers\Admin\AdminCustomerVerificationController;
 use App\Http\Controllers\CustomerAccessRequestController;
 use App\Models\AdminUser;
@@ -333,6 +334,104 @@ class Crm8BuyerLifecycleTest extends TestCase
             'customer_id' => $c->id,
             'event_type'  => 'access_request_approved',
         ]);
+    }
+
+    // ── Admin "Add Customer" onboarding (POST /admin/customers) ──────────────
+
+    public function test_admin_add_customer_creates_approved_buyer_and_invites(): void
+    {
+        \Illuminate\Support\Facades\Mail::fake();
+        $admin = $this->admin();
+
+        $req = $this->adminRequest($admin, [
+            'customer_type'   => 'b2b',
+            'first_name'      => 'New',
+            'last_name'       => 'Buyer',
+            'email'           => 'fresh-buyer@acme-tyres.com',
+            'company_name'    => 'Acme Tyres GmbH',
+            'country'         => 'DE',
+            'access_level'    => 'approved_buyer',
+            'onboarding_status' => 'approved',
+            'send_invitation' => true,
+            'notes'           => 'Met at trade show.',
+            'created_via'     => 'admin',
+        ]);
+
+        $resp = app(AdminCustomerController::class)->store($req);
+        $this->assertSame(201, $resp->getStatusCode());
+
+        $payload = $resp->getData(true);
+        $this->assertTrue($payload['data']['approved_for_checkout']);
+        $this->assertTrue($payload['data']['approved_for_documents']);
+        $this->assertSame('approved_buyer', $payload['data']['access_level']);
+        // No usable login yet — must set a password via the invitation link.
+        $this->assertSame('invited', $payload['data']['onboarding_status']);
+        $this->assertTrue($payload['data']['pending_invitation']);
+        $this->assertTrue($payload['data']['invitation_email']['sent']);
+        $this->assertSame($admin->id, $payload['data']['approved_by']);
+
+        $customer = Customer::where('email', 'fresh-buyer@acme-tyres.com')->firstOrFail();
+        $this->assertSame('Met at trade show.', $customer->admin_notes);
+
+        // A single-use set-password token was created.
+        $this->assertDatabaseHas('password_reset_tokens', ['email' => 'fresh-buyer@acme-tyres.com']);
+        \Illuminate\Support\Facades\Mail::assertSent(
+            \App\Mail\CustomerInvitation::class,
+            fn ($m) => $m->hasTo('fresh-buyer@acme-tyres.com')
+        );
+    }
+
+    public function test_admin_add_customer_without_invitation_skips_email(): void
+    {
+        \Illuminate\Support\Facades\Mail::fake();
+
+        $req = $this->adminRequest($this->admin(), [
+            'customer_type'   => 'b2c',
+            'first_name'      => 'Walk',
+            'email'           => 'walkin@example.com',
+            'access_level'    => 'approved_buyer',
+            'send_invitation' => false,
+        ]);
+
+        $resp = app(AdminCustomerController::class)->store($req);
+        $this->assertSame(201, $resp->getStatusCode());
+
+        $payload = $resp->getData(true);
+        $this->assertSame('approved', $payload['data']['onboarding_status']);
+        $this->assertFalse($payload['data']['invitation_email']['attempted']);
+        \Illuminate\Support\Facades\Mail::assertNothingSent();
+    }
+
+    public function test_admin_add_customer_b2b_requires_company_name(): void
+    {
+        $req = $this->adminRequest($this->admin(), [
+            'customer_type'   => 'b2b',
+            'first_name'      => 'No',
+            'email'           => 'nocompany@example.com',
+            'send_invitation' => false,
+        ]);
+
+        $this->expectException(\Illuminate\Validation\ValidationException::class);
+        app(AdminCustomerController::class)->store($req);
+    }
+
+    public function test_admin_add_customer_duplicate_email_is_rejected(): void
+    {
+        $existing = $this->customer(['email' => 'taken@acme-tyres.com']);
+
+        $req = $this->adminRequest($this->admin(), [
+            'customer_type'   => 'b2c',
+            'first_name'      => 'Dup',
+            'email'           => 'taken@acme-tyres.com',
+            'send_invitation' => false,
+        ]);
+
+        try {
+            app(AdminCustomerController::class)->store($req);
+            $this->fail('Expected a duplicate-email validation failure.');
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            $this->assertArrayHasKey('email', $e->errors());
+        }
     }
 
     public function test_existing_active_customer_keeps_access_after_block_of_another(): void

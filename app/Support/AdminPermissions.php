@@ -87,6 +87,7 @@ class AdminPermissions
 
         // ── Customers ─────────────────────────────────────────────────────
         'customers.view'          => ['super_admin', 'admin', 'support'],
+        'customers.create'        => ['super_admin', 'admin', 'sales_manager'],
         'customers.manage'        => ['super_admin', 'admin'],
         'customers.export'        => ['super_admin', 'admin'],
         'customers.import'        => ['super_admin'],
