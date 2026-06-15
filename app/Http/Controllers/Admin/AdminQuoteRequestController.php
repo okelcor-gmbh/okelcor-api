@@ -10,6 +10,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\OrderLog;
 use App\Models\QuoteRequest;
+use App\Services\AdminNotificationService;
 use App\Services\CustomerTimelineService;
 use App\Services\PromoCodeService;
 use App\Services\SecurityEventService;
@@ -448,6 +449,7 @@ class AdminQuoteRequestController extends Controller
         ]);
 
         $quote = QuoteRequest::findOrFail($id);
+        $previousAssignee = $quote->assigned_to;
 
         $quote->update([
             'assigned_to'  => $data['assigned_to'],
@@ -461,6 +463,16 @@ class AdminQuoteRequestController extends Controller
             'assigned_to' => $data['assigned_to'],
             'by_admin'   => $request->user()?->id,
         ]);
+
+        if ($data['assigned_to'] !== $previousAssignee) {
+            AdminNotificationService::notify(
+                $data['assigned_to'],
+                'lead_assigned',
+                'New lead assigned to you',
+                sprintf('Quote %s from %s', $quote->ref_number, $quote->company_name ?: $quote->full_name),
+                "/admin/quotes/{$quote->id}"
+            );
+        }
 
         return response()->json([
             'success' => true,

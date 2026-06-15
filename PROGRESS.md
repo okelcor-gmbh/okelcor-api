@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-06-10 | Branch: `main` | Latest commit: `f699ce2`
+Last updated: 2026-06-15 | Branch: `main` | Latest commit: `0a3c79c`
 
 ---
 
@@ -171,6 +171,19 @@ Last updated: 2026-06-10 | Branch: `main` | Latest commit: `f699ce2`
 
 ---
 
+## CRM-3 — Admin Notifications (Session 42)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `admin_notifications` table (new) | 🔧 | Generic per-admin-user feed; `type`/`link` reusable for future event types |
+| `GET /admin/notifications` | 🔧 | List current admin's notifications, most recent first, + `unread_count` |
+| `POST /admin/notifications/{id}/read` | 🔧 | Marks one as read; scoped to owning user (404 if not owned) |
+| `POST /admin/notifications/read-all` | 🔧 | Marks all of current user's unread notifications as read |
+| `AdminNotificationService::notify()` | 🔧 | Generic writer, try/catch logged (never throws) |
+| `lead_assigned` trigger in `POST /admin/quote-requests/{id}/assign` | 🔧 | Fires when `assigned_to` changes to a new user (not on re-assign to same user) |
+
+---
+
 ## eBay Integration (Sessions 15–25)
 
 | Phase | Feature | Status |
@@ -281,6 +294,7 @@ Last updated: 2026-06-10 | Branch: `main` | Latest commit: `f699ce2`
 | `customer_timeline_events` | CRM-8 append-only buyer lifecycle timeline 🔧 |
 | `customer_access_requests` | CRM-8 customer-initiated access requests 🔧 |
 | `customer_communications` | CRM communication log |
+| `admin_notifications` | CRM-3 per-admin-user notification feed 🔧 |
 | `ebay_tokens` | Encrypted eBay OAuth tokens |
 | `ebay_listing_logs` | eBay listing action audit |
 | `ebay_order_sync_logs` | eBay order sync audit |
@@ -370,3 +384,4 @@ composer install --no-dev
 5. `2026_06_08_000003_create_customer_timeline_events_table` (CRM-8)
 6. `2026_06_08_000004_create_customer_access_requests_table` (CRM-8)
 7. `2026_06_10_000001_extend_security_events_type_enum` (CRM-9 — audit-trail fix)
+8. `2026_06_15_000001_create_admin_notifications_table` (CRM-3 — admin notifications)

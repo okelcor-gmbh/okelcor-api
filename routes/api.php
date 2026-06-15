@@ -27,6 +27,7 @@ use App\Http\Controllers\Admin\AdminNewsletterController;
 use App\Http\Controllers\Admin\AdminOrderController;
 use App\Http\Controllers\Admin\AdminOrderShipmentEventController;
 use App\Http\Controllers\Admin\OrderImportController;
+use App\Http\Controllers\Admin\AdminNotificationController;
 use App\Http\Controllers\Admin\AdminProductController;
 use App\Http\Controllers\Admin\AdminQuoteRequestController;
 use App\Http\Controllers\Admin\AdminQuoteAttachmentController;
@@ -296,6 +297,11 @@ Route::prefix('v1')->group(function () {
         // Auth — all authenticated admin users
         Route::post('logout', [AuthController::class, 'logout']);
         Route::get('me', [AuthController::class, 'me']);
+
+        // Notifications (CRM-3) — all authenticated admin users, scoped to self
+        Route::get('notifications', [AdminNotificationController::class, 'index']);
+        Route::post('notifications/{id}/read', [AdminNotificationController::class, 'markRead']);
+        Route::post('notifications/read-all', [AdminNotificationController::class, 'readAll']);
 
         // 2FA management — all authenticated admin users
         Route::prefix('2fa')->group(function () {
