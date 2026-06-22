@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\StoreQuoteRequestRequest;
+use App\Http\Requests\StoreWholesalerLeadRequest;
 use App\Mail\QuoteRequestAcknowledgement;
 use App\Mail\QuoteRequestReceived;
 use App\Models\Customer;
@@ -144,8 +145,182 @@ class QuoteRequestController extends Controller
             }
         }
 
-        // Admin notification — send for both qualified and needs_review; never for spam
-        $quoteEmail   = config('mail.quote_email');
+        // Admin notification + customer acknowledgement (shared with landing leads)
+        $this->dispatchInquirySideEffects($quote, $quality);
+
+        $isNeedsReview = $quality['review_status'] === 'needs_review';
+
+        $responseMessage = $isNeedsReview
+            ? 'Your inquiry has been received and will be reviewed by our team. We will be in touch shortly.'
+            : 'Quote request received. Our team will respond within 1 business day.';
+
+        return response()->json([
+            'data' => [
+                'ref_number'    => $refNumber,
+                'message'       => $responseMessage,
+                'review_status' => $quality['review_status'],
+            ],
+        ], 201);
+    }
+
+    /**
+     * POST /api/v1/leads/tyre-wholesaler
+     *
+     * Dedicated intake for the /tyre-wholesaler SEO/ads landing page.
+     *
+     * Accepts the landing form's own field names (name/company/interest/volume)
+     * and normalises them into the standard quote_requests pipeline so the lead
+     * flows through CRM-2 (quality scoring), CRM-3 (pipeline defaults) and the
+     * CRM-3B notifications exactly like a normal inquiry. Conversion attribution
+     * (utm_*, gclid, fbclid, referrer, landing_page) is persisted in
+     * lead_metadata. Phone is intentionally optional for this campaign form.
+     */
+    public function storeWholesalerLead(StoreWholesalerLeadRequest $request): JsonResponse
+    {
+        $data = $request->validated();
+
+        $interest = $data['interest'] ?? null;        // PCR | TBR | OTR | Value | Mixed
+        $volume   = $data['volume'] ?? null;           // less-than-1 | 1-to-5 | 5-plus
+        $rawNotes = trim((string) ($data['notes'] ?? ''));
+
+        $volumeLabel = match ($volume) {
+            'less-than-1' => 'Less than 1 container / month',
+            '1-to-5'      => '1–5 containers / month',
+            '5-plus'      => '5+ containers / month',
+            default       => null,
+        };
+
+        // Guarantee a meaningful, non-empty notes value (column is NOT NULL and
+        // CRM-2 scores on it). Synthesise from structured fields when the
+        // free-text box was left blank.
+        $notes = $rawNotes !== ''
+            ? $rawNotes
+            : sprintf(
+                'Wholesale inquiry via /tyre-wholesaler. Primary interest: %s. Estimated monthly volume: %s. Destination: %s.',
+                $interest ?: 'unspecified',
+                $volumeLabel ?: 'unspecified',
+                $data['country']
+            );
+
+        // CRM-2 quality gate — enrich the scored text with the structured
+        // selections so a genuine, terse ad lead isn't mistaken for spam.
+        $scoringPayload = [
+            'notes'        => trim($notes . ' | Interest: ' . ($interest ?? '') . ' | Volume: ' . ($volumeLabel ?? '')),
+            'email'        => $data['email'],
+            'country'      => $data['country'],
+            'company_name' => $data['company_name'] ?? ($data['company'] ?? ''),
+            'phone'        => $data['phone'] ?? '',
+            'quantity'     => $volumeLabel ?? '',
+        ];
+        $quality = $this->qualityService->score($scoringPayload);
+
+        $companyName = $data['company_name'] ?? ($data['company'] ?? null);
+        $fullName    = $data['full_name'] ?? ($data['name'] ?? '');
+
+        $leadMetadata = array_filter([
+            'landing_page'             => $data['landing_page'] ?? '/tyre-wholesaler',
+            'primary_tyre_interest'    => $interest,
+            'estimated_monthly_volume' => $volume,
+            'utm_source'               => $data['utm_source']   ?? null,
+            'utm_medium'               => $data['utm_medium']   ?? null,
+            'utm_campaign'             => $data['utm_campaign'] ?? null,
+            'utm_term'                 => $data['utm_term']     ?? null,
+            'utm_content'              => $data['utm_content']  ?? null,
+            'gclid'                    => $data['gclid']        ?? null,
+            'fbclid'                   => $data['fbclid']       ?? null,
+            'referrer'                 => $data['referrer']     ?? null,
+        ], fn ($v) => $v !== null && $v !== '');
+
+        $refNumber = $this->generateRef();
+
+        // Hard spam: persist for audit, then reject (mirrors store()).
+        if ($quality['review_status'] === 'spam') {
+            try {
+                QuoteRequest::create([
+                    'ref_number'    => $refNumber,
+                    'full_name'     => $fullName,
+                    'company_name'  => $companyName,
+                    'email'         => $data['email'],
+                    'country'       => $data['country'],
+                    'tyre_category' => $interest ? strtolower($interest) : 'mixed',
+                    'quantity'      => $volumeLabel ?? 'unspecified',
+                    'delivery_location' => $data['country'],
+                    'notes'         => $notes,
+                    'status'        => 'new',
+                    'review_status' => 'spam',
+                    'quality_score' => $quality['quality_score'],
+                    'quality_flags' => $quality['quality_flags'],
+                    'lead_source'   => 'tyre_wholesaler_landing',
+                    'lead_metadata' => $leadMetadata,
+                    'ip_address'    => $request->ip(),
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('[wholesaler_lead_spam_save_failed] Could not persist spam landing lead', [
+                    'error' => $e->getMessage(),
+                    'flags' => $quality['quality_flags'],
+                ]);
+            }
+
+            return response()->json([
+                'message' => 'Please provide a clear business inquiry including your tyre interest, estimated volume, and destination country.',
+                'code'    => 'low_quality_inquiry',
+                'flags'   => $quality['quality_flags'],
+            ], 422);
+        }
+
+        $quote = QuoteRequest::create([
+            'ref_number'           => $refNumber,
+            'full_name'            => $fullName,
+            'company_name'         => $companyName,
+            'email'                => $data['email'],
+            'phone'                => $data['phone'] ?? null,
+            'country'              => $data['country'],
+            'business_type'        => 'wholesale',
+            'tyre_category'        => $interest ? strtolower($interest) : 'mixed',
+            'quantity'             => $volumeLabel ?? 'unspecified',
+            'delivery_location'    => $data['country'],
+            'notes'                => $notes,
+            'status'               => 'new',
+            'review_status'        => $quality['review_status'],
+            'quality_score'        => $quality['quality_score'],
+            'quality_flags'        => $quality['quality_flags'],
+            'qualification_status' => $quality['review_status'],
+            'lead_source'          => 'tyre_wholesaler_landing',
+            'lead_metadata'        => $leadMetadata,
+            'ip_address'           => $request->ip(),
+        ]);
+
+        // Link to an existing customer by email (CRM-5 parity with store()).
+        $existingCustomer = Customer::whereRaw('LOWER(TRIM(email)) = ?', [strtolower(trim($quote->email))])->first();
+        if ($existingCustomer) {
+            $quote->update(['possible_customer_id' => $existingCustomer->id]);
+        }
+
+        $this->dispatchInquirySideEffects($quote, $quality);
+
+        $isNeedsReview = $quality['review_status'] === 'needs_review';
+
+        return response()->json([
+            'data' => [
+                'ref_number'    => $refNumber,
+                'message'       => $isNeedsReview
+                    ? 'Thank you — your wholesale inquiry has been received and will be reviewed by our team shortly.'
+                    : 'Thank you — your wholesale inquiry has been received. Our team will respond within 1 business day.',
+                'review_status' => $quality['review_status'],
+            ],
+        ], 201);
+    }
+
+    /**
+     * Fire post-creation side effects shared by the standard quote form and the
+     * landing-page lead intake: CRM-3B "needs review" notification, the admin
+     * notification email, and the customer acknowledgement email. Failures are
+     * logged but never bubble up — the lead is already safely persisted.
+     */
+    private function dispatchInquirySideEffects(QuoteRequest $quote, array $quality): void
+    {
+        $refNumber     = $quote->ref_number;
+        $quoteEmail    = config('mail.quote_email');
         $isNeedsReview = $quality['review_status'] === 'needs_review';
 
         // CRM-3B — in-app alert for inquiries CRM-2 flagged as needing review.
@@ -216,18 +391,6 @@ class QuoteRequestController extends Controller
                 'error' => $e->getMessage(),
             ]);
         }
-
-        $responseMessage = $isNeedsReview
-            ? 'Your inquiry has been received and will be reviewed by our team. We will be in touch shortly.'
-            : 'Quote request received. Our team will respond within 1 business day.';
-
-        return response()->json([
-            'data' => [
-                'ref_number'    => $refNumber,
-                'message'       => $responseMessage,
-                'review_status' => $quality['review_status'],
-            ],
-        ], 201);
     }
 
     private function resolveCustomerFromToken(Request $request): ?Customer

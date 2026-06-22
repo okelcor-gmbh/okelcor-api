@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-06-22 | Branch: `main` | Latest commit: `0e7ac0f`
+Last updated: 2026-06-22 | Branch: `main` | Latest commit: `431b790`
 
 ---
 
@@ -202,6 +202,22 @@ Last updated: 2026-06-22 | Branch: `main` | Latest commit: `0e7ac0f`
 | Trigger: `quote_needs_review` (CRM-2) | 🔧 | `quotes.manage` fan-out; severity warning |
 | `admin:notifications:due-followups` command (hourly) | 🔧 | Notifies assigned owner of due/overdue follow-ups; no customer emails |
 | Backend feature tests (16, MySQL) | ✅ | `Crm3bNotificationsTest` — 16 passed / 46 assertions |
+
+---
+
+## Landing Pages — Tyre Wholesaler (Session 44)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `lead_metadata` JSON column on `quote_requests` | 🔧 | Attribution bag (utm_*/gclid/fbclid/referrer/landing_page + interest/volume) |
+| `POST /api/v1/leads/tyre-wholesaler` | 🔧 | Dedicated SEO/ads intake; `throttle:quote-form` (5/hr) |
+| Field mapping (name/company/interest/volume → quote fields) | 🔧 | Accepts landing names + canonical names; phone optional |
+| `lead_source = tyre_wholesaler_landing` | 🔧 | + `lead_metadata` attribution persisted |
+| Reuses CRM-2 quality gate + CRM-3 defaults + CRM-3B notifications | 🔧 | Side-effects extracted to shared `dispatchInquirySideEffects()` |
+| Notes synthesised when blank | 🔧 | Guarantees NOT-NULL notes + meaningful CRM-2 scoring text |
+| Backend feature tests (8, MySQL) | ✅ | `WholesalerLandingLeadTest` — 8 passed / 38 assertions |
+
+**Frontend owns:** the `/tyre-wholesaler` page, landing header/footer, inventory overlays, the form UI, `/tyre-wholesaler/thank-you`, and analytics events. Backend contract is the endpoint above.
 
 ---
 
@@ -407,3 +423,4 @@ composer install --no-dev
 7. `2026_06_10_000001_extend_security_events_type_enum` (CRM-9 — audit-trail fix)
 8. `2026_06_15_000001_create_admin_notifications_table` (CRM-3 — admin notifications)
 9. `2026_06_22_000001_extend_admin_notifications_for_crm3b` (CRM-3B — notification center)
+10. `2026_06_22_000002_add_lead_metadata_to_quote_requests_table` (tyre-wholesaler landing attribution)

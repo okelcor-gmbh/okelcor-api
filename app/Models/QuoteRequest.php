@@ -68,6 +68,7 @@ class QuoteRequest extends Model
         'follow_up_completed_by',
         'lead_priority',
         'lead_source',
+        'lead_metadata',
         'lead_customer_type',
         'qualification_status',
         'qualification_reason',
@@ -96,6 +97,7 @@ class QuoteRequest extends Model
     protected $casts = [
         'tyre_items'               => 'array',
         'quality_flags'            => 'array',
+        'lead_metadata'            => 'array',
         'proposal_items'           => 'array',
         'proposal_total'           => 'decimal:2',
         'customer_accepted_at'     => 'datetime',

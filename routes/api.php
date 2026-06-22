@@ -252,6 +252,9 @@ Route::prefix('v1')->group(function () {
     // Quote requests — rate limited: 5/hour (stricter per spec)
     Route::middleware('throttle:quote-form')->group(function () {
         Route::post('quote-requests', [QuoteRequestController::class, 'store']);
+
+        // SEO/ads landing-page lead intake (/tyre-wholesaler)
+        Route::post('leads/tyre-wholesaler', [QuoteRequestController::class, 'storeWholesalerLead']);
     });
 
     // Newsletter confirmation (GET — no rate limit needed)
