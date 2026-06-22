@@ -210,14 +210,13 @@ Last updated: 2026-06-22 | Branch: `main` | Latest commit: `431b790`
 | Feature | Status | Notes |
 |---------|--------|-------|
 | `lead_metadata` JSON column on `quote_requests` | 🔧 | Attribution bag (utm_*/gclid/fbclid/referrer/landing_page + interest/volume) |
-| `POST /api/v1/leads/tyre-wholesaler` | 🔧 | Dedicated SEO/ads intake; `throttle:quote-form` (5/hr) |
-| Field mapping (name/company/interest/volume → quote fields) | 🔧 | Accepts landing names + canonical names; phone optional |
-| `lead_source = tyre_wholesaler_landing` | 🔧 | + `lead_metadata` attribution persisted |
-| Reuses CRM-2 quality gate + CRM-3 defaults + CRM-3B notifications | 🔧 | Side-effects extracted to shared `dispatchInquirySideEffects()` |
-| Notes synthesised when blank | 🔧 | Guarantees NOT-NULL notes + meaningful CRM-2 scoring text |
-| Backend feature tests (8, MySQL) | ✅ | `WholesalerLandingLeadTest` — 8 passed / 38 assertions |
+| `lead_source` + `lead_metadata` accepted on **`POST /api/v1/quote-requests`** | 🔧 | **The live path the frontend uses.** `quantity` now optional (NOT-NULL-safe fallback); attribution stripped from columns into `lead_metadata`; accepts nested `metadata{}` + flat `utm_*/gclid/fbclid/referrer` |
+| EU VAT enforcement gated to `lead_source=website_quote` | 🔧 | Landing/ads leads (no VAT field) not hard-blocked at inquiry stage; website form unchanged |
+| `POST /api/v1/leads/tyre-wholesaler` | 🔧 | Typed alternative intake (interest/volume enums, phone optional); not used by current frontend |
+| Reuses CRM-2 quality gate + CRM-3 defaults + CRM-3B notifications | 🔧 | Side-effects extracted to shared `dispatchInquirySideEffects()`; `lead_metadata` via shared `buildLeadMetadata()` |
+| Backend feature tests (11, MySQL) | ✅ | `WholesalerLandingLeadTest` — 11 passed / 51 assertions (covers `/quote-requests` landing path + VAT gate) |
 
-**Frontend owns:** the `/tyre-wholesaler` page, landing header/footer, inventory overlays, the form UI, `/tyre-wholesaler/thank-you`, and analytics events. Backend contract is the endpoint above.
+**Frontend owns:** the `/tyre-wholesaler` page, landing header/footer, inventory overlays, the form UI, `/tyre-wholesaler/thank-you`, and analytics events. **Frontend posts the landing form to the shared `/quote-requests` endpoint** (via its `/api/customer/quote-requests` proxy) with `lead_source=tyre_wholesaler_landing` + `metadata{}` attribution.
 
 ---
 

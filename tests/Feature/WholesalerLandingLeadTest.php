@@ -164,6 +164,100 @@ class WholesalerLandingLeadTest extends TestCase
             ->assertJsonValidationErrorFor('volume');
     }
 
+    // ── Shared /quote-requests endpoint (the path the frontend actually uses) ──
+
+    /**
+     * The landing form posts to the existing /quote-requests endpoint with the
+     * mapped payload (no quantity / tyre rows). It must succeed and persist
+     * lead_source + attribution.
+     */
+    public function test_quote_requests_accepts_landing_payload_without_quantity(): void
+    {
+        $resp = $this->postJson('/api/v1/quote-requests', [
+            'full_name'        => 'Ada Buyer',
+            'company_name'     => 'Lagos Tyre Importers Ltd',
+            'email'            => 'ada@lagos-tyres.com',
+            'country'          => 'Nigeria',
+            'delivery_location' => 'Nigeria',
+            'tyre_category'    => 'PCR Tyres',
+            'notes'            => 'Looking to import 205/55R16 passenger tyres in container volumes to Lagos.',
+            'business_type'    => 'Wholesale / Distribution',
+            'lead_source'      => 'tyre_wholesaler_landing',
+            'source'           => 'tyre_wholesaler_landing',
+            'primary_tyre_interest'    => 'PCR',
+            'estimated_monthly_volume' => '1-to-5',
+            'metadata' => [
+                'landing_page'             => '/tyre-wholesaler',
+                'primary_tyre_interest'    => 'PCR',
+                'estimated_monthly_volume' => '1-to-5',
+                'utm_source'               => 'google',
+                'gclid'                    => 'TeSt-GcLiD-123',
+            ],
+            'utm_source' => 'google',
+            'gclid'      => 'TeSt-GcLiD-123',
+            'fbclid'     => 'fb-456',
+            'referrer'   => 'https://www.google.com/',
+        ]);
+
+        $resp->assertCreated();
+
+        $quote = QuoteRequest::where('email', 'ada@lagos-tyres.com')->firstOrFail();
+        $this->assertSame('tyre_wholesaler_landing', $quote->lead_source);
+        $this->assertSame('PCR Tyres', $quote->tyre_category);
+        $this->assertNotEmpty($quote->quantity);                 // NOT-NULL-safe fallback applied
+        $this->assertSame('google', $quote->lead_metadata['utm_source']);
+        $this->assertSame('TeSt-GcLiD-123', $quote->lead_metadata['gclid']);
+        $this->assertSame('fb-456', $quote->lead_metadata['fbclid']);
+        $this->assertSame('1-to-5', $quote->lead_metadata['estimated_monthly_volume']);
+
+        // Attribution keys must NOT leak into real columns / break the insert.
+        $this->assertArrayNotHasKey('utm_source', $quote->getAttributes());
+    }
+
+    /**
+     * An EU-based landing lead (no VAT field) must not be hard-blocked by EU VAT
+     * enforcement — that gate only applies to the standard website quote form.
+     */
+    public function test_eu_landing_lead_is_not_blocked_by_vat_enforcement(): void
+    {
+        $this->postJson('/api/v1/quote-requests', [
+            'full_name'         => 'Hans Müller',
+            'company_name'      => 'Bayern Reifen GmbH',
+            'email'             => 'hans@bayern-reifen.de',
+            'country'           => 'France',
+            'delivery_location' => 'France',
+            'tyre_category'     => 'TBR Tyres',
+            'notes'             => 'Interested in 295/80R22.5 truck tyres, monthly container volumes.',
+            'lead_source'       => 'tyre_wholesaler_landing',
+        ])->assertCreated();
+
+        $this->assertDatabaseHas('quote_requests', [
+            'email'       => 'hans@bayern-reifen.de',
+            'lead_source' => 'tyre_wholesaler_landing',
+        ]);
+    }
+
+    /**
+     * The standard website quote form is unaffected: lead_source defaults to
+     * website_quote and EU VAT enforcement still applies.
+     */
+    public function test_standard_website_quote_still_enforces_eu_vat(): void
+    {
+        $resp = $this->postJson('/api/v1/quote-requests', [
+            'full_name'         => 'Hans Müller',
+            'company_name'      => 'Bayern Reifen GmbH',
+            'email'             => 'hans@bayern-reifen.de',
+            'country'           => 'France',
+            'delivery_location' => 'Paris, France',
+            'tyre_category'     => 'TBR',
+            'quantity'          => '500',
+            'notes'             => 'Interested in 295/80R22.5 truck tyres, monthly container volumes.',
+        ]);
+
+        // No VAT number → blocked for an EU B2B website submission.
+        $resp->assertStatus(422)->assertJsonValidationErrorFor('vat_number');
+    }
+
     public function test_links_to_existing_customer_by_email(): void
     {
         $customer = Customer::create([

@@ -31,7 +31,9 @@ class StoreQuoteRequestRequest extends FormRequest
             'tyre_category'     => ['required', 'string', 'max:100'],
             'brand_preference'  => ['nullable', 'string', 'max:200'],
             'tyre_size'         => ['nullable', 'string', 'max:100'],   // legacy — kept for BC
-            'quantity'          => ['required', 'string', 'max:100'],   // legacy — kept for BC
+            // Optional: the rich website form always sends it; SEO/ads landing
+            // leads omit it. A NOT-NULL-safe fallback is applied in the controller.
+            'quantity'          => ['nullable', 'string', 'max:100'],
             'tyre_condition'    => ['nullable', 'string', 'in:new,used'],
             'used_tyre_grade'   => ['nullable', 'string', 'in:grade_a,grade_b,mixed'],
             'used_tyre_notes'   => ['nullable', 'string', 'max:500'],
@@ -55,6 +57,23 @@ class StoreQuoteRequestRequest extends FormRequest
             'notes'         => ['required', 'string', 'max:2000'],
             'vat_number'    => ['nullable', 'string', 'min:4', 'max:20'],
             'attachment'    => ['nullable', 'file', 'mimes:pdf,csv,xls,xlsx', 'max:10240'],
+
+            // Lead source + conversion attribution (landing pages / ads).
+            // Not stored as columns directly — folded into lead_metadata.
+            'lead_source'   => ['nullable', 'string', 'max:100'],
+            'source'        => ['nullable', 'string', 'max:100'],
+            'metadata'      => ['nullable', 'array'],
+            'primary_tyre_interest'    => ['nullable', 'string', 'max:100'],
+            'estimated_monthly_volume' => ['nullable', 'string', 'max:100'],
+            'landing_page'  => ['nullable', 'string', 'max:255'],
+            'utm_source'    => ['nullable', 'string', 'max:255'],
+            'utm_medium'    => ['nullable', 'string', 'max:255'],
+            'utm_campaign'  => ['nullable', 'string', 'max:255'],
+            'utm_term'      => ['nullable', 'string', 'max:255'],
+            'utm_content'   => ['nullable', 'string', 'max:255'],
+            'gclid'         => ['nullable', 'string', 'max:512'],
+            'fbclid'        => ['nullable', 'string', 'max:512'],
+            'referrer'      => ['nullable', 'string', 'max:1024'],
         ];
     }
 }

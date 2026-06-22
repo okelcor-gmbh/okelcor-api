@@ -16,6 +16,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\PersonalAccessToken;
@@ -32,6 +33,22 @@ class QuoteRequestController extends Controller
     {
         $validated = $request->validated();
 
+        // Separate lead source + conversion attribution from the quote columns.
+        $leadSource   = $validated['lead_source'] ?? $validated['source'] ?? 'website_quote';
+        $leadMetadata = $this->buildLeadMetadata($validated);
+        $validated    = Arr::except($validated, [
+            'lead_source', 'source', 'metadata',
+            'primary_tyre_interest', 'estimated_monthly_volume', 'landing_page',
+            'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+            'gclid', 'fbclid', 'referrer',
+        ]);
+
+        // quantity is optional (landing/ads leads omit it) but the column is
+        // NOT NULL — fall back to the stated volume, else a clear placeholder.
+        if (empty($validated['quantity'])) {
+            $validated['quantity'] = $leadMetadata['estimated_monthly_volume'] ?? 'Not specified';
+        }
+
         // ── Quality gate ─────────────────────────────────────────────────────
         $quality = $this->qualityService->score($validated);
 
@@ -46,6 +63,8 @@ class QuoteRequestController extends Controller
                     'review_status'  => 'spam',
                     'quality_score'  => $quality['quality_score'],
                     'quality_flags'  => $quality['quality_flags'],
+                    'lead_source'    => $leadSource,
+                    'lead_metadata'  => $leadMetadata ?: null,
                     'ip_address'     => $request->ip(),
                     'vat_number'     => null,
                     'vat_valid'      => null,
@@ -88,8 +107,11 @@ class QuoteRequestController extends Controller
             $vatValidBool = (bool) $vatResult['valid'];
         }
 
-        // EU VAT enforcement: B2B customers outside Germany must supply a valid VAT number
-        if ($this->taxService->requiresEuVat($validated['country'], $customerType)) {
+        // EU VAT enforcement: B2B customers outside Germany must supply a valid
+        // VAT number. Only enforced for the standard website quote form, which
+        // collects a VAT field — marketing/ads landing leads capture interest
+        // without it and must not be hard-blocked at the inquiry stage.
+        if ($leadSource === 'website_quote' && $this->taxService->requiresEuVat($validated['country'], $customerType)) {
             if (! $vatNumber) {
                 return response()->json([
                     'message' => 'A valid EU VAT number is required for business purchases in EU member states.',
@@ -114,7 +136,8 @@ class QuoteRequestController extends Controller
                 'quality_score'        => $quality['quality_score'],
                 'quality_flags'        => $quality['quality_flags'],
                 'qualification_status' => $quality['review_status'],  // mirrors review_status at creation
-                'lead_source'          => 'website_quote',
+                'lead_source'          => $leadSource,
+                'lead_metadata'        => $leadMetadata ?: null,
                 'ip_address'           => $request->ip(),
                 'vat_number'           => $vatNumber,
                 'vat_valid'            => $vatValid,
@@ -309,6 +332,31 @@ class QuoteRequestController extends Controller
                 'review_status' => $quality['review_status'],
             ],
         ], 201);
+    }
+
+    /**
+     * Fold a submission's conversion-attribution + landing extras into a single
+     * lead_metadata bag. Accepts both a nested `metadata` object and flat
+     * top-level keys (flat wins). Returns [] when nothing meaningful is present.
+     *
+     * @param  array<string, mixed>  $validated
+     * @return array<string, mixed>
+     */
+    private function buildLeadMetadata(array $validated): array
+    {
+        $nested = (isset($validated['metadata']) && is_array($validated['metadata']))
+            ? $validated['metadata']
+            : [];
+
+        $flat = Arr::only($validated, [
+            'landing_page', 'primary_tyre_interest', 'estimated_monthly_volume',
+            'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+            'gclid', 'fbclid', 'referrer',
+        ]);
+
+        $merged = array_merge($nested, $flat);
+
+        return array_filter($merged, fn ($v) => $v !== null && $v !== '');
     }
 
     /**
