@@ -465,12 +465,19 @@ class AdminQuoteRequestController extends Controller
         ]);
 
         if ($data['assigned_to'] !== $previousAssignee) {
-            AdminNotificationService::notify(
-                $data['assigned_to'],
-                'lead_assigned',
-                'New lead assigned to you',
-                sprintf('Quote %s from %s', $quote->ref_number, $quote->company_name ?: $quote->full_name),
-                "/admin/quotes/{$quote->id}"
+            AdminNotificationService::notifyUser(
+                adminUserId: $data['assigned_to'],
+                type:        'lead_assigned',
+                title:       'New lead assigned to you',
+                body:        sprintf(
+                    '%s has been assigned to you for follow-up.',
+                    $quote->company_name ?: $quote->full_name
+                ),
+                actionUrl:   "/admin/quotes/{$quote->id}",
+                severity:    'info',
+                relatedType: 'quote_request',
+                relatedId:   $quote->id,
+                metadata:    ['ref_number' => $quote->ref_number],
             );
         }
 

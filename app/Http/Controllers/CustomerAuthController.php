@@ -10,6 +10,7 @@ use App\Models\Invoice;
 use App\Models\LoginHistory;
 use App\Models\Order;
 use App\Models\QuoteRequest;
+use App\Services\AdminNotificationService;
 use App\Services\InvoiceService;
 use App\Services\SecurityEventService;
 use App\Services\TaxService;
@@ -71,6 +72,22 @@ class CustomerAuthController extends Controller
             'customer_pending_review_created', $customer->id,
             $request->ip(), $request->userAgent(),
             "New customer registration pending review: {$customer->email}", 'info'
+        );
+
+        // CRM-3B — alert admins that a new registration needs approval.
+        AdminNotificationService::notifyPermission(
+            permission:  'customers.manage',
+            type:        'customer_approval_needed',
+            title:       'New customer awaiting approval',
+            body:        sprintf(
+                '%s registered and is pending review.',
+                $customer->company_name ?: trim($customer->first_name . ' ' . $customer->last_name)
+            ),
+            actionUrl:   '/admin/customer-approvals',
+            severity:    'warning',
+            relatedType: 'customer',
+            relatedId:   $customer->id,
+            metadata:    ['email' => $customer->email],
         );
 
         return response()->json([

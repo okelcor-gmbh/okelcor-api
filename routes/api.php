@@ -28,6 +28,7 @@ use App\Http\Controllers\Admin\AdminOrderController;
 use App\Http\Controllers\Admin\AdminOrderShipmentEventController;
 use App\Http\Controllers\Admin\OrderImportController;
 use App\Http\Controllers\Admin\AdminNotificationController;
+use App\Http\Controllers\Admin\AdminWorkQueueController;
 use App\Http\Controllers\Admin\AdminProductController;
 use App\Http\Controllers\Admin\AdminQuoteRequestController;
 use App\Http\Controllers\Admin\AdminQuoteAttachmentController;
@@ -298,10 +299,15 @@ Route::prefix('v1')->group(function () {
         Route::post('logout', [AuthController::class, 'logout']);
         Route::get('me', [AuthController::class, 'me']);
 
-        // Notifications (CRM-3) — all authenticated admin users, scoped to self
+        // Notifications (CRM-3 / CRM-3B) — all authenticated admin users, scoped to self
         Route::get('notifications', [AdminNotificationController::class, 'index']);
-        Route::post('notifications/{id}/read', [AdminNotificationController::class, 'markRead']);
+        Route::get('notifications/unread-count', [AdminNotificationController::class, 'unreadCount']);
         Route::post('notifications/read-all', [AdminNotificationController::class, 'readAll']);
+        Route::post('notifications/{id}/read', [AdminNotificationController::class, 'markRead']);
+        Route::post('notifications/{id}/dismiss', [AdminNotificationController::class, 'dismiss']);
+
+        // Work queue (CRM-3B) — actionable work for the logged-in admin
+        Route::get('my-work', [AdminWorkQueueController::class, 'index']);
 
         // 2FA management — all authenticated admin users
         Route::prefix('2fa')->group(function () {

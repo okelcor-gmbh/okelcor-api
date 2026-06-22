@@ -7,6 +7,7 @@ use App\Mail\QuoteRequestAcknowledgement;
 use App\Mail\QuoteRequestReceived;
 use App\Models\Customer;
 use App\Models\QuoteRequest;
+use App\Services\AdminNotificationService;
 use App\Services\InquiryQualityService;
 use App\Services\TaxService;
 use App\Services\VatValidationService;
@@ -146,6 +147,25 @@ class QuoteRequestController extends Controller
         // Admin notification — send for both qualified and needs_review; never for spam
         $quoteEmail   = config('mail.quote_email');
         $isNeedsReview = $quality['review_status'] === 'needs_review';
+
+        // CRM-3B — in-app alert for inquiries CRM-2 flagged as needing review.
+        if ($isNeedsReview) {
+            AdminNotificationService::notifyPermission(
+                permission:  'quotes.manage',
+                type:        'quote_needs_review',
+                title:       'Inquiry needs review',
+                body:        sprintf(
+                    'Inquiry %s from %s was flagged for manual review.',
+                    $quote->ref_number,
+                    $quote->company_name ?: $quote->full_name
+                ),
+                actionUrl:   "/admin/quotes/{$quote->id}",
+                severity:    'warning',
+                relatedType: 'quote_request',
+                relatedId:   $quote->id,
+                metadata:    ['ref_number' => $quote->ref_number, 'quality_score' => $quality['quality_score']],
+            );
+        }
 
         if ($quoteEmail) {
             try {

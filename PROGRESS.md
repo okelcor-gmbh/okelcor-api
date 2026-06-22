@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-06-15 | Branch: `main` | Latest commit: `0a3c79c`
+Last updated: 2026-06-22 | Branch: `main` | Latest commit: `0e7ac0f`
 
 ---
 
@@ -184,6 +184,27 @@ Last updated: 2026-06-15 | Branch: `main` | Latest commit: `0a3c79c`
 
 ---
 
+## CRM-3B — Admin Notification Center & Work Queue (Session 43)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `admin_notifications` extended (severity/body/action_url/related_type/related_id/dismissed_at/metadata) | 🔧 | Additive; `message`/`link` kept & mirrored from `body`/`action_url` |
+| `AdminNotificationService` rebuilt | 🔧 | notifyUser / notifyPermission / notifyRoles / markRead / markAllRead / dismiss / unreadCount; legacy `notify()` wrapper kept |
+| Dedupe (metadata `dedupe_key`) | 🔧 | Suppresses duplicate **unread**; recurring events pass `includeRead=true` (one per due-date) |
+| `GET /admin/notifications` (filters: unread/type/severity/page) | 🔧 | Paginated, scoped to self, excludes dismissed |
+| `GET /admin/notifications/unread-count` | 🔧 | |
+| `POST /admin/notifications/{id}/read` / `read-all` / `{id}/dismiss` | 🔧 | Owner-scoped (404 if not owned) |
+| `GET /admin/my-work` work queue | 🔧 | assigned leads / due follow-ups / proposals accepted / approvals + access requests (customers.manage) |
+| Trigger: `lead_assigned` (assign endpoint) | 🔧 | |
+| Trigger: `proposal_accepted` (public + authenticated) | 🔧 | Assigned owner, else `quotes.manage` fan-out; severity success |
+| Trigger: `customer_access_requested` (portal) | 🔧 | `customers.manage` fan-out; severity warning |
+| Trigger: `customer_approval_needed` (registration) | 🔧 | `customers.manage` fan-out; severity warning |
+| Trigger: `quote_needs_review` (CRM-2) | 🔧 | `quotes.manage` fan-out; severity warning |
+| `admin:notifications:due-followups` command (hourly) | 🔧 | Notifies assigned owner of due/overdue follow-ups; no customer emails |
+| Backend feature tests (16, MySQL) | ✅ | `Crm3bNotificationsTest` — 16 passed / 46 assertions |
+
+---
+
 ## eBay Integration (Sessions 15–25)
 
 | Phase | Feature | Status |
@@ -294,7 +315,7 @@ Last updated: 2026-06-15 | Branch: `main` | Latest commit: `0a3c79c`
 | `customer_timeline_events` | CRM-8 append-only buyer lifecycle timeline 🔧 |
 | `customer_access_requests` | CRM-8 customer-initiated access requests 🔧 |
 | `customer_communications` | CRM communication log |
-| `admin_notifications` | CRM-3 per-admin-user notification feed 🔧 |
+| `admin_notifications` | CRM-3/3B per-admin-user notification feed + work queue 🔧 |
 | `ebay_tokens` | Encrypted eBay OAuth tokens |
 | `ebay_listing_logs` | eBay listing action audit |
 | `ebay_order_sync_logs` | eBay order sync audit |
@@ -385,3 +406,4 @@ composer install --no-dev
 6. `2026_06_08_000004_create_customer_access_requests_table` (CRM-8)
 7. `2026_06_10_000001_extend_security_events_type_enum` (CRM-9 — audit-trail fix)
 8. `2026_06_15_000001_create_admin_notifications_table` (CRM-3 — admin notifications)
+9. `2026_06_22_000001_extend_admin_notifications_for_crm3b` (CRM-3B — notification center)

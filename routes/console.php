@@ -31,3 +31,9 @@ Schedule::command('crm:follow-ups-digest')
     ->withoutOverlapping()
     ->onOneServer()
     ->appendOutputTo(storage_path('logs/crm-digest.log'));
+
+Schedule::command('admin:notifications:due-followups')
+    ->hourly()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/admin-notifications.log'));

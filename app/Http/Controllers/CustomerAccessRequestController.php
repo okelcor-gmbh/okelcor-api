@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\CustomerAccessRequest;
+use App\Services\AdminNotificationService;
 use App\Services\CustomerTimelineService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -70,6 +71,21 @@ class CustomerAccessRequestController extends Controller
             "Customer requested '{$data['requested_access']}' access."
                 . ($data['reason'] ? ' Reason: ' . $data['reason'] : ''),
             ['requested_access' => $data['requested_access'], 'request_id' => $accessRequest->id]
+        );
+
+        // CRM-3B — alert admins who can action access requests.
+        $customerName = $customer->company_name ?: trim($customer->first_name . ' ' . $customer->last_name);
+        AdminNotificationService::notifyPermission(
+            permission:  'customers.manage',
+            type:        'customer_access_requested',
+            title:       'Customer access request',
+            body:        sprintf("%s requested '%s' access.", $customerName, $data['requested_access']),
+            actionUrl:   '/admin/customer-approvals?tab=access_requests',
+            severity:    'warning',
+            relatedType: 'customer',
+            relatedId:   $customer->id,
+            metadata:    ['requested_access' => $data['requested_access'], 'request_id' => $accessRequest->id],
+            dedupeKey:   "customer_access_requested:access_request:{$accessRequest->id}",
         );
 
         return response()->json([

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Customer;
 use App\Models\CustomerCommunication;
 use App\Models\QuoteRequest;
+use App\Services\AdminNotificationService;
 use App\Services\CustomerTimelineService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -110,6 +111,8 @@ class ProposalController extends Controller
         $this->logCommunication($quote, 'system', 'inbound',
             "Proposal {$quote->proposal_number} accepted",
             'Customer accepted the proposal via the acceptance link.');
+
+        $this->notifyProposalAccepted($quote);
 
         // CRM-8 timeline — resolve the customer this quote belongs to.
         $customerId = $quote->customer_id
@@ -270,6 +273,49 @@ class ProposalController extends Controller
             'expires_at'        => $quote->proposal_expires_at?->toIso8601String(),
             'already_actioned'  => in_array($quote->proposal_status, ['accepted', 'rejected', 'expired', 'converted'], true),
         ];
+    }
+
+    /**
+     * CRM-3B — notify the assigned owner (or the sales/admin queue) that a
+     * proposal was accepted and is awaiting conversion to an order.
+     */
+    private function notifyProposalAccepted(QuoteRequest $quote): void
+    {
+        $title = 'Proposal accepted';
+        $body  = sprintf(
+            'Proposal %s from %s was accepted — ready to convert to an order.',
+            $quote->proposal_number,
+            $quote->company_name ?: $quote->full_name
+        );
+        $url = "/admin/quotes/{$quote->id}";
+
+        if ($quote->assigned_to) {
+            AdminNotificationService::notifyUser(
+                adminUserId: (int) $quote->assigned_to,
+                type:        'proposal_accepted',
+                title:       $title,
+                body:        $body,
+                actionUrl:   $url,
+                severity:    'success',
+                relatedType: 'quote_request',
+                relatedId:   $quote->id,
+                metadata:    ['ref_number' => $quote->ref_number, 'proposal_number' => $quote->proposal_number],
+            );
+
+            return;
+        }
+
+        AdminNotificationService::notifyPermission(
+            permission:  'quotes.manage',
+            type:        'proposal_accepted',
+            title:       $title,
+            body:        $body,
+            actionUrl:   $url,
+            severity:    'success',
+            relatedType: 'quote_request',
+            relatedId:   $quote->id,
+            metadata:    ['ref_number' => $quote->ref_number, 'proposal_number' => $quote->proposal_number],
+        );
     }
 
     private function logCommunication(
