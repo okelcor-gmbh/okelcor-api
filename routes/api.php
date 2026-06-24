@@ -12,6 +12,7 @@ use App\Http\Controllers\BrandController;
 use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\HeroSlideController;
+use App\Http\Controllers\LocaleController;
 use App\Http\Controllers\NewsletterController;
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\ProductController;
@@ -182,6 +183,10 @@ Route::prefix('v1')->group(function () {
         // Site settings (public read-only)
         Route::get('settings/public', [SettingController::class, 'public']);
         Route::get('settings', [SettingController::class, 'index']);
+
+        // i18n — locale auto-detection (country -> language)
+        Route::get('i18n/locales', [LocaleController::class, 'index']);
+        Route::get('i18n/resolve', [LocaleController::class, 'resolve']);
     });
 
     // Container tracking — rate limited: 30/min (guards external DHL + ShipsGo calls)
