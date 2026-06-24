@@ -12,7 +12,7 @@ this API. You are building the backend only.
 ## Local Development URLs
 - This API runs at: `http://localhost:8000`
 - Next.js frontend runs at: `http://localhost:3000`
-- Production API will be: `https://api.okelcor.de`
+- Production API will be: `https://api.okelcor.com`
 - Production frontend will be: `https://okelcor.com`
 
 ## Tech Stack
