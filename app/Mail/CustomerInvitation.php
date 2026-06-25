@@ -21,7 +21,9 @@ class CustomerInvitation extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: 'Your Okelcor account invitation',
+            // Rendered within the recipient's locale (Customer implements
+            // HasLocalePreference), so __() resolves to their language.
+            subject: __('emails.invitation.subject'),
         );
     }
 

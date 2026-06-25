@@ -46,6 +46,7 @@ class CustomerAuthController extends Controller
             'password'      => ['required', 'confirmed', Password::min(8)],
             'phone'         => ['nullable', 'string', 'max:50'],
             'country'       => ['nullable', 'string', 'max:100'],
+            'preferred_language' => ['nullable', 'in:en,de,fr,es'],
             'company_name'  => [
                 $request->input('customer_type') === 'b2b' ? 'required' : 'nullable',
                 'string', 'max:200',
@@ -447,6 +448,7 @@ class CustomerAuthController extends Controller
             'last_name'    => ['sometimes', 'string', 'max:100'],
             'phone'        => ['nullable', 'string', 'max:50'],
             'country'      => ['nullable', 'string', 'max:100'],
+            'preferred_language' => ['sometimes', 'in:en,de,fr,es'],
             'company_name' => ['nullable', 'string', 'max:200'],
             'vat_number'   => ['nullable', 'string', 'max:20'],
             'industry'     => ['nullable', 'string', 'max:100'],
@@ -770,6 +772,7 @@ class CustomerAuthController extends Controller
             'email'                          => $c->email,
             'phone'                          => $c->phone,
             'country'                        => $c->country,
+            'preferred_language'             => $c->preferredLocale(),
             'company_name'                   => $c->company_name,
             'vat_number'                     => $c->vat_number,
             'vat_verified'                   => $c->vat_verified,

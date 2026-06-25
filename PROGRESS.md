@@ -235,6 +235,42 @@ Last updated: 2026-06-22 | Branch: `main` | Latest commit: `431b790`
 
 ---
 
+## Lead Funnel Analytics (Session 46)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `GET /admin/quote-requests/funnel?from=&to=` | 🔧 | `quotes.manage`; funnel stages (leads→qualified→proposal_sent→converted) + rates |
+| Breakdown by `lead_source`, `lead_customer_type`, month | 🔧 | conversion rate per group |
+| UTM attribution from `lead_metadata` | 🔧 | utm_source/campaign/medium top-10 with conversions; only when column exists |
+| Deploy-order-safe | 🔧 | Built on always-present `qualification_status`; enrichment guarded by `Schema::hasColumn` |
+| Backend feature tests (4, MySQL) | ✅ | `LeadFunnelAnalyticsTest` — 4 passed / 17 assertions |
+
+---
+
+## Localized Emails / Documents — Infrastructure (Session 46)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `preferred_language` on `customers` (en/de/fr/es, default en) | 🔧 | Additive, guarded migration; in `$fillable` |
+| Customer implements `HasLocalePreference` | 🔧 | Laravel auto-localizes any mail/notification sent to the customer |
+| `lang/{en,de,fr,es}/emails.php` | 🔧 | EN complete (source); DE/FR/ES **drafted — need native-speaker review**; missing keys fall back to EN |
+| Invitation email converted to `__()` (reference pattern) | 🔧 | HTML + text + subject localized; tested in all 4 languages |
+| `preferred_language` accepted on register + profile, returned in `/auth/me` | 🔧 | |
+| Backend tests (4) | ✅ | `CustomerEmailLocalizationTest` — 4 passed / 12 assertions |
+
+**Follow-up (not done):** convert the remaining ~20 mailables + the trade-document PDFs to `__()`, and get professional DE/FR/ES translations. The plumbing is in place — each converted template starts working the moment its lang keys exist.
+
+---
+
+## Ops / CI (Session 46)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `DEPLOY_RUNBOOK.md` | 🔧 | Audited 10-migration deploy plan (backup → pretend → migrate → cache) + eBay secret rotation steps |
+| `.github/workflows/ci.yml` | 🔧 | Runs migrations + full suite against **MySQL 8** on push/PR — closes the SQLite/MySQL schema-drift gap |
+
+---
+
 ## eBay Integration (Sessions 15–25)
 
 | Phase | Feature | Status |

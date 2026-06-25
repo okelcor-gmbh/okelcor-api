@@ -1,16 +1,20 @@
-Hello {{ $customer->first_name }},
+{{ __('emails.invitation.greeting', ['name' => $customer->first_name]) }}
 
-Your Okelcor B2B wholesale account has been approved.
+{{ __('emails.invitation.approved') }}
 
-Click the link below to set your password and activate your account:
+{{ __('emails.invitation.cta_intro') }}
 
 {{ $activationUrl }}
 
-This invitation link expires in 48 hours. If it expires, contact our team to request a new one.
+{{ __('emails.invitation.expiry') }} {{ __('emails.invitation.expiry_note') }}
 
-Once activated, you'll have access to place and track wholesale tyre orders, submit quote requests, view invoices and trade documents, and manage delivery addresses.
+{{ __('emails.invitation.access_intro') }}
+- {{ __('emails.invitation.access_orders') }}
+- {{ __('emails.invitation.access_quotes') }}
+- {{ __('emails.invitation.access_docs') }}
+- {{ __('emails.invitation.access_addresses') }}
 
-If you have any questions, simply reply to this email.
+{{ __('emails.invitation.questions') }}
 
-Welcome aboard,
-The Okelcor Team
+{{ __('emails.invitation.signoff') }}
+{{ __('emails.invitation.team') }}

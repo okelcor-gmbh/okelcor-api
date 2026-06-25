@@ -32,6 +32,7 @@ use App\Http\Controllers\Admin\AdminNotificationController;
 use App\Http\Controllers\Admin\AdminWorkQueueController;
 use App\Http\Controllers\Admin\AdminProductController;
 use App\Http\Controllers\Admin\AdminQuoteRequestController;
+use App\Http\Controllers\Admin\AdminLeadFunnelController;
 use App\Http\Controllers\Admin\AdminQuoteAttachmentController;
 use App\Http\Controllers\Admin\AdminSettingController;
 use App\Http\Controllers\Admin\AdminUserController;
@@ -485,6 +486,7 @@ Route::prefix('v1')->group(function () {
         // Read — quotes.manage (sales_manager can view)
         Route::middleware('permission:quotes.manage')->group(function () {
             Route::get('quote-requests/summary', [AdminQuoteRequestController::class, 'summary']);
+            Route::get('quote-requests/funnel', [AdminLeadFunnelController::class, 'index']);
             Route::get('quote-requests', [AdminQuoteRequestController::class, 'index']);
             Route::get('quote-requests/{id}', [AdminQuoteRequestController::class, 'show']);
             // Attachments streamed through controller — never via public URL

@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Your Okelcor account invitation</title>
+    <title>{{ __('emails.invitation.subject') }}</title>
     <style>
         body { font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 0; }
         .container { max-width: 600px; margin: 40px auto; background: #ffffff; border-radius: 8px; overflow: hidden; }
@@ -24,28 +24,28 @@
             <h1>Okelcor</h1>
         </div>
         <div class="body">
-            <p>Hello {{ $customer->first_name }},</p>
-            <p>Your Okelcor B2B wholesale account has been approved. You're one step away from accessing our platform.</p>
-            <p>Click the button below to set your password and activate your account:</p>
+            <p>{{ __('emails.invitation.greeting', ['name' => $customer->first_name]) }}</p>
+            <p>{{ __('emails.invitation.approved') }}</p>
+            <p>{{ __('emails.invitation.cta_intro') }}</p>
             <p style="text-align:center;">
-                <a href="{{ $activationUrl }}" class="btn">Activate My Account</a>
+                <a href="{{ $activationUrl }}" class="btn">{{ __('emails.invitation.cta_button') }}</a>
             </p>
             <div class="highlight">
-                <p style="margin:0;"><strong>This invitation link expires in 48 hours.</strong><br>
-                If it expires, please contact our team to request a new one.</p>
+                <p style="margin:0;"><strong>{{ __('emails.invitation.expiry') }}</strong><br>
+                {{ __('emails.invitation.expiry_note') }}</p>
             </div>
-            <p>Once activated, you'll have access to:</p>
+            <p>{{ __('emails.invitation.access_intro') }}</p>
             <ul>
-                <li>Place and track wholesale tyre orders</li>
-                <li>Submit and manage quote requests</li>
-                <li>View invoices and trade documents</li>
-                <li>Manage your delivery addresses</li>
+                <li>{{ __('emails.invitation.access_orders') }}</li>
+                <li>{{ __('emails.invitation.access_quotes') }}</li>
+                <li>{{ __('emails.invitation.access_docs') }}</li>
+                <li>{{ __('emails.invitation.access_addresses') }}</li>
             </ul>
-            <p>If you have any questions before activating, reply to this email and our team will be happy to help.</p>
-            <p>Welcome aboard,<br><strong>The Okelcor Team</strong></p>
+            <p>{{ __('emails.invitation.questions') }}</p>
+            <p>{{ __('emails.invitation.signoff') }}<br><strong>{{ __('emails.invitation.team') }}</strong></p>
         </div>
         <div class="footer">
-            <p>If you're having trouble clicking the button, copy and paste the URL below into your browser:<br>
+            <p>{{ __('emails.invitation.trouble') }}<br>
             <a href="{{ $activationUrl }}" style="color:#e63946;word-break:break-all;">{{ $activationUrl }}</a></p>
         </div>
     </div>

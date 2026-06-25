@@ -2,13 +2,14 @@
 
 namespace App\Models;
 
+use Illuminate\Contracts\Translation\HasLocalePreference;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
-class Customer extends Authenticatable
+class Customer extends Authenticatable implements HasLocalePreference
 {
     use HasApiTokens, HasFactory, Notifiable;
 
@@ -20,6 +21,7 @@ class Customer extends Authenticatable
         'password',
         'phone',
         'country',
+        'preferred_language',
         'company_name',
         'vat_number',
         'vat_verified',
@@ -94,6 +96,18 @@ class Customer extends Authenticatable
     public function getIsLockedAttribute(): bool
     {
         return $this->status === 'locked';
+    }
+
+    /**
+     * The customer's preferred locale for mail & notifications.
+     * Implements HasLocalePreference so Laravel auto-localizes anything sent to
+     * this customer. Falls back to English for unset / unsupported values.
+     */
+    public function preferredLocale(): string
+    {
+        return in_array($this->preferred_language, ['en', 'de', 'fr', 'es'], true)
+            ? $this->preferred_language
+            : 'en';
     }
 
     public function addresses(): HasMany
