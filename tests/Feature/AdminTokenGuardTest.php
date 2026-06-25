@@ -182,11 +182,18 @@ class AdminTokenGuardTest extends TestCase
     public function test_editor_passes_ensureAdminToken_but_blocked_by_role_on_users(): void
     {
         // EnsureAdminToken passes (editor IS an AdminUser).
-        // CheckAdminRole must return 403 because users requires super_admin or admin.
-        $this->actingAs($this->makeAdmin('editor'), 'sanctum')
+        // 2FA is mandatory and runs before the access check (ensure.admin.2fa), so
+        // the editor must have 2FA confirmed to reach it — otherwise the request
+        // is short-circuited with 428 (two_factor_required).
+        // /admin/users is guarded by permission:admins.manage, which an editor
+        // lacks, so the access guard must return 403.
+        $editor = $this->makeAdmin('editor');
+        $editor->two_factor_confirmed_at = now();
+
+        $this->actingAs($editor, 'sanctum')
             ->getJson('/api/v1/admin/users')
             ->assertStatus(403)
-            ->assertJson(['message' => 'Forbidden. Insufficient role.']);
+            ->assertJson(['message' => 'Forbidden. You do not have permission to perform this action.']);
     }
 
     public function test_editor_can_access_products_via_role(): void
