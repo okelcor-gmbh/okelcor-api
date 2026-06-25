@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-06-22 | Branch: `main` | Latest commit: `431b790`
+Last updated: 2026-06-25 | Branch: `main` | Latest commit: `b8192d6`
 
 ---
 
@@ -267,7 +267,8 @@ Last updated: 2026-06-22 | Branch: `main` | Latest commit: `431b790`
 | Feature | Status | Notes |
 |---------|--------|-------|
 | `DEPLOY_RUNBOOK.md` | 🔧 | Audited 10-migration deploy plan (backup → pretend → migrate → cache) + eBay secret rotation steps |
-| `.github/workflows/ci.yml` | 🔧 | Runs migrations + full suite against **MySQL 8** on push/PR — closes the SQLite/MySQL schema-drift gap |
+| `.github/workflows/ci.yml` | ✅ | Runs migrations + full suite against **MySQL 8** on push/PR — closes the SQLite/MySQL schema-drift gap |
+| Fixed stale `AdminTokenGuardTest` (CI surfaced it) | ✅ | Predated mandatory 2FA + role→`permission:admins.manage` move; full suite now green on MySQL (**88 passed**) |
 
 ---
 
@@ -474,3 +475,6 @@ composer install --no-dev
 8. `2026_06_15_000001_create_admin_notifications_table` (CRM-3 — admin notifications)
 9. `2026_06_22_000001_extend_admin_notifications_for_crm3b` (CRM-3B — notification center)
 10. `2026_06_22_000002_add_lead_metadata_to_quote_requests_table` (tyre-wholesaler landing attribution)
+11. `2026_06_25_000001_add_preferred_language_to_customers_table` (localized emails/documents)
+
+All 11 verified to apply cleanly on MySQL via CI (`migrate:fresh`) and `LeadFunnelAnalyticsTest`'s `RefreshDatabase`. See `DEPLOY_RUNBOOK.md` for the ordered deploy + rollback plan.
