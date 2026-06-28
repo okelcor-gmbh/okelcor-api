@@ -53,6 +53,8 @@ class PaymentMilestoneEmailService
 
             $this->writeLog($order, 'payment_milestone_email_sent', $stage);
 
+            $this->notifyCustomer($order, $stage);
+
             return true;
         } catch (\Throwable $e) {
             Log::error('Payment milestone email failed', [
@@ -74,6 +76,39 @@ class PaymentMilestoneEmailService
     public static function sentAtColumn(string $stage): ?string
     {
         return self::SENT_AT_COLUMN[$stage] ?? null;
+    }
+
+    /** Human title/summary per milestone stage for the in-app twin. */
+    private const STAGE_COPY = [
+        'deposit_requested' => ['Deposit requested', 'Your deposit is due to start preparing your order.', 'warning'],
+        'deposit_paid'      => ['Deposit received', "We've received your deposit. We'll prepare your shipment next.", 'success'],
+        'balance_due'       => ['Balance payment due', 'Your balance payment is now due before shipment.', 'warning'],
+        'balance_paid'      => ['Balance payment received', "We've received your balance payment. Thank you.", 'success'],
+        'shipment_released' => ['Shipment released', 'Your payment is complete and your shipment has been released.', 'success'],
+    ];
+
+    /** Write the in-app twin of a milestone email (skips guest/non-account orders). */
+    private function notifyCustomer(Order $order, string $stage): void
+    {
+        [$title, $body, $severity] = self::STAGE_COPY[$stage]
+            ?? ['Payment update', 'There is an update on your order payment.', 'info'];
+
+        $ref = $order->ref;
+
+        \App\Services\CustomerNotifier::notifyByEmail(
+            $order->customer_email,
+            'payment_milestone',
+            $ref ? "{$title} for order {$ref}" : $title,
+            $body,
+            [
+                'severity'     => $severity,
+                'action_url'   => $ref ? "/account/orders/{$ref}" : '/account/orders',
+                'related_type' => 'order',
+                'related_id'   => $ref,
+                'email_sent'   => true,
+                'metadata'     => ['stage' => $stage],
+            ]
+        );
     }
 
     private function writeLog(Order $order, string $action, string $stage, ?string $errorMessage = null): void

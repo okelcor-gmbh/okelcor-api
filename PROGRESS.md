@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-06-25 | Branch: `main` | Latest commit: `b8192d6`
+Last updated: 2026-06-28 | Branch: `main` | Latest commit: `d9bb847`
 
 ---
 
@@ -272,6 +272,38 @@ Last updated: 2026-06-25 | Branch: `main` | Latest commit: `b8192d6`
 
 ---
 
+## Customer Portal Notifications — "Email = Inbox" (Session 47)
+
+The customer-facing twin of the admin CRM-3B feed: every transactional email a
+customer receives also writes a `customer_notifications` row with the same
+subject/summary, surfaced in the portal bell + `/account/notifications`.
+Frontend was already built behind graceful degradation; these endpoints activate
+it with no FE deploy.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `customer_notifications` table + `customers.notification_preferences` JSON | 🔧 | Guarded/additive migration; indexes for polled unread-count + dedupe |
+| `CustomerNotification` model | 🔧 | unread/visible/forCustomer scopes |
+| `CustomerNotifier` service | 🔧 | notify / notifyByEmail / markRead / markAllRead / dismiss / unreadCount; dedupe (type:related:stage), email_sent_at refresh on resend, relative-URL guard, prefs + wantsEmail gating |
+| 5 notification endpoints (list / unread-count / read / read-all / dismiss) | 🔧 | `auth/customer/notifications*`; scoped to self, excludes dismissed, newest first, per_page default 15 |
+| 2 preference endpoints (GET/PUT) | 🔧 | `auth/customer/notification-preferences`; email_orders forced on, email_marketing opt-in |
+| Trigger: account approved (`account_approved`) | 🔧 | CustomerApprovalService::sendApprovalEmail (email twin) |
+| Trigger: access request approved/rejected (`access_request_update`) | 🔧 | In-app only (no email today) |
+| Trigger: payment milestones (`payment_milestone`) | 🔧 | PaymentMilestoneEmailService — resolves account by order email |
+| Trigger: trade doc sent (`document_ready`) | 🔧 | AdminTradeDocumentController::sendEmail |
+| Trigger: proposal sent (`quote_ready`) | 🔧 | AdminProposalController::send |
+| Trigger: quote received (`quote_received`) | 🔧 | QuoteRequestController acknowledgement |
+| Trigger: password changed (`security_alert`) | 🔧 | CustomerAuthController::changePassword (urgent, always fresh) |
+| Trigger: email verified (`welcome`) | 🔧 | CustomerAuthController::verifyEmail |
+| Backend feature tests (15, MySQL) | ✅ | `CustomerNotificationsTest` — 15 passed / 55 assertions; full suite 103 passed |
+
+**Remaining triggers (follow-up):** order placed/confirmed/shipped/delivered,
+verification status change, proposal reminder, announcements — wire alongside
+their existing emails using the same `CustomerNotifier::notify(...)` pattern.
+Per the contract, account-area i18n of notification copy is a separate effort.
+
+---
+
 ## eBay Integration (Sessions 15–25)
 
 | Phase | Feature | Status |
@@ -383,6 +415,7 @@ Last updated: 2026-06-25 | Branch: `main` | Latest commit: `b8192d6`
 | `customer_access_requests` | CRM-8 customer-initiated access requests 🔧 |
 | `customer_communications` | CRM communication log |
 | `admin_notifications` | CRM-3/3B per-admin-user notification feed + work queue 🔧 |
+| `customer_notifications` | Customer portal notification feed ("Email = Inbox") 🔧 |
 | `ebay_tokens` | Encrypted eBay OAuth tokens |
 | `ebay_listing_logs` | eBay listing action audit |
 | `ebay_order_sync_logs` | eBay order sync audit |
@@ -476,5 +509,6 @@ composer install --no-dev
 9. `2026_06_22_000001_extend_admin_notifications_for_crm3b` (CRM-3B — notification center)
 10. `2026_06_22_000002_add_lead_metadata_to_quote_requests_table` (tyre-wholesaler landing attribution)
 11. `2026_06_25_000001_add_preferred_language_to_customers_table` (localized emails/documents)
+12. `2026_06_28_000001_create_customer_notifications_table` (customer portal notifications + notification_preferences)
 
-All 11 verified to apply cleanly on MySQL via CI (`migrate:fresh`) and `LeadFunnelAnalyticsTest`'s `RefreshDatabase`. See `DEPLOY_RUNBOOK.md` for the ordered deploy + rollback plan.
+All 12 verified to apply cleanly on MySQL via CI (`migrate:fresh`) and `LeadFunnelAnalyticsTest`'s `RefreshDatabase`. See `DEPLOY_RUNBOOK.md` for the ordered deploy + rollback plan.

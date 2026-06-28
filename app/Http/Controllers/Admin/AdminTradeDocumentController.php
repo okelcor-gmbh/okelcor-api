@@ -8,6 +8,7 @@ use App\Mail\TradeDocumentEmail;
 use App\Models\Order;
 use App\Models\OrderLog;
 use App\Models\TradeDocument;
+use App\Services\CustomerNotifier;
 use App\Services\TradeDocumentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -482,6 +483,25 @@ class AdminTradeDocumentController extends Controller
 
         // Advance lifecycle: issued → sent
         $document->update(['status' => 'sent', 'sent_at' => now()]);
+
+        // In-app twin for the recipient if they have a customer account.
+        $docLabel = $document->number ?? $document->type_label ?? 'Document';
+        CustomerNotifier::notifyByEmail(
+            $recipientEmail,
+            'document_ready',
+            "{$docLabel} is ready",
+            $order?->ref
+                ? "{$docLabel} for order {$order->ref} is available in your account."
+                : "{$docLabel} is available in your account.",
+            [
+                'severity'     => 'info',
+                'action_url'   => $order?->ref ? "/account/orders/{$order->ref}" : '/account/invoices',
+                'related_type' => 'trade_document',
+                'related_id'   => $document->number ?: (string) $document->id,
+                'email_sent'   => true,
+                'metadata'     => ['document_type' => $document->type, 'order_ref' => $order?->ref],
+            ]
+        );
 
         // Audit log — wrapped so it never blocks the 200 response
         try {

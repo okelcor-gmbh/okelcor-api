@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Mail\ApprovedAccountEmail;
 use App\Models\AdminUser;
+use App\Services\CustomerNotifier;
 use App\Models\Customer;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -161,6 +162,22 @@ class CustomerApprovalService
             Mail::to($customer->email)->send(new ApprovedAccountEmail(
                 $customer, $loginUrl, $supportEmail, $needsVerify
             ));
+
+            // In-app twin of the approval email (Email = Inbox).
+            CustomerNotifier::notify(
+                $customer,
+                'account_approved',
+                'Your account has been approved',
+                'Your Okelcor account is approved. You can now sign in and place orders.',
+                [
+                    'severity'     => 'success',
+                    'action_url'   => '/account',
+                    'related_type' => 'account',
+                    'related_id'   => $customer->id,
+                    'email_sent'   => true,
+                    'metadata'     => ['profile' => $profile],
+                ]
+            );
 
             Log::info('[customer_approval_email_sent] Approval email sent', [
                 'event'       => 'customer_approval_email_sent',

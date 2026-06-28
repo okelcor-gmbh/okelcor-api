@@ -28,6 +28,8 @@ verified by reading each file. They can be deployed as one batch.
 | 8 | `2026_06_15_000001_create_admin_notifications_table` | create table | low |
 | 9 | `2026_06_22_000001_extend_admin_notifications_for_crm3b` | add columns + indexes | low — each column guarded |
 | 10 | `2026_06_22_000002_add_lead_metadata_to_quote_requests_table` | add JSON column | low — guarded |
+| 11 | `2026_06_25_000001_add_preferred_language_to_customers_table` | add column | low — guarded |
+| 12 | `2026_06_28_000001_create_customer_notifications_table` | create table + add `customers.notification_preferences` JSON | low — guarded/additive |
 
 The only non-Blueprint statement is **#7** (`ALTER TABLE security_events MODIFY
 COLUMN type ENUM(...)`). It only *widens* the allowed set and touches no rows, so

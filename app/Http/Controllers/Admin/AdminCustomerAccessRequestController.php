@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\CustomerAccessRequest;
+use App\Services\CustomerNotifier;
 use App\Services\CustomerTimelineService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -94,6 +95,21 @@ class AdminCustomerAccessRequestController extends Controller
                 ['requested_access' => $accessRequest->requested_access, 'request_id' => $accessRequest->id],
                 $request->user()?->id
             );
+
+            $label = str_replace('_', ' ', $accessRequest->requested_access);
+            CustomerNotifier::notify(
+                $customer,
+                'access_request_update',
+                ucfirst($label) . ' access approved',
+                "Your request for {$label} access has been approved.",
+                [
+                    'severity'     => 'success',
+                    'action_url'   => '/account',
+                    'related_type' => 'access_request',
+                    'related_id'   => $accessRequest->id,
+                    'metadata'     => ['requested_access' => $accessRequest->requested_access, 'decision' => 'approved'],
+                ]
+            );
         }
 
         return response()->json([
@@ -135,6 +151,22 @@ class AdminCustomerAccessRequestController extends Controller
                     . ($data['reason'] ? ' Reason: ' . $data['reason'] : ''),
                 ['requested_access' => $accessRequest->requested_access, 'request_id' => $accessRequest->id],
                 $request->user()?->id
+            );
+
+            $label = str_replace('_', ' ', $accessRequest->requested_access);
+            CustomerNotifier::notify(
+                $accessRequest->customer,
+                'access_request_update',
+                ucfirst($label) . ' access request declined',
+                "Your request for {$label} access was not approved."
+                    . ($data['reason'] ? ' Reason: ' . $data['reason'] : ''),
+                [
+                    'severity'     => 'warning',
+                    'action_url'   => '/account',
+                    'related_type' => 'access_request',
+                    'related_id'   => $accessRequest->id,
+                    'metadata'     => ['requested_access' => $accessRequest->requested_access, 'decision' => 'rejected'],
+                ]
             );
         }
 

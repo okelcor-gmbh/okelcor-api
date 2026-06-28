@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Mail\ProposalEmail;
 use App\Models\CustomerCommunication;
 use App\Models\QuoteRequest;
+use App\Services\CustomerNotifier;
 use App\Services\TradeDocumentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -297,6 +298,22 @@ class AdminProposalController extends Controller
             "Proposal {$quote->proposal_number} sent",
             $data['message'] ?? "Proposal sent to {$recipientEmail}.",
             $emailSent ? 'sent' : 'failed'
+        );
+
+        // In-app twin for the recipient if they have a customer account.
+        CustomerNotifier::notifyByEmail(
+            $recipientEmail,
+            'quote_ready',
+            'Your quote is ready',
+            "Proposal {$quote->proposal_number} is ready for your review.",
+            [
+                'severity'     => 'success',
+                'action_url'   => $quote->ref_number ? "/account/quotes/{$quote->ref_number}" : '/account/quotes',
+                'related_type' => 'proposal',
+                'related_id'   => $quote->proposal_number ?: $quote->ref_number,
+                'email_sent'   => $emailSent,
+                'metadata'     => ['quote_ref' => $quote->ref_number, 'proposal_number' => $quote->proposal_number],
+            ]
         );
 
         return response()->json([

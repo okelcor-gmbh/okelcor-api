@@ -9,6 +9,7 @@ use App\Mail\QuoteRequestReceived;
 use App\Models\Customer;
 use App\Models\QuoteRequest;
 use App\Services\AdminNotificationService;
+use App\Services\CustomerNotifier;
 use App\Services\InquiryQualityService;
 use App\Services\TaxService;
 use App\Services\VatValidationService;
@@ -432,6 +433,22 @@ class QuoteRequestController extends Controller
                 'event' => 'quote_ack_sent',
                 'ref'   => $refNumber,
             ]);
+
+            // In-app twin for the sender if they have a customer account.
+            CustomerNotifier::notifyByEmail(
+                $quote->email,
+                'quote_received',
+                'We received your quote request',
+                'Thanks — your request has been received. Our team will get back to you shortly.',
+                [
+                    'severity'     => 'info',
+                    'action_url'   => $quote->ref_number ? "/account/quotes/{$quote->ref_number}" : '/account/quotes',
+                    'related_type' => 'quote_request',
+                    'related_id'   => $quote->ref_number,
+                    'email_sent'   => true,
+                    'metadata'     => ['quote_ref' => $quote->ref_number],
+                ]
+            );
         } catch (\Throwable $e) {
             Log::error('[quote_ack_failed] Customer acknowledgement failed', [
                 'event' => 'quote_ack_failed',

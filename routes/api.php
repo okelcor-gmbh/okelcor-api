@@ -46,6 +46,8 @@ use App\Http\Controllers\Admin\AdminCustomerApprovalController;
 use App\Http\Controllers\Admin\AdminCustomerVerificationController;
 use App\Http\Controllers\Admin\AdminCustomerAccessRequestController;
 use App\Http\Controllers\CustomerAccessRequestController;
+use App\Http\Controllers\CustomerNotificationController;
+use App\Http\Controllers\CustomerNotificationPreferenceController;
 use App\Http\Controllers\Admin\AdminCrmFollowUpController;
 use App\Http\Controllers\Admin\AdminCommunicationController;
 use App\Http\Controllers\Admin\AdminCrmEmailController;
@@ -128,6 +130,15 @@ Route::prefix('v1')->group(function () {
         // CRM-8: Customer-initiated access requests (portal)
         Route::get('customer/access-requests', [CustomerAccessRequestController::class, 'index']);
         Route::post('customer/access-requests', [CustomerAccessRequestController::class, 'store']);
+
+        // Customer portal notifications ("Email = Inbox") — scoped to self
+        Route::get('customer/notifications', [CustomerNotificationController::class, 'index']);
+        Route::get('customer/notifications/unread-count', [CustomerNotificationController::class, 'unreadCount']);
+        Route::post('customer/notifications/read-all', [CustomerNotificationController::class, 'readAll']);
+        Route::post('customer/notifications/{id}/read', [CustomerNotificationController::class, 'markRead']);
+        Route::post('customer/notifications/{id}/dismiss', [CustomerNotificationController::class, 'dismiss']);
+        Route::get('customer/notification-preferences', [CustomerNotificationPreferenceController::class, 'show']);
+        Route::put('customer/notification-preferences', [CustomerNotificationPreferenceController::class, 'update']);
 
         // Addresses
         Route::get('addresses', [CustomerAddressController::class, 'index']);

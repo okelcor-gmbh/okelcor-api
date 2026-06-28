@@ -11,6 +11,7 @@ use App\Models\LoginHistory;
 use App\Models\Order;
 use App\Models\QuoteRequest;
 use App\Services\AdminNotificationService;
+use App\Services\CustomerNotifier;
 use App\Services\InvoiceService;
 use App\Services\SecurityEventService;
 use App\Services\TaxService;
@@ -325,6 +326,19 @@ class CustomerAuthController extends Controller
 
         if (! $customer->email_verified_at) {
             $customer->update(['email_verified_at' => now()]);
+
+            CustomerNotifier::notify(
+                $customer,
+                'welcome',
+                'Welcome to Okelcor',
+                'Your email is verified. Welcome aboard — you can now sign in to your account.',
+                [
+                    'severity'     => 'info',
+                    'action_url'   => '/account',
+                    'related_type' => 'account',
+                    'related_id'   => $customer->id,
+                ]
+            );
         }
 
         return redirect($frontendUrl . '/login?verified=true');
@@ -513,6 +527,21 @@ class CustomerAuthController extends Controller
         }
 
         $customer->update(['password' => Hash::make($request->password)]);
+
+        CustomerNotifier::notify(
+            $customer,
+            'security_alert',
+            'Your password was changed',
+            'Your account password was just changed. If this was not you, contact Okelcor immediately.',
+            [
+                'severity'     => 'urgent',
+                'action_url'   => '/account',
+                'related_type' => 'account',
+                'related_id'   => $customer->id,
+                // Always allow a fresh alert per change — don't dedupe across changes.
+                'dedupe_key'   => 'security_alert:password_changed:' . now()->timestamp,
+            ]
+        );
 
         return response()->json(['message' => 'Password changed successfully.']);
     }

@@ -22,6 +22,7 @@ class Customer extends Authenticatable implements HasLocalePreference
         'phone',
         'country',
         'preferred_language',
+        'notification_preferences',
         'company_name',
         'vat_number',
         'vat_verified',
@@ -83,6 +84,7 @@ class Customer extends Authenticatable implements HasLocalePreference
         'approved_for_documents'         => 'boolean',
         'data_quality_score'             => 'integer',
         'data_quality_flags'             => 'array',
+        'notification_preferences'       => 'array',
         // Buyer lifecycle (CRM-8)
         'health_score'                   => 'integer',
         'approved_at'                    => 'datetime',
@@ -148,6 +150,11 @@ class Customer extends Authenticatable implements HasLocalePreference
     public function communications(): HasMany
     {
         return $this->hasMany(CustomerCommunication::class)->orderByDesc('created_at');
+    }
+
+    public function notifications(): HasMany
+    {
+        return $this->hasMany(CustomerNotification::class)->orderByDesc('created_at');
     }
 
     // ── Buyer lifecycle (CRM-8) ──────────────────────────────────────────────
