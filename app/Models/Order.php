@@ -155,6 +155,15 @@ class Order extends Model
         return $this->hasMany(TradeDocument::class)->orderByDesc('created_at');
     }
 
+    /**
+     * The tax invoice for this order. Invoices link to orders by ref string
+     * (order_ref), not a numeric FK, so the relation is keyed accordingly.
+     */
+    public function invoice(): HasOne
+    {
+        return $this->hasOne(Invoice::class, 'order_ref', 'ref');
+    }
+
     public function financialsLockedBy(): BelongsTo
     {
         return $this->belongsTo(AdminUser::class, 'financials_locked_by');

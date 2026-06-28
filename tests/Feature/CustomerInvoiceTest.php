@@ -4,8 +4,10 @@ namespace Tests\Feature;
 
 use App\Http\Controllers\CustomerAuthController;
 use App\Http\Controllers\InvoiceDownloadController;
+use App\Http\Controllers\OrderController;
 use App\Models\Customer;
 use App\Models\Invoice;
+use App\Models\Order;
 use App\Services\InvoiceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
@@ -69,11 +71,40 @@ class CustomerInvoiceTest extends TestCase
         ], $overrides));
     }
 
+    private function order(Customer $customer, array $overrides = []): Order
+    {
+        return Order::create(array_merge([
+            'ref'            => 'OKL-' . strtoupper(uniqid()),
+            'customer_name'  => $customer->full_name,
+            'customer_email' => $customer->email,
+            'address'        => '1 Test St',
+            'city'           => 'Berlin',
+            'postal_code'    => '10115',
+            'country'        => 'DE',
+            'payment_method' => 'bank_transfer',
+            'subtotal'       => 100.00,
+            'delivery_cost'  => 0.00,
+            'total'          => 100.00,
+            'status'         => 'processing',
+            'payment_status' => 'paid',
+            'mode'           => 'manual',
+        ], $overrides));
+    }
+
     private function customerRequest(Customer $customer, string $method = 'GET'): Request
     {
         $req = Request::create('/', $method);
         $req->setUserResolver(fn () => $customer);
         return $req;
+    }
+
+    private function orderRow(Customer $customer, string $ref): array
+    {
+        $payload = app(OrderController::class)
+            ->index($this->customerRequest($customer))
+            ->getData(true);
+
+        return collect($payload['data'])->firstWhere('ref', $ref);
     }
 
     private function putCanonical(Invoice $invoice): string
@@ -203,5 +234,60 @@ class CustomerInvoiceTest extends TestCase
             ->getData(true);
 
         $this->assertCount(1, $payload['data'], 'Held (unreleased) invoices must not appear in the customer list.');
+    }
+
+    // ── order-detail invoice fields ──────────────────────────────────────────────
+
+    public function test_order_detail_exposes_released_invoice_download(): void
+    {
+        Storage::fake('public');
+        $c = $this->customer();
+        $order = $this->order($c);
+        $inv = $this->invoice($c, ['order_ref' => $order->ref, 'released_at' => now()]);
+
+        $row = $this->orderRow($c, $order->ref);
+
+        $this->assertTrue($row['invoice_available']);
+        $this->assertSame($inv->invoice_number, $row['invoice_number']);
+        $this->assertNotNull($row['invoice_download_url']);
+        $this->assertFalse($row['invoice_pending_release']);
+    }
+
+    public function test_order_detail_flags_held_reverse_charge_invoice(): void
+    {
+        Storage::fake('public');
+        $c = $this->customer();
+        $order = $this->order($c, ['is_reverse_charge' => true]);
+        $this->invoice($c, ['order_ref' => $order->ref, 'released_at' => null]); // held
+
+        $row = $this->orderRow($c, $order->ref);
+
+        $this->assertTrue($row['invoice_pending_release']);
+        $this->assertFalse($row['invoice_available']);
+        $this->assertNull($row['invoice_number']);
+        $this->assertNull($row['invoice_download_url']);
+    }
+
+    public function test_order_detail_pending_release_when_paid_reverse_charge_without_invoice(): void
+    {
+        $c = $this->customer();
+        $order = $this->order($c, ['is_reverse_charge' => true, 'payment_status' => 'paid']);
+
+        $row = $this->orderRow($c, $order->ref);
+
+        $this->assertTrue($row['invoice_pending_release']);
+        $this->assertFalse($row['invoice_available']);
+    }
+
+    public function test_order_detail_no_invoice_flags_for_standard_unpaid_order(): void
+    {
+        $c = $this->customer();
+        $order = $this->order($c, ['is_reverse_charge' => false, 'payment_status' => 'pending']);
+
+        $row = $this->orderRow($c, $order->ref);
+
+        $this->assertFalse($row['invoice_available']);
+        $this->assertFalse($row['invoice_pending_release']);
+        $this->assertNull($row['invoice_number']);
     }
 }

@@ -325,8 +325,9 @@ manual `invoices:generate-missing-pdfs` CLI run by an admin.
 | `GET /auth/invoices` self-heals released null-PDF invoices | 🔧 | `download_available` now reflects reality instead of staying false |
 | `createForOrder()` PDF step now calls `ensurePdf()` | 🔧 | de-duplicated generation logic |
 | Released-invoice email gets in-app twin (`document_ready`) | 🔧 | `AdminEuDeclarationController::acknowledge` — Email = Inbox |
+| Order payload exposes invoice state | 🔧 | `GET /orders` + `/orders/{ref}`: `invoice_number` / `invoice_available` / `invoice_pending_release` / `invoice_download_url` (via new `Order::invoice()` relation) — lets FE show download vs "pending EU cert" |
 | Compliance gate unchanged | ✅ | reverse-charge invoices still held (released_at null) until EU cert acknowledged; held invoices stay hidden from the customer list |
-| Backend feature tests (9, MySQL) | ✅ | `CustomerInvoiceTest` — 9 passed; full suite 112 passed / 378 assertions |
+| Backend feature tests (13, MySQL) | ✅ | `CustomerInvoiceTest` — 13 passed; full suite 116 passed / 391 assertions |
 
 See `FRONTEND_NOTE_invoices.md` for the frontend-facing summary + contract.
 

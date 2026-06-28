@@ -76,15 +76,47 @@ deep-link to an invoice from an order detail, handle `423`.
 
 ---
 
+## NEW — invoice state on the order payload
+
+`GET /api/v1/orders` and `GET /api/v1/orders/{ref}` (customer bearer) now include
+four invoice fields per order, so the order page can show the right invoice
+affordance without a second call:
+
+```jsonc
+{
+  "ref": "AB-1042",
+  // … existing order fields …
+  "invoice_number": "INV-2026-0004",   // string when released, else null
+  "invoice_available": true,            // released → always downloadable (self-heals)
+  "invoice_pending_release": false,     // true = reverse-charge invoice held pending EU cert
+  "invoice_download_url": "https://api.okelcor.com/api/v1/invoices/41/download" // null unless available
+}
+```
+
+Render logic:
+- `invoice_available: true` → show **Download invoice** → `invoice_download_url`
+  (fetch through the proxy with the bearer, same as the list).
+- `invoice_pending_release: true` → show **"Invoice pending — awaiting EU entry
+  certificate acknowledgement."** Pair it with the existing
+  `declaration_status` / `declaration_required` fields already on this payload to
+  explain the step to the customer.
+- both false → no invoice affordance yet (e.g. unpaid order).
+
+`invoice_pending_release` is true when a reverse-charge order's invoice is held
+(`released_at` null), **or** the order is paid reverse-charge with no released
+invoice yet — so it's correct even before the invoice row is generated.
+
+---
+
 ## Behaviour worth knowing (so the UI matches reality)
 
 1. **Held invoices are invisible in the list.** Reverse-charge invoices are
    legally held (`released_at = null`) until an admin acknowledges the EU Entry
    Certificate. They are intentionally **omitted** from `GET /auth/invoices`.
-   → A customer who paid a reverse-charge order sees **no invoice yet**. If that
-   feels like a gap to you, the cleanest UX is on the **order detail** page:
-   show an "Invoice pending — awaiting EU entry certificate acknowledgement"
-   state there. Backend can add a flag for that if you want it (ask).
+   → A customer who paid a reverse-charge order sees **no invoice yet** in the
+   list. To cover this, the **order detail/list payload now carries invoice
+   state** (see next section) so you can render an "Invoice pending — awaiting EU
+   entry certificate" state on the order page.
 
 2. **`download_available` is now trustworthy.** Before, it could be `false` even
    though the file existed. You can rely on it to enable/disable the button.
@@ -106,7 +138,7 @@ deep-link to an invoice from an order detail, handle `423`.
 - Confirm the invoices page fetches `pdf_url` **through the proxy with the bearer**,
   and renders the PDF (new tab / blob), not a raw browser navigation.
 - Handle `423` and `404` distinctly (see table) rather than a single error toast.
-- Decide whether you want the "invoice pending EU certificate" state on order
-  detail for reverse-charge orders (backend can expose a flag).
+- Use the new `invoice_*` fields on the order payload to render the pending /
+  download states on the order page (no extra request needed).
 - Reminder (shared infra): the proxy base `API_URL` must include `/api/v1` and no
   trailing slash, or every customer proxy 404s — see the separate note.

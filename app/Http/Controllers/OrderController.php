@@ -30,7 +30,7 @@ class OrderController extends Controller
     {
         $email = $request->user()->email;
 
-        $orders = Order::with(['items', 'shipmentEvents', 'euDeclaration', 'tradeDocuments'])
+        $orders = Order::with(['items', 'shipmentEvents', 'euDeclaration', 'tradeDocuments', 'invoice'])
             ->where('customer_email', $email)
             ->orderByDesc('created_at')
             ->get();
@@ -51,7 +51,7 @@ class OrderController extends Controller
      */
     public function show(Request $request, string $ref): JsonResponse
     {
-        $order = Order::with(['items', 'shipmentEvents', 'euDeclaration', 'tradeDocuments'])
+        $order = Order::with(['items', 'shipmentEvents', 'euDeclaration', 'tradeDocuments', 'invoice'])
             ->where('ref', $ref)
             ->where('customer_email', $request->user()->email)
             ->firstOrFail();
@@ -73,6 +73,16 @@ class OrderController extends Controller
 
     private function formatOrder(Order $o): array
     {
+        // Invoice state for the order — lets the FE show "download invoice" vs
+        // "invoice pending EU entry certificate" without a second request.
+        $invoice         = $o->relationLoaded('invoice') ? $o->invoice : null;
+        $invoiceReleased = $invoice && $invoice->released_at !== null;
+        // Held: a reverse-charge order whose invoice isn't released yet (or is
+        // paid with no released invoice yet) — waiting on EU cert acknowledgement.
+        $invoicePendingRelease = $o->is_reverse_charge === true
+            && ! $invoiceReleased
+            && ($invoice !== null || $o->payment_status === 'paid');
+
         return [
             'ref'               => $o->ref,
             'status'            => $o->status,
@@ -117,6 +127,16 @@ class OrderController extends Controller
             'declaration_download_available' => $o->relationLoaded('euDeclaration')
                 && $o->euDeclaration?->pdf_path !== null
                 && in_array($o->euDeclaration?->status, ['signed', 'acknowledged']),
+
+            // Invoice — customer-visible state + download availability.
+            // A released invoice is always downloadable: the order exists here, so
+            // the download endpoint self-heals (regenerates) any missing PDF.
+            'invoice_number'          => $invoiceReleased ? $invoice->invoice_number : null,
+            'invoice_available'       => $invoiceReleased,
+            'invoice_pending_release' => $invoicePendingRelease,
+            'invoice_download_url'    => $invoiceReleased
+                ? route('invoices.download', $invoice->id)
+                : null,
 
             'items'             => $o->items->map(fn ($i) => [
                 'product_id'   => $i->product_id,
