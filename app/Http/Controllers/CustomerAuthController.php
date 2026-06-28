@@ -730,6 +730,23 @@ class CustomerAuthController extends Controller
             ]);
         }
 
+        // Self-heal released invoices whose PDF failed to generate earlier (or
+        // whose file went missing), so the download button reflects reality
+        // instead of being permanently disabled (download_available=false).
+        try {
+            $svc = app(InvoiceService::class);
+            $customer->invoices()
+                ->whereNotNull('released_at')
+                ->whereNull('pdf_url')
+                ->get()
+                ->each(fn ($inv) => $svc->ensurePdf($inv));
+        } catch (\Throwable $e) {
+            Log::warning('Invoice PDF self-heal failed in GET /auth/invoices', [
+                'customer_id' => $customer->id,
+                'error'       => $e->getMessage(),
+            ]);
+        }
+
         $invoices = $customer
             ->invoices()
             ->whereNotNull('released_at')

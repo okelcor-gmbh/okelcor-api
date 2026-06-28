@@ -8,6 +8,7 @@ use App\Models\EuDeclaration;
 use App\Models\Invoice;
 use App\Models\Order;
 use App\Models\OrderLog;
+use App\Services\CustomerNotifier;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -163,6 +164,22 @@ class AdminEuDeclarationController extends Controller
                     'error'          => $e->getMessage(),
                 ]);
             }
+
+            // In-app twin of the released-invoice email (Email = Inbox).
+            CustomerNotifier::notifyByEmail(
+                $decl->customer_email,
+                'document_ready',
+                "Invoice {$invoice->invoice_number} is ready",
+                'Your final invoice is now available to download in your account.',
+                [
+                    'severity'     => 'info',
+                    'action_url'   => '/account/invoices',
+                    'related_type' => 'trade_document',
+                    'related_id'   => $invoice->invoice_number,
+                    'email_sent'   => true,
+                    'metadata'     => ['order_ref' => $decl->order_ref, 'invoice_number' => $invoice->invoice_number],
+                ]
+            );
         }
 
         // Audit log on the associated order

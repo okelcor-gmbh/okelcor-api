@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-06-28 | Branch: `main` | Latest commit: `d9bb847`
+Last updated: 2026-06-28 | Branch: `main` | Latest commit: `1eac7eb`
 
 ---
 
@@ -307,6 +307,28 @@ it with no FE deploy.
 reminder scheduler and an announcement broadcast are introduced, using the same
 `CustomerNotifier::notify(...)` pattern. Per the contract, account-area i18n of
 notification copy is a separate effort.
+
+---
+
+## Customer Invoices — Self-Healing Download (Session 48)
+
+Hardened the customer-facing invoice section. Root cause: when invoice PDF
+generation failed once at creation (Stripe webhook), `pdf_url` stayed null and
+the customer could **never** self-serve it — the listing skipped regeneration
+(invoice row already existed) and the download endpoint hard-404'd. Required a
+manual `invoices:generate-missing-pdfs` CLI run by an admin.
+
+| Fix | Status | Notes |
+|-----|--------|-------|
+| `InvoiceService::ensurePdf()` — single source of truth, self-healing | 🔧 | fast path → adopt canonical file → regenerate from order; repairs `pdf_url` |
+| `GET /invoices/{id}/download` regenerates on demand | 🔧 | No more permanent 404 on null/missing pdf_url; 404 only when order truly gone |
+| `GET /auth/invoices` self-heals released null-PDF invoices | 🔧 | `download_available` now reflects reality instead of staying false |
+| `createForOrder()` PDF step now calls `ensurePdf()` | 🔧 | de-duplicated generation logic |
+| Released-invoice email gets in-app twin (`document_ready`) | 🔧 | `AdminEuDeclarationController::acknowledge` — Email = Inbox |
+| Compliance gate unchanged | ✅ | reverse-charge invoices still held (released_at null) until EU cert acknowledged; held invoices stay hidden from the customer list |
+| Backend feature tests (9, MySQL) | ✅ | `CustomerInvoiceTest` — 9 passed; full suite 112 passed / 378 assertions |
+
+See `FRONTEND_NOTE_invoices.md` for the frontend-facing summary + contract.
 
 ---
 
