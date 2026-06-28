@@ -150,6 +150,29 @@ class TraccarTrackingTest extends TestCase
         $this->assertSame(52.5, $result['route'][0]['latitude']);
     }
 
+    public function test_current_trip_route_bounds_from_latest_trip_start(): void
+    {
+        $captured = [];
+        Http::fake([
+            'https://demo.traccar.org/api/reports/trips*' => Http::response([
+                ['startTime' => '2026-06-28T06:00:00Z', 'endTime' => '2026-06-28T07:00:00Z', 'distance' => 1000],
+                ['startTime' => '2026-06-28T09:30:00Z', 'endTime' => '2026-06-28T10:00:00Z', 'distance' => 5000], // most recent
+            ]),
+            'https://demo.traccar.org/api/reports/route*' => function ($request) use (&$captured) {
+                $captured['route_from'] = $request->data()['from'] ?? null;
+                return Http::response([
+                    ['latitude' => 52.5, 'longitude' => 13.4, 'fixTime' => '2026-06-28T09:31:00Z', 'valid' => true],
+                ]);
+            },
+        ]);
+
+        $result = app(TraccarService::class)->currentTripRoute(7);
+
+        $this->assertArrayNotHasKey('error', $result);
+        // Route lower bound must be the most recent trip's start, not 12h ago.
+        $this->assertStringStartsWith('2026-06-28T09:30:00', $captured['route_from']);
+    }
+
     public function test_geofences_shaping(): void
     {
         Http::fake([
@@ -232,8 +255,11 @@ class TraccarTrackingTest extends TestCase
             'https://demo.traccar.org/api/positions*'      => Http::response([
                 ['deviceId' => 7, 'latitude' => 52.52, 'longitude' => 13.4, 'speed' => 10, 'fixTime' => '2026-06-28T10:00:00Z', 'valid' => true],
             ]),
+            'https://demo.traccar.org/api/reports/trips*'  => Http::response([
+                ['startTime' => '2026-06-28T09:30:00Z', 'endTime' => '2026-06-28T10:00:00Z', 'distance' => 5000],
+            ]),
             'https://demo.traccar.org/api/reports/route*'  => Http::response([
-                ['latitude' => 52.5, 'longitude' => 13.4, 'speed' => 0, 'fixTime' => '2026-06-28T09:00:00Z', 'valid' => true],
+                ['latitude' => 52.5, 'longitude' => 13.4, 'speed' => 0, 'fixTime' => '2026-06-28T09:30:00Z', 'valid' => true],
             ]),
         ]);
 

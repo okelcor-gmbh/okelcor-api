@@ -68,6 +68,8 @@ return [
         'email'    => env('TRACCAR_EMAIL'),
         'password' => env('TRACCAR_PASSWORD'),
         'timeout'  => (int) env('TRACCAR_TIMEOUT', 15),
+        // Max hours of history for the customer "current trip" trail (safety cap).
+        'route_hours' => (int) env('TRACCAR_ROUTE_HOURS', 12),
     ],
 
     'ebay' => [

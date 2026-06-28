@@ -77,7 +77,7 @@ Always `200`. Two shapes:
     "status": "online",
     "last_update": "2026-06-28T10:00:00Z",
     "position": { "latitude":52.52, "longitude":13.40, "speed_kmh":18.5, "course":90, "address":"Berlin", "fix_time":"…" },
-    "route": [ { "latitude":…, "longitude":…, "fix_time":"…" } ]   // recent ~24h trail
+    "route": [ { "latitude":…, "longitude":…, "fix_time":"…" } ]   // CURRENT TRIP trail (bounded to latest trip start, capped at TRACCAR_ROUTE_HOURS)
   }
 }
 ```
@@ -103,10 +103,10 @@ internal device attributes are exposed.
 4. **Map library is your call** (Leaflet/Mapbox/Google). Backend only supplies
    lat/lng + WKT; no tiles.
 
-## Open questions for you
-- Do you want the customer trail (`route`) limited to the **current trip** rather
-  than a flat last-24h window? Backend can switch to "since last stop" if useful.
-- Should we expose an **ETA**? Traccar doesn't compute delivery ETA; we'd derive
-  it (distance to destination) only if you want it.
+## Resolved / status
+- ✅ **Customer trail = current trip** (done): `route` is now bounded to the most
+  recent trip's start (capped at `TRACCAR_ROUTE_HOURS`, default 12), not a flat
+  24h window. No FE change needed — same shape, just a tighter set of points.
+- ❌ **ETA** — not exposed (per your call).
 - Reminder (shared infra): proxy `API_URL` must include `/api/v1`, no trailing
   slash.

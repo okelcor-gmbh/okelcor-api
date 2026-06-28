@@ -166,6 +166,42 @@ class TraccarService
     }
 
     /**
+     * Route for the device's CURRENT (most recent) trip — for the customer
+     * delivery trail. Bounds the route to the latest trip's start so the map
+     * shows the active journey rather than a flat 24h smear, capped at
+     * `route_hours` so a long-idle device can't pull a huge history.
+     *
+     * Best-effort: if no finalised trip is found in the cap window (e.g. a trip
+     * still in progress that Traccar hasn't closed), it falls back to the full
+     * cap window — which still reads as "the current journey" for delivery use.
+     *
+     * @return array{route: array, from: string, to: string}|array{error: string}
+     */
+    public function currentTripRoute(int $deviceId): array
+    {
+        $capHours = max(1, (int) config('services.traccar.route_hours', 12));
+        $to       = Carbon::now();
+        $from     = $to->copy()->subHours($capHours);
+
+        $trips = $this->trips($deviceId, $from->toIso8601String(), $to->toIso8601String());
+        if (! isset($trips['error']) && ! empty($trips['trips'])) {
+            $latestStart = collect($trips['trips'])
+                ->pluck('start_time')
+                ->filter()
+                ->max();
+
+            if ($latestStart) {
+                $start = Carbon::parse($latestStart);
+                if ($start->greaterThan($from)) {
+                    $from = $start;
+                }
+            }
+        }
+
+        return $this->route($deviceId, $from->toIso8601String(), $to->toIso8601String());
+    }
+
+    /**
      * Trip summaries for a device over a window.
      *
      * @return array{trips: array}|array{error: string}

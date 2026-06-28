@@ -45,7 +45,7 @@ class CustomerTrackingController extends Controller
             ]);
         }
 
-        $route = $this->traccar->route($deviceId);
+        $route = $this->traccar->currentTripRoute($deviceId);
         $shapedDevice = $device['device'];
 
         return response()->json([
