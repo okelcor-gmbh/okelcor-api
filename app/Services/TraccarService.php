@@ -50,22 +50,34 @@ class TraccarService
         }
 
         try {
-            $resp = $this->request()->get($this->endpoint('/session'));
+            // Probe a real resource endpoint. Note: GET /api/session only works
+            // with a session cookie (404 under Basic/token auth), so it is NOT a
+            // valid readiness check — /devices accepts Basic auth and a token.
+            $resp = $this->request()->get($this->endpoint('/devices'));
 
             if ($resp->successful()) {
+                $devices = $resp->json();
                 return [
                     'configured' => true,
                     'connected'  => true,
                     'server'     => config('services.traccar.url'),
-                    'user'       => $resp->json('name') ?? $resp->json('email'),
+                    'devices'    => is_array($devices) ? count($devices) : null,
                     'message'    => 'Connected.',
+                ];
+            }
+
+            if (in_array($resp->status(), [401, 403], true)) {
+                return [
+                    'configured' => true,
+                    'connected'  => false,
+                    'message'    => 'Authentication failed — check TRACCAR_TOKEN or TRACCAR_EMAIL/PASSWORD.',
                 ];
             }
 
             return [
                 'configured' => true,
                 'connected'  => false,
-                'message'    => 'Authentication failed (HTTP ' . $resp->status() . ').',
+                'message'    => 'Traccar returned HTTP ' . $resp->status() . '.',
             ];
         } catch (\Throwable $e) {
             Log::warning('Traccar status check failed', ['error' => $e->getMessage()]);

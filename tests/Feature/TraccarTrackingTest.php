@@ -165,6 +165,30 @@ class TraccarTrackingTest extends TestCase
         $this->assertStringStartsWith('CIRCLE', $result['geofences'][0]['area']);
     }
 
+    public function test_status_connected_probes_devices_endpoint(): void
+    {
+        Http::fake([
+            'https://demo.traccar.org/api/devices*' => Http::response([
+                ['id' => 7, 'name' => 'Truck 1'],
+            ]),
+        ]);
+
+        $status = app(TraccarService::class)->status();
+
+        $this->assertTrue($status['connected']);
+        $this->assertSame(1, $status['devices']);
+    }
+
+    public function test_status_reports_auth_failure(): void
+    {
+        Http::fake(['https://demo.traccar.org/api/devices*' => Http::response('no', 401)]);
+
+        $status = app(TraccarService::class)->status();
+
+        $this->assertFalse($status['connected']);
+        $this->assertStringContainsString('Authentication failed', $status['message']);
+    }
+
     public function test_not_configured_degrades_gracefully(): void
     {
         config(['services.traccar.url' => '', 'services.traccar.token' => null]);

@@ -18,7 +18,7 @@ All under the admin Sanctum area, permission **`tracking.view`**
 
 | Endpoint | Returns |
 |---|---|
-| `GET /api/v1/admin/tracking/status` | `{ configured, connected, server, user, message }` — show a "not configured / disconnected" banner if `connected:false` |
+| `GET /api/v1/admin/tracking/status` | `{ configured, connected, server, devices, message }` — show a "not configured / disconnected" banner if `connected:false` |
 | `GET /api/v1/admin/tracking/devices` | `{ data: Device[], meta:{total} }` — each device + its latest position. Powers the live map + list. |
 | `GET /api/v1/admin/tracking/devices/{id}` | `{ data: Device }` |
 | `GET /api/v1/admin/tracking/devices/{id}/route?from=&to=` | `{ data: Position[], meta:{from,to,total} }` — ordered points for route playback. Defaults to last 24h. |
