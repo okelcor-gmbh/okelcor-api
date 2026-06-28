@@ -131,6 +131,9 @@ class OrderController extends Controller
             // Invoice — customer-visible state + download availability.
             // A released invoice is always downloadable: the order exists here, so
             // the download endpoint self-heals (regenerates) any missing PDF.
+            // invoice_id is exposed so the FE can hit its id-based download proxy
+            // without parsing it out of invoice_download_url.
+            'invoice_id'              => $invoiceReleased ? $invoice->id : null,
             'invoice_number'          => $invoiceReleased ? $invoice->invoice_number : null,
             'invoice_available'       => $invoiceReleased,
             'invoice_pending_release' => $invoicePendingRelease,

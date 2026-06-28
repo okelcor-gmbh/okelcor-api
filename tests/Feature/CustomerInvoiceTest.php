@@ -248,6 +248,7 @@ class CustomerInvoiceTest extends TestCase
         $row = $this->orderRow($c, $order->ref);
 
         $this->assertTrue($row['invoice_available']);
+        $this->assertSame($inv->id, $row['invoice_id']);
         $this->assertSame($inv->invoice_number, $row['invoice_number']);
         $this->assertNotNull($row['invoice_download_url']);
         $this->assertFalse($row['invoice_pending_release']);

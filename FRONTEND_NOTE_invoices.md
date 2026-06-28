@@ -86,6 +86,7 @@ affordance without a second call:
 {
   "ref": "AB-1042",
   // … existing order fields …
+  "invoice_id": 41,                     // number when released, else null — use for the id-based download proxy
   "invoice_number": "INV-2026-0004",   // string when released, else null
   "invoice_available": true,            // released → always downloadable (self-heals)
   "invoice_pending_release": false,     // true = reverse-charge invoice held pending EU cert
@@ -94,8 +95,10 @@ affordance without a second call:
 ```
 
 Render logic:
-- `invoice_available: true` → show **Download invoice** → `invoice_download_url`
-  (fetch through the proxy with the bearer, same as the list).
+- `invoice_available: true` → show **Download invoice**. Use `invoice_id` with
+  your existing id-based download proxy (`/api/account/invoices/{invoice_id}/download`)
+  — same component as the invoices list. `invoice_download_url` is the absolute
+  backend URL for reference; you don't need to parse the id out of it.
 - `invoice_pending_release: true` → show **"Invoice pending — awaiting EU entry
   certificate acknowledgement."** Pair it with the existing
   `declaration_status` / `declaration_required` fields already on this payload to
