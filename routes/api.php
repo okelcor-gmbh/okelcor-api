@@ -48,6 +48,8 @@ use App\Http\Controllers\Admin\AdminCustomerAccessRequestController;
 use App\Http\Controllers\CustomerAccessRequestController;
 use App\Http\Controllers\CustomerNotificationController;
 use App\Http\Controllers\CustomerNotificationPreferenceController;
+use App\Http\Controllers\CustomerTrackingController;
+use App\Http\Controllers\Admin\AdminTrackingController;
 use App\Http\Controllers\Admin\AdminCrmFollowUpController;
 use App\Http\Controllers\Admin\AdminCommunicationController;
 use App\Http\Controllers\Admin\AdminCrmEmailController;
@@ -152,6 +154,10 @@ Route::prefix('v1')->group(function () {
         Route::get('orders/{ref}/declaration/download', [EuDeclarationController::class, 'download']);
         Route::get('orders/{ref}/trade-documents', [TradeDocumentController::class, 'index']);
         Route::get('trade-documents/{id}/download', [TradeDocumentController::class, 'download']);
+
+        // Live delivery tracking (Traccar) — scoped to the customer's own order
+        Route::get('orders/{ref}/tracking', [CustomerTrackingController::class, 'show'])
+            ->middleware('throttle:tracking');
     });
 
     // Invoice download — protected by customer Bearer token
@@ -718,6 +724,23 @@ Route::prefix('v1')->group(function () {
         // Customer CSV import — customers.import (super_admin only)
         Route::middleware('permission:customers.import')->group(function () {
             Route::post('customers/import', [CustomerImportController::class, 'import']);
+        });
+
+        // -----------------------------------------------------------------
+        // Fleet / GPS tracking (Traccar) — reads (tracking.view)
+        // -----------------------------------------------------------------
+        Route::middleware('permission:tracking.view')->prefix('tracking')->group(function () {
+            Route::get('status', [AdminTrackingController::class, 'status']);
+            Route::get('devices', [AdminTrackingController::class, 'devices']);
+            Route::get('geofences', [AdminTrackingController::class, 'geofences']);
+            Route::get('devices/{id}', [AdminTrackingController::class, 'device']);
+            Route::get('devices/{id}/route', [AdminTrackingController::class, 'route']);
+            Route::get('devices/{id}/trips', [AdminTrackingController::class, 'trips']);
+        });
+
+        // Assign a Traccar device to an order (write) — orders.update
+        Route::middleware('permission:orders.update')->group(function () {
+            Route::put('tracking/orders/{id}/device', [AdminTrackingController::class, 'assignDevice']);
         });
 
         // -----------------------------------------------------------------

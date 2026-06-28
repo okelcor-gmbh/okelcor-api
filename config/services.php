@@ -56,6 +56,20 @@ return [
         'api_key' => env('DHL_API_KEY'),
     ],
 
+    // Traccar — open-source GPS/fleet tracking server (REST client).
+    // We are a CLIENT of a Traccar instance; the server runs elsewhere
+    // (own VPS/cloud, or the public demo server for trials).
+    //   TRACCAR_URL      e.g. https://demo.traccar.org  (no trailing /api)
+    //   TRACCAR_TOKEN    preferred: a Traccar API token (Bearer)
+    //   TRACCAR_EMAIL/PASSWORD  fallback: Basic auth (e.g. a demo account)
+    'traccar' => [
+        'url'      => rtrim((string) env('TRACCAR_URL', ''), '/'),
+        'token'    => env('TRACCAR_TOKEN'),
+        'email'    => env('TRACCAR_EMAIL'),
+        'password' => env('TRACCAR_PASSWORD'),
+        'timeout'  => (int) env('TRACCAR_TIMEOUT', 15),
+    ],
+
     'ebay' => [
         'client_id'     => env('EBAY_CLIENT_ID'),
         'client_secret' => env('EBAY_CLIENT_SECRET'),

@@ -333,6 +333,28 @@ See `FRONTEND_NOTE_invoices.md` for the frontend-facing summary + contract.
 
 ---
 
+## Traccar GPS / Fleet Tracking (Session 49)
+
+Open-source GPS tracking integration — Okelcor API as a REST client of a Traccar
+server (runs elsewhere; demo server for trials). Admin fleet visibility +
+customer-facing per-order delivery tracking. Config-driven, graceful degradation.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `config/services.php` traccar block | 🔧 | `TRACCAR_URL` + token (Bearer) or email/password (Basic) |
+| `TraccarService` (REST client) | 🔧 | devices+positions, route, trips, geofences, status/ping; knots→km/h, m→km; `['error'=>…]` degradation |
+| Admin endpoints (`tracking.view`) | 🔧 | `GET /admin/tracking/{status,devices,devices/{id},devices/{id}/route,devices/{id}/trips,geofences}` |
+| Assign device to order (`orders.update`) | 🔧 | `PUT /admin/tracking/orders/{id}/device` → sets `orders.tracking_device_id` |
+| Customer endpoint | 🔧 | `GET /auth/orders/{ref}/tracking` — scoped to own order, lean payload, `available:false` when none |
+| `tracking.view` permission added | 🔧 | super_admin / admin / order_manager / sales_manager |
+| Migration `orders.tracking_device_id` | 🔧 | guarded/additive (12th… 13th pending migration) |
+| Backend feature tests (10, MySQL) | ✅ | `TraccarTrackingTest` (Http::fake) — 10 passed; full suite 126 passed / 419 assertions |
+
+Setup: `TRACCAR_SETUP.md`. Frontend: `FRONTEND_NOTE_tracking.md`. Distinct from
+the freight tracking (DHL + ShipsGo `GET /tracking/{container}`), which stays.
+
+---
+
 ## eBay Integration (Sessions 15–25)
 
 | Phase | Feature | Status |
@@ -539,5 +561,6 @@ composer install --no-dev
 10. `2026_06_22_000002_add_lead_metadata_to_quote_requests_table` (tyre-wholesaler landing attribution)
 11. `2026_06_25_000001_add_preferred_language_to_customers_table` (localized emails/documents)
 12. `2026_06_28_000001_create_customer_notifications_table` (customer portal notifications + notification_preferences)
+13. `2026_06_28_000002_add_tracking_device_to_orders_table` (Traccar GPS — orders.tracking_device_id)
 
-All 12 verified to apply cleanly on MySQL via CI (`migrate:fresh`) and `LeadFunnelAnalyticsTest`'s `RefreshDatabase`. See `DEPLOY_RUNBOOK.md` for the ordered deploy + rollback plan.
+All 13 verified to apply cleanly on MySQL via CI (`migrate:fresh`) and `LeadFunnelAnalyticsTest`'s `RefreshDatabase`. See `DEPLOY_RUNBOOK.md` for the ordered deploy + rollback plan.

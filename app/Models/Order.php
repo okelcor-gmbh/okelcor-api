@@ -50,6 +50,7 @@ class Order extends Model
         'tracking_number',
         'container_number',
         'tracking_status',
+        'tracking_device_id',
         'estimated_delivery',
         'eta',
         'financials_locked_at',
