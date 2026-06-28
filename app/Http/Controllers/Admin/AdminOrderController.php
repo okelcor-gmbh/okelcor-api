@@ -8,6 +8,7 @@ use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderLog;
 use App\Services\AdminAuditLogger;
+use App\Services\CustomerNotifier;
 use App\Services\InvoiceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -99,6 +100,7 @@ class AdminOrderController extends Controller
 
         $this->logStatusChange($request, $order, $previousStatus);
         $this->logTrackingChange($request, $order);
+        $this->notifyShipmentStatus($order, $previousStatus);
 
         return response()->json([
             'data'    => $this->formatOrderDetail($order),
@@ -167,6 +169,7 @@ class AdminOrderController extends Controller
 
         $this->logStatusChange($request, $order, $previousStatus);
         $this->logTrackingChange($request, $order);
+        $this->notifyShipmentStatus($order, $previousStatus);
 
         return response()->json([
             'data'    => [
@@ -240,6 +243,22 @@ class AdminOrderController extends Controller
                 'error'     => $e->getMessage(),
             ]);
         }
+
+        // In-app twin — payment received, order confirmed.
+        CustomerNotifier::notifyByEmail(
+            $fresh->customer_email,
+            'order_placed',
+            "Payment received for order {$fresh->ref}",
+            "Thank you — we've confirmed your payment and your order is now being processed.",
+            [
+                'severity'     => 'success',
+                'action_url'   => "/account/orders/{$fresh->ref}",
+                'related_type' => 'order',
+                'related_id'   => $fresh->ref,
+                'email_sent'   => true,
+                'metadata'     => ['stage' => 'paid', 'order_ref' => $fresh->ref],
+            ]
+        );
 
         // Audit log
         $noteParts = array_filter([
@@ -339,6 +358,49 @@ class AdminOrderController extends Controller
             'old_value' => $previousStatus,
             'new_value' => $order->status,
         ]);
+    }
+
+    /**
+     * In-app twin for the shipment lifecycle. Fires once when an order
+     * transitions INTO 'shipped' or 'delivered'. No email mailable exists for
+     * these today, so this is in-app only; dedupe (stage = status) keeps it to a
+     * single row per stage per order. Guest orders resolve to null and no-op.
+     */
+    private function notifyShipmentStatus(Order $order, string $previousStatus): void
+    {
+        if (! $order->wasChanged('status') || ! in_array($order->status, ['shipped', 'delivered'], true)) {
+            return;
+        }
+
+        [$type, $title, $body, $severity] = $order->status === 'shipped'
+            ? [
+                'order_shipped',
+                "Order {$order->ref} has shipped",
+                $order->tracking_number
+                    ? "Your order is on its way. Tracking number: {$order->tracking_number}."
+                    : "Your order is on its way. Tracking details will follow shortly.",
+                'info',
+            ]
+            : [
+                'order_delivered',
+                "Order {$order->ref} delivered",
+                "Your order has been delivered. Thank you for choosing Okelcor.",
+                'success',
+            ];
+
+        CustomerNotifier::notifyByEmail(
+            $order->customer_email,
+            $type,
+            $title,
+            $body,
+            [
+                'severity'     => $severity,
+                'action_url'   => "/account/orders/{$order->ref}",
+                'related_type' => 'order',
+                'related_id'   => $order->ref,
+                'metadata'     => ['stage' => $order->status, 'order_ref' => $order->ref],
+            ]
+        );
     }
 
     private function logTrackingChange(Request $request, Order $order): void

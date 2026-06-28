@@ -8,6 +8,7 @@ use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Product;
+use App\Services\CustomerNotifier;
 use App\Services\InvoiceService;
 use App\Services\PromoCodeService;
 use App\Services\StripeService;
@@ -244,6 +245,22 @@ class PaymentController extends Controller
                         'error' => $e->getMessage(),
                     ]);
                 }
+
+                // In-app twin — order received, awaiting bank transfer.
+                CustomerNotifier::notifyByEmail(
+                    $order->customer_email,
+                    'order_placed',
+                    "Order {$order->ref} received",
+                    "We've received your order. Please complete your bank transfer to confirm it — see your order for payment details.",
+                    [
+                        'severity'     => 'info',
+                        'action_url'   => "/account/orders/{$order->ref}",
+                        'related_type' => 'order',
+                        'related_id'   => $order->ref,
+                        'email_sent'   => true,
+                        'metadata'     => ['stage' => 'received', 'order_ref' => $order->ref],
+                    ]
+                );
 
                 $adminEmail = config('mail.order_email');
                 if ($adminEmail) {
@@ -603,6 +620,22 @@ class PaymentController extends Controller
                 'error' => $e->getMessage(),
             ]);
         }
+
+        // In-app twin — payment received, order confirmed.
+        CustomerNotifier::notifyByEmail(
+            $order->customer_email,
+            'order_placed',
+            "Payment received for order {$order->ref}",
+            "Thank you — your payment is confirmed and your order is now being processed.",
+            [
+                'severity'     => 'success',
+                'action_url'   => "/account/orders/{$order->ref}",
+                'related_type' => 'order',
+                'related_id'   => $order->ref,
+                'email_sent'   => true,
+                'metadata'     => ['stage' => 'paid', 'order_ref' => $order->ref],
+            ]
+        );
 
         $adminEmail = config('mail.order_email');
         if ($adminEmail) {

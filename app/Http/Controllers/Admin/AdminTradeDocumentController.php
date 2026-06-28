@@ -943,6 +943,22 @@ class AdminTradeDocumentController extends Controller
         // Advance document lifecycle: issued → sent
         $document->update(['status' => 'sent', 'sent_at' => now()]);
 
+        // In-app twin — action required: please review & accept the order confirmation.
+        CustomerNotifier::notifyByEmail(
+            $recipientEmail,
+            'order_confirmation',
+            "Please confirm order {$order->ref}",
+            "Your order confirmation is ready. Please review and accept it so we can prepare your proforma invoice.",
+            [
+                'severity'     => 'warning',
+                'action_url'   => "/account/orders/{$order->ref}",
+                'related_type' => 'order',
+                'related_id'   => $order->ref,
+                'email_sent'   => true,
+                'metadata'     => ['stage' => 'acceptance_requested', 'order_ref' => $order->ref],
+            ]
+        );
+
         try {
             OrderLog::create([
                 'order_id'         => $order->id,

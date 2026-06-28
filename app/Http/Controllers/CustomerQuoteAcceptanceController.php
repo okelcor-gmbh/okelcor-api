@@ -7,6 +7,7 @@ use App\Models\OrderLog;
 use App\Models\QuoteRequest;
 use App\Models\TradeDocument;
 use App\Services\AdminNotificationService;
+use App\Services\CustomerNotifier;
 use App\Services\CustomerTimelineService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -177,6 +178,21 @@ class CustomerQuoteAcceptanceController extends Controller
 
         $this->logOrderEvent($order, 'order_confirmation_accepted',
             'Customer accepted order confirmation for order ' . $order->ref . '.');
+
+        // In-app twin — a record of the acceptance in the customer's inbox.
+        CustomerNotifier::notify(
+            $customer,
+            'order_confirmed',
+            "Order {$order->ref} confirmed",
+            "Thanks for confirming. We'll now prepare your proforma invoice.",
+            [
+                'severity'     => 'success',
+                'action_url'   => "/account/orders/{$order->ref}",
+                'related_type' => 'order',
+                'related_id'   => $order->ref,
+                'metadata'     => ['stage' => 'accepted', 'order_ref' => $order->ref],
+            ]
+        );
 
         return response()->json([
             'data'    => ['customer_acceptance_status' => 'accepted'],

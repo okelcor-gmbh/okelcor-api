@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Customer;
 use App\Models\CustomerVerification;
 use App\Services\CustomerHealthService;
+use App\Services\CustomerNotifier;
 use App\Services\CustomerTimelineService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -120,6 +121,47 @@ class AdminCustomerVerificationController extends Controller
         } catch (\Throwable) {
             // Health recompute is best-effort; never block a verification change.
         }
+
+        $this->notifyVerificationOutcome($customer, $v);
+    }
+
+    /**
+     * In-app twin for a verification reaching a terminal outcome. In-app only
+     * (no customer email exists for this today). Dedupe (stage = status) keeps
+     * one row per outcome per verification record.
+     */
+    private function notifyVerificationOutcome(Customer $customer, CustomerVerification $v): void
+    {
+        if (! in_array($v->status, ['verified', 'rejected'], true)) {
+            return;
+        }
+
+        $label = match ($v->type) {
+            'company_registration' => 'company registration',
+            'vat_number'           => 'VAT number',
+            'website'              => 'website',
+            'import_license'       => 'import licence',
+            'business_address'     => 'business address',
+            default                => 'business details',
+        };
+
+        [$title, $body, $severity] = $v->status === 'verified'
+            ? ["Your {$label} has been verified", "Thanks — we've verified your {$label}.", 'success']
+            : ["We couldn't verify your {$label}", "We were unable to verify your {$label}. Please review the details or contact us.", 'warning'];
+
+        CustomerNotifier::notify(
+            $customer,
+            'verification_update',
+            $title,
+            $body,
+            [
+                'severity'     => $severity,
+                'action_url'   => '/account/company',
+                'related_type' => 'verification',
+                'related_id'   => $v->id,
+                'metadata'     => ['stage' => $v->status, 'verification_type' => $v->type],
+            ]
+        );
     }
 
     private function rollUpVerificationStatus(Customer $customer): void

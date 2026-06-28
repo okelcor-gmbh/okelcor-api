@@ -295,12 +295,18 @@ it with no FE deploy.
 | Trigger: quote received (`quote_received`) | 🔧 | QuoteRequestController acknowledgement |
 | Trigger: password changed (`security_alert`) | 🔧 | CustomerAuthController::changePassword (urgent, always fresh) |
 | Trigger: email verified (`welcome`) | 🔧 | CustomerAuthController::verifyEmail |
-| Backend feature tests (15, MySQL) | ✅ | `CustomerNotificationsTest` — 15 passed / 55 assertions; full suite 103 passed |
+| Trigger: order placed/paid (`order_placed`) | 🔧 | PaymentController (bank-transfer `received` + Stripe `paid`) + AdminOrderController::markPaid (`paid`); stage-keyed dedupe |
+| Trigger: order confirmation requested (`order_confirmation`) | 🔧 | AdminTradeDocumentController::sendAcceptanceRequest (email twin, warning) |
+| Trigger: order confirmation accepted (`order_confirmed`) | 🔧 | CustomerQuoteAcceptanceController::acceptOrderConfirmation (in-app) |
+| Trigger: shipped / delivered (`order_shipped`/`order_delivered`) | 🔧 | AdminOrderController::notifyShipmentStatus from both update + updateStatus (in-app; no mailable today) |
+| Trigger: verification verified/rejected (`verification_update`) | 🔧 | AdminCustomerVerificationController::notifyVerificationOutcome (in-app) |
+| Backend feature tests (MySQL) | ✅ | `CustomerNotificationsTest` 15 passed; **full Feature suite 103 passed / 365 assertions** after trigger wiring — no regressions |
 
-**Remaining triggers (follow-up):** order placed/confirmed/shipped/delivered,
-verification status change, proposal reminder, announcements — wire alongside
-their existing emails using the same `CustomerNotifier::notify(...)` pattern.
-Per the contract, account-area i18n of notification copy is a separate effort.
+**Remaining triggers (no source event yet):** `proposal_reminder` and
+`announcement` have no existing email/job to hook onto — wire them when a proposal
+reminder scheduler and an announcement broadcast are introduced, using the same
+`CustomerNotifier::notify(...)` pattern. Per the contract, account-area i18n of
+notification copy is a separate effort.
 
 ---
 
