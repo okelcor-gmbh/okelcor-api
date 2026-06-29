@@ -88,10 +88,32 @@ misleading — a live truck only appears once the order is actually shipped.
     "status": "online",                 // device online/offline
     "last_update": "2026-06-28T10:00:00Z",
     "position": { "latitude":52.52, "longitude":13.40, "speed_kmh":18.5, "course":90, "address":"Berlin", "fix_time":"…" },
-    "route": [ { "latitude":…, "longitude":…, "fix_time":"…" } ]   // CURRENT TRIP trail; [] when delivered
+    "route": [ { "latitude":…, "longitude":…, "fix_time":"…" } ],  // CURRENT TRIP trail; [] when delivered
+    "eta": {                                  // null when not computable / delivered
+      "eta": "2026-06-29T14:30:00+00:00",     // estimated arrival timestamp
+      "minutes_remaining": 145,
+      "distance_remaining_km": 168.4,
+      "speed_kmh_used": 58.0,                  // moving avg, or fallback cruising speed
+      "progress_percent": 37                   // 0–100 for the progress bar
+    }
   }
 }
 ```
+
+### Delivery countdown + progress bar (the "2 days left" UI)
+The backend gives you an **`eta` timestamp**, **`distance_remaining_km`**, and
+**`progress_percent`**. Render the live countdown **client-side** from `eta.eta`
+(don't poll per second):
+- Compute `eta.eta - now` and format as `Xd Yh`, then `Yh Zm`, then `Zm` as it
+  shrinks. Re-derive every second from the timestamp; refresh the payload on your
+  normal 30s poll so distance/progress stay current.
+- Progress bar width = `eta.progress_percent`.
+- `eta` can be `null` (no GPS fix yet, or destination not geocodable) — just hide
+  the countdown/bar; the map still works.
+
+> Honesty note: this is a **straight-line estimate** (great-circle × road factor ÷
+> recent average speed), not traffic-aware routing. It's a good "roughly N hours
+> out" indicator — label it "estimated", not a guaranteed time.
 
 Reason meanings: `no_device` (none assigned) · `not_shipped` (still being
 prepared — show "tracking starts when it ships") · `order_cancelled` · `unavailable`

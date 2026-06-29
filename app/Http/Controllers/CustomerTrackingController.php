@@ -3,9 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Models\Order;
+use App\Services\DeliveryEtaService;
+use App\Services\GeocodingService;
 use App\Services\TraccarService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 
 /**
  * Customer-facing live delivery tracking (Traccar).
@@ -28,7 +31,11 @@ class CustomerTrackingController extends Controller
     private const IN_TRANSIT = 'shipped';
     private const DELIVERED  = 'delivered';
 
-    public function __construct(private TraccarService $traccar) {}
+    public function __construct(
+        private TraccarService $traccar,
+        private GeocodingService $geocoder,
+        private DeliveryEtaService $eta,
+    ) {}
 
     public function show(Request $request, string $ref): JsonResponse
     {
@@ -79,9 +86,86 @@ class CustomerTrackingController extends Controller
                 'last_update'  => $shapedDevice['last_update'],
                 'position'     => $shapedDevice['position'],
                 'route'        => $route,
+                'eta'          => $delivered ? null : $this->buildEta($order, $shapedDevice['position'], $route),
             ],
             'message' => 'success',
         ]);
+    }
+
+    /**
+     * Straight-line ETA + delivery progress for the in-transit order. Best-effort:
+     * returns null (map still shows) if there's no position or the destination
+     * can't be geocoded. Never throws.
+     *
+     * @return array{eta: ?string, minutes_remaining: ?int, distance_remaining_km: float, speed_kmh_used: float, progress_percent: ?int}|null
+     */
+    private function buildEta(Order $order, ?array $position, array $route): ?array
+    {
+        try {
+            if (! $position || $position['latitude'] === null || $position['longitude'] === null) {
+                return null;
+            }
+
+            [$destLat, $destLon] = $this->destination($order);
+            if ($destLat === null) {
+                return null;
+            }
+
+            // Effective speed: average of recent MOVING points on the current trip.
+            $movingSpeeds = (new Collection($route))
+                ->pluck('speed_kmh')
+                ->filter(fn ($s) => $s !== null && $s > 5);
+            $avgSpeed = $movingSpeeds->isNotEmpty() ? round($movingSpeeds->avg(), 1) : null;
+
+            $estimate = $this->eta->estimate(
+                (float) $position['latitude'],
+                (float) $position['longitude'],
+                $destLat,
+                $destLon,
+                $avgSpeed,
+            );
+
+            // Snapshot the first measured distance as the progress baseline.
+            if ($order->route_total_km === null && $estimate['distance_remaining_km'] > 0) {
+                $order->forceFill(['route_total_km' => $estimate['distance_remaining_km']])->saveQuietly();
+                $order->route_total_km = $estimate['distance_remaining_km'];
+            }
+
+            $total    = (float) $order->route_total_km;
+            $progress = $total > 0
+                ? max(0, min(100, (int) round((1 - $estimate['distance_remaining_km'] / $total) * 100)))
+                : null;
+
+            return array_merge($estimate, ['progress_percent' => $progress]);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * Destination coordinates: use stored values, else geocode the delivery
+     * address once (via OSM Nominatim) and persist them on the order.
+     *
+     * @return array{0: float|null, 1: float|null}
+     */
+    private function destination(Order $order): array
+    {
+        if ($order->dest_lat !== null && $order->dest_lon !== null) {
+            return [(float) $order->dest_lat, (float) $order->dest_lon];
+        }
+
+        $address = trim(implode(', ', array_filter([
+            $order->address, $order->city, $order->postal_code, $order->country,
+        ])));
+
+        $geo = $this->geocoder->geocode($address);
+        if (! $geo) {
+            return [null, null];
+        }
+
+        $order->forceFill(['dest_lat' => $geo['lat'], 'dest_lon' => $geo['lon']])->saveQuietly();
+
+        return [$geo['lat'], $geo['lon']];
     }
 
     private function unavailable(Order $order, string $reason, string $message): JsonResponse

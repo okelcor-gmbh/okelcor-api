@@ -197,6 +197,39 @@ class TraccarTrackingTest extends TestCase
         $this->assertStringStartsWith('2026-06-28T09:30:00', $captured['route_from']);
     }
 
+    public function test_eta_service_distance_and_time(): void
+    {
+        config(['services.traccar.road_factor' => 1.3, 'services.traccar.default_speed_kmh' => 60]);
+
+        $svc = app(\App\Services\DeliveryEtaService::class);
+
+        // Berlin → Munich great-circle is ~504 km.
+        $straight = $svc->haversineKm(52.52, 13.405, 48.1351, 11.582);
+        $this->assertEqualsWithDelta(504, $straight, 15);
+
+        // Stationary → falls back to default 60 km/h, distance ×1.3 road factor.
+        $est = $svc->estimate(52.52, 13.405, 48.1351, 11.582, null);
+        $this->assertEqualsWithDelta(504 * 1.3, $est['distance_remaining_km'], 25);
+        $this->assertSame(60.0, $est['speed_kmh_used']);
+        $this->assertGreaterThan(0, $est['minutes_remaining']);
+        $this->assertNotNull($est['eta']);
+    }
+
+    public function test_geocoding_service_returns_coords(): void
+    {
+        Http::fake([
+            '*nominatim*' => Http::response([
+                ['lat' => '52.5200066', 'lon' => '13.404954', 'display_name' => 'Berlin'],
+            ]),
+        ]);
+
+        $geo = app(\App\Services\GeocodingService::class)->geocode('Alexanderplatz, Berlin, DE');
+
+        $this->assertNotNull($geo);
+        $this->assertEqualsWithDelta(52.52, $geo['lat'], 0.01);
+        $this->assertEqualsWithDelta(13.40, $geo['lon'], 0.01);
+    }
+
     public function test_geofences_shaping(): void
     {
         Http::fake([
@@ -288,7 +321,12 @@ class TraccarTrackingTest extends TestCase
         ]);
 
         $c = $this->customer();
-        $order = $this->order($c, ['tracking_device_id' => '7']);
+        // Destination pre-set (Munich) so no live geocoding HTTP is needed.
+        $order = $this->order($c, [
+            'tracking_device_id' => '7',
+            'dest_lat'           => 48.1351,
+            'dest_lon'           => 11.5820,
+        ]);
 
         $payload = app(CustomerTrackingController::class)
             ->show($this->customerRequest($c), $order->ref)
@@ -298,6 +336,13 @@ class TraccarTrackingTest extends TestCase
         $this->assertSame('Truck 1', $payload['data']['name']);
         $this->assertSame(52.52, $payload['data']['position']['latitude']);
         $this->assertCount(1, $payload['data']['route']);
+
+        // ETA block present (Berlin → Munich is ~hundreds of km).
+        $eta = $payload['data']['eta'];
+        $this->assertNotNull($eta);
+        $this->assertGreaterThan(0, $eta['distance_remaining_km']);
+        $this->assertNotNull($eta['eta']);
+        $this->assertSame(0, $eta['progress_percent']); // first reading = baseline
     }
 
     public function test_customer_tracking_hidden_until_order_shipped(): void

@@ -70,6 +70,18 @@ return [
         'timeout'  => (int) env('TRACCAR_TIMEOUT', 15),
         // Max hours of history for the customer "current trip" trail (safety cap).
         'route_hours' => (int) env('TRACCAR_ROUTE_HOURS', 12),
+        // Delivery ETA tuning: straight-line distance × road factor, ÷ speed.
+        'road_factor'       => (float) env('TRACCAR_ROAD_FACTOR', 1.3),
+        'default_speed_kmh' => (float) env('TRACCAR_DEFAULT_SPEED_KMH', 60),
+    ],
+
+    // OpenStreetMap Nominatim — free forward geocoding (address → lat/lng) for
+    // delivery destinations. Results are cached + persisted on the order, so we
+    // call it at most once per address. Nominatim policy requires a User-Agent
+    // with a contact, so set NOMINATIM_EMAIL (falls back to MAIL_FROM_ADDRESS).
+    'nominatim' => [
+        'url'   => rtrim((string) env('NOMINATIM_URL', 'https://nominatim.openstreetmap.org'), '/'),
+        'email' => env('NOMINATIM_EMAIL', env('MAIL_FROM_ADDRESS', 'support@okelcor.com')),
     ],
 
     'ebay' => [

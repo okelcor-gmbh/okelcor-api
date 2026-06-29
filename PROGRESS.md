@@ -352,8 +352,9 @@ customer-facing per-order delivery tracking. Config-driven, graceful degradation
 | Customer trail = current trip | 🔧 | `currentTripRoute()` bounds route to latest trip start, capped at `TRACCAR_ROUTE_HOURS` (default 12) |
 | Admin order payload exposes `tracking_device_id` | 🔧 | links order ↔ fleet device |
 | "Track it live" on shipped notification | 🔧 | `order_shipped` notification gains live-tracking copy + `metadata.live_tracking` when a device is assigned |
+| Delivery ETA + progress | 🔧 | `eta` block in customer tracking: arrival timestamp, minutes/distance remaining, `progress_percent`. Straight-line (haversine × road factor ÷ recent avg speed). `GeocodingService` (OSM Nominatim, cached) resolves destination; `DeliveryEtaService` computes. New `orders.dest_lat/dest_lon/route_total_km` |
 | Carrier type `bus` → `truck` | 🔧 | enum migration (data-safe) + validation + PDF labels ("Truck Freight"); Okelcor runs no bus freight |
-| Backend feature tests (17, MySQL) | ✅ | `TraccarTrackingTest` (Http::fake) — 17 passed; full suite 133 passed / 437 assertions |
+| Backend feature tests (19, MySQL) | ✅ | `TraccarTrackingTest` (Http::fake) — 19 passed; full suite 135 passed / 449 assertions |
 
 Setup: `TRACCAR_SETUP.md`. Frontend: `FRONTEND_NOTE_tracking.md`. Distinct from
 the freight tracking (DHL + ShipsGo `GET /tracking/{container}`), which stays.
@@ -568,5 +569,6 @@ composer install --no-dev
 12. `2026_06_28_000001_create_customer_notifications_table` (customer portal notifications + notification_preferences)
 13. `2026_06_28_000002_add_tracking_device_to_orders_table` (Traccar GPS — orders.tracking_device_id)
 14. `2026_06_29_000001_change_carrier_type_bus_to_truck_on_orders` (carrier_type bus → truck, data-safe)
+15. `2026_06_29_000002_add_delivery_eta_fields_to_orders` (dest_lat/dest_lon/route_total_km for ETA + progress)
 
-All 14 verified to apply cleanly on MySQL via CI (`migrate:fresh`) and `LeadFunnelAnalyticsTest`'s `RefreshDatabase`. See `DEPLOY_RUNBOOK.md` for the ordered deploy + rollback plan.
+All 15 verified to apply cleanly on MySQL via CI (`migrate:fresh`) and `LeadFunnelAnalyticsTest`'s `RefreshDatabase`. See `DEPLOY_RUNBOOK.md` for the ordered deploy + rollback plan.
