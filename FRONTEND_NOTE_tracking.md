@@ -134,6 +134,12 @@ lean payload, no internal device attributes.
    `/admin/tracking/devices`, or a free-text device id; send `null` to clear).
    The admin order detail payload now returns **`tracking_device_id`** so you can
    pre-select the current device.
+   - **Set destination (for ETA):** `PUT /admin/tracking/orders/{id}/destination`
+     — body `{ "lat": 48.13, "lon": 11.58 }` (a map pin) **or** `{ "address": "…" }`
+     (geocoded server-side; `422` `geocode_failed` if not found), or `{}` to clear.
+     The order detail payload returns the current **`dest_lat` / `dest_lon`** so you
+     can show/prefill the pin. Use this for orders whose address is too sparse to
+     auto-geocode (ETA comes back `null` for those until a destination is set).
 3. **Customer order page:** call `/auth/orders/{ref}/tracking`; if
    `available:true` show a live map (position marker + `route` polyline) + "last
    updated" stamp, and poll ~30s **only while `order_status === "shipped"`** (stop

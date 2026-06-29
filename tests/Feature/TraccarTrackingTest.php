@@ -422,6 +422,62 @@ class TraccarTrackingTest extends TestCase
         $this->assertFalse($n->metadata['live_tracking']);
     }
 
+    public function test_admin_sets_destination_pin_and_resets_baseline(): void
+    {
+        $c = $this->customer();
+        $order = $this->order($c, ['route_total_km' => 500]); // stale baseline
+
+        app(AdminTrackingController::class)
+            ->setDestination($this->adminRequest(['lat' => 48.1351, 'lon' => 11.5820]), $order->id);
+
+        $fresh = $order->fresh();
+        $this->assertEqualsWithDelta(48.1351, (float) $fresh->dest_lat, 0.0001);
+        $this->assertEqualsWithDelta(11.5820, (float) $fresh->dest_lon, 0.0001);
+        $this->assertNull($fresh->route_total_km, 'Baseline must reset when destination changes.');
+    }
+
+    public function test_admin_sets_destination_by_address(): void
+    {
+        Http::fake([
+            '*nominatim*' => Http::response([['lat' => '52.5200', 'lon' => '13.4050']]),
+        ]);
+
+        $c = $this->customer();
+        $order = $this->order($c);
+
+        app(AdminTrackingController::class)
+            ->setDestination($this->adminRequest(['address' => 'Alexanderplatz, Berlin']), $order->id);
+
+        $this->assertEqualsWithDelta(52.52, (float) $order->fresh()->dest_lat, 0.01);
+    }
+
+    public function test_admin_set_destination_bad_address_422(): void
+    {
+        Http::fake(['*nominatim*' => Http::response([])]); // no match
+
+        $c = $this->customer();
+        $order = $this->order($c);
+
+        $resp = app(AdminTrackingController::class)
+            ->setDestination($this->adminRequest(['address' => 'asdfqwerty nowhere']), $order->id);
+
+        $this->assertSame(422, $resp->getStatusCode());
+    }
+
+    public function test_admin_clears_destination(): void
+    {
+        $c = $this->customer();
+        $order = $this->order($c, ['dest_lat' => 48.1, 'dest_lon' => 11.5, 'route_total_km' => 200]);
+
+        app(AdminTrackingController::class)
+            ->setDestination($this->adminRequest([]), $order->id);
+
+        $fresh = $order->fresh();
+        $this->assertNull($fresh->dest_lat);
+        $this->assertNull($fresh->dest_lon);
+        $this->assertNull($fresh->route_total_km);
+    }
+
     public function test_admin_assigns_and_clears_tracking_device(): void
     {
         $c = $this->customer();

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Order;
+use App\Services\GeocodingService;
 use App\Services\TraccarService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -18,7 +19,10 @@ use Illuminate\Http\Request;
  */
 class AdminTrackingController extends Controller
 {
-    public function __construct(private TraccarService $traccar) {}
+    public function __construct(
+        private TraccarService $traccar,
+        private GeocodingService $geocoder,
+    ) {}
 
     /** GET /admin/tracking/status — connection/readiness probe. */
     public function status(): JsonResponse
@@ -110,6 +114,60 @@ class AdminTrackingController extends Controller
         return response()->json([
             'data'    => ['ref' => $order->ref, 'tracking_device_id' => $order->tracking_device_id],
             'message' => $order->tracking_device_id ? 'Tracking device assigned.' : 'Tracking device cleared.',
+        ]);
+    }
+
+    /**
+     * PUT /admin/tracking/orders/{id}/destination — set the delivery destination
+     * for ETA/progress when the order address can't be geocoded automatically.
+     * (orders.update)
+     *
+     * Accepts either an explicit pin (`lat` + `lon`) or an `address` to geocode.
+     * Empty body clears the destination. Either way the progress baseline
+     * (route_total_km) is reset so it recomputes against the new destination.
+     */
+    public function setDestination(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate([
+            'lat'     => ['nullable', 'numeric', 'between:-90,90', 'required_with:lon'],
+            'lon'     => ['nullable', 'numeric', 'between:-180,180', 'required_with:lat'],
+            'address' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $order = Order::findOrFail($id);
+
+        // Explicit pin wins.
+        if (isset($data['lat'], $data['lon'])) {
+            $lat = (float) $data['lat'];
+            $lon = (float) $data['lon'];
+        } elseif (! empty($data['address'])) {
+            $geo = $this->geocoder->geocode($data['address']);
+            if (! $geo) {
+                return response()->json([
+                    'message' => 'Could not find coordinates for that address. Enter a lat/lng pin instead.',
+                    'code'    => 'geocode_failed',
+                ], 422);
+            }
+            $lat = $geo['lat'];
+            $lon = $geo['lon'];
+        } else {
+            // Clear.
+            $order->update(['dest_lat' => null, 'dest_lon' => null, 'route_total_km' => null]);
+            return response()->json([
+                'data'    => ['ref' => $order->ref, 'dest_lat' => null, 'dest_lon' => null],
+                'message' => 'Destination cleared.',
+            ]);
+        }
+
+        $order->update([
+            'dest_lat'       => $lat,
+            'dest_lon'       => $lon,
+            'route_total_km' => null, // reset progress baseline for the new destination
+        ]);
+
+        return response()->json([
+            'data'    => ['ref' => $order->ref, 'dest_lat' => (float) $order->dest_lat, 'dest_lon' => (float) $order->dest_lon],
+            'message' => 'Destination set.',
         ]);
     }
 

@@ -486,6 +486,8 @@ class AdminOrderController extends Controller
             'container_number'   => $o->container_number,
             'tracking_status'    => $o->tracking_status,
             'tracking_device_id' => $o->tracking_device_id,
+            'dest_lat'           => $o->dest_lat !== null ? (float) $o->dest_lat : null,
+            'dest_lon'           => $o->dest_lon !== null ? (float) $o->dest_lon : null,
             'estimated_delivery' => $o->estimated_delivery,
             'eta'                => $o->eta,
             'payment_status'     => $o->payment_status,

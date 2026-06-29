@@ -741,6 +741,7 @@ Route::prefix('v1')->group(function () {
         // Assign a Traccar device to an order (write) — orders.update
         Route::middleware('permission:orders.update')->group(function () {
             Route::put('tracking/orders/{id}/device', [AdminTrackingController::class, 'assignDevice']);
+            Route::put('tracking/orders/{id}/destination', [AdminTrackingController::class, 'setDestination']);
         });
 
         // -----------------------------------------------------------------
