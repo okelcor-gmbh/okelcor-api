@@ -372,21 +372,23 @@ class AdminOrderController extends Controller
             return;
         }
 
-        [$type, $title, $body, $severity] = $order->status === 'shipped'
-            ? [
-                'order_shipped',
-                "Order {$order->ref} has shipped",
-                $order->tracking_number
-                    ? "Your order is on its way. Tracking number: {$order->tracking_number}."
-                    : "Your order is on its way. Tracking details will follow shortly.",
-                'info',
-            ]
-            : [
-                'order_delivered',
-                "Order {$order->ref} delivered",
-                "Your order has been delivered. Thank you for choosing Okelcor.",
-                'success',
-            ];
+        $hasLiveTracking = ! empty($order->tracking_device_id);
+
+        if ($order->status === 'shipped') {
+            $type     = 'order_shipped';
+            $title    = "Order {$order->ref} has shipped";
+            $severity = 'info';
+            $trackingSuffix = $order->tracking_number ? " Tracking number: {$order->tracking_number}." : '';
+            // "Track it live" only when a GPS device is actually assigned.
+            $body = $hasLiveTracking
+                ? "Your order is on its way — track it live in your account.{$trackingSuffix}"
+                : "Your order is on its way." . ($trackingSuffix ?: ' Tracking details will follow shortly.');
+        } else {
+            $type     = 'order_delivered';
+            $title    = "Order {$order->ref} delivered";
+            $severity = 'success';
+            $body     = 'Your order has been delivered. Thank you for choosing Okelcor.';
+        }
 
         CustomerNotifier::notifyByEmail(
             $order->customer_email,
@@ -398,7 +400,11 @@ class AdminOrderController extends Controller
                 'action_url'   => "/account/orders/{$order->ref}",
                 'related_type' => 'order',
                 'related_id'   => $order->ref,
-                'metadata'     => ['stage' => $order->status, 'order_ref' => $order->ref],
+                'metadata'     => [
+                    'stage'         => $order->status,
+                    'order_ref'     => $order->ref,
+                    'live_tracking' => $order->status === 'shipped' ? $hasLiveTracking : false,
+                ],
             ]
         );
     }

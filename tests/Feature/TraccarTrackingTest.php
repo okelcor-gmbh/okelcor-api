@@ -2,9 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Http\Controllers\Admin\AdminOrderController;
 use App\Http\Controllers\Admin\AdminTrackingController;
 use App\Http\Controllers\CustomerTrackingController;
+use App\Models\AdminUser;
 use App\Models\Customer;
+use App\Models\CustomerNotification;
 use App\Models\Order;
 use App\Services\TraccarService;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -92,6 +95,24 @@ class TraccarTrackingTest extends TestCase
     private function adminRequest(array $input = []): Request
     {
         return Request::create('/', 'PUT', $input);
+    }
+
+    private function admin(): AdminUser
+    {
+        return AdminUser::create([
+            'name'      => 'Ops ' . uniqid(),
+            'email'     => 'ops' . uniqid() . '@okelcor.test',
+            'role'      => 'super_admin',
+            'password'  => Hash::make('secret-pass-123'),
+            'is_active' => true,
+        ]);
+    }
+
+    private function markStatus(AdminUser $admin, Order $order, string $status): void
+    {
+        $req = Request::create('/', 'PATCH', ['status' => $status]);
+        $req->setUserResolver(fn () => $admin);
+        app(AdminOrderController::class)->updateStatus($req, $order->id);
     }
 
     // ── Service shaping ──────────────────────────────────────────────────────────
@@ -329,6 +350,32 @@ class TraccarTrackingTest extends TestCase
     }
 
     // ── Admin device assignment ──────────────────────────────────────────────────
+
+    public function test_shipping_with_device_sends_track_live_notification(): void
+    {
+        $c = $this->customer();
+        $order = $this->order($c, ['status' => 'processing', 'tracking_device_id' => '7']);
+
+        $this->markStatus($this->admin(), $order, 'shipped');
+
+        $n = CustomerNotification::where('customer_id', $c->id)->where('type', 'order_shipped')->first();
+        $this->assertNotNull($n);
+        $this->assertStringContainsString('track it live', $n->body);
+        $this->assertTrue($n->metadata['live_tracking']);
+    }
+
+    public function test_shipping_without_device_omits_track_live(): void
+    {
+        $c = $this->customer();
+        $order = $this->order($c, ['status' => 'processing']); // no device
+
+        $this->markStatus($this->admin(), $order, 'shipped');
+
+        $n = CustomerNotification::where('customer_id', $c->id)->where('type', 'order_shipped')->first();
+        $this->assertNotNull($n);
+        $this->assertStringNotContainsString('track it live', $n->body);
+        $this->assertFalse($n->metadata['live_tracking']);
+    }
 
     public function test_admin_assigns_and_clears_tracking_device(): void
     {

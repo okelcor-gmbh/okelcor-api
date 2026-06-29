@@ -121,6 +121,36 @@ lean payload, no internal device attributes.
 4. **Map library is your call** (Leaflet/Mapbox/Google). Backend only supplies
    lat/lng + WKT; no tiles.
 
+## "Track it live" notification (when an order ships)
+
+When an admin marks an order **shipped**, the customer already gets an
+`order_shipped` notification (the existing Email = Inbox feed). Now, **if a
+tracking device is assigned**, that notification:
+- says *"Your order is on its way — track it live in your account."* (vs the plain
+  "on its way" copy when there's no device), and
+- carries `metadata.live_tracking: true`.
+
+Shape (from the existing notifications feed — `GET /auth/customer/notifications`):
+```jsonc
+{
+  "type": "order_shipped",
+  "title": "Order AB-1042 has shipped",
+  "body": "Your order is on its way — track it live in your account. Tracking number: …",
+  "action_url": "/account/orders/AB-1042",
+  "metadata": { "stage": "shipped", "order_ref": "AB-1042", "live_tracking": true }
+}
+```
+
+**Frontend:** nothing required — the notification bell/inbox already render this.
+Optional polish: when `metadata.live_tracking === true`, you can deep-link the
+notification straight to the order's tracking map (the `action_url` already points
+at the order page where the DeliveryTracking card lives), or show a small "Live"
+badge on the notification.
+
+**Admin workflow note:** assign the device **before** marking the order shipped,
+so the shipped notification includes the "track it live" copy. (Re-marking an
+already-shipped order won't re-send — one notification per shipment.)
+
 ## ⚠️ Carrier types changed (admin order form)
 
 The `carrier_type` enum dropped **`bus`** and added **`truck`**. Valid values are

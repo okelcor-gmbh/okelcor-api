@@ -351,8 +351,9 @@ customer-facing per-order delivery tracking. Config-driven, graceful degradation
 | Customer tracking tied to shipment status | 🔧 | live only when order `shipped`; `delivered` state (no live route); reasons `no_device`/`not_shipped`/`order_cancelled`/`unavailable`; returns `order_status`+`delivered` |
 | Customer trail = current trip | 🔧 | `currentTripRoute()` bounds route to latest trip start, capped at `TRACCAR_ROUTE_HOURS` (default 12) |
 | Admin order payload exposes `tracking_device_id` | 🔧 | links order ↔ fleet device |
+| "Track it live" on shipped notification | 🔧 | `order_shipped` notification gains live-tracking copy + `metadata.live_tracking` when a device is assigned |
 | Carrier type `bus` → `truck` | 🔧 | enum migration (data-safe) + validation + PDF labels ("Truck Freight"); Okelcor runs no bus freight |
-| Backend feature tests (15, MySQL) | ✅ | `TraccarTrackingTest` (Http::fake) — 15 passed; full suite 131 passed / 431 assertions |
+| Backend feature tests (17, MySQL) | ✅ | `TraccarTrackingTest` (Http::fake) — 17 passed; full suite 133 passed / 437 assertions |
 
 Setup: `TRACCAR_SETUP.md`. Frontend: `FRONTEND_NOTE_tracking.md`. Distinct from
 the freight tracking (DHL + ShipsGo `GET /tracking/{container}`), which stays.
