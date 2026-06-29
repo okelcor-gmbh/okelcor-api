@@ -78,7 +78,7 @@ class AdminOrderController extends Controller
         $request->validate([
             'status'             => ['required', Rule::in(['pending', 'confirmed', 'awaiting_proforma', 'processing', 'shipped', 'delivered', 'cancelled'])],
             'carrier'            => ['sometimes', 'nullable', 'string', 'max:100'],
-            'carrier_type'       => ['sometimes', 'nullable', Rule::in(['sea', 'air', 'dhl', 'road', 'bus'])],
+            'carrier_type'       => ['sometimes', 'nullable', Rule::in(['sea', 'air', 'dhl', 'road', 'truck'])],
             'tracking_number'    => ['sometimes', 'nullable', 'string', 'max:100'],
             'container_number'   => ['sometimes', 'nullable', 'string', 'max:30'],
             'estimated_delivery' => ['sometimes', 'nullable', 'date'],
@@ -149,7 +149,7 @@ class AdminOrderController extends Controller
         $request->validate([
             'status'             => ['required', Rule::in(['pending', 'confirmed', 'awaiting_proforma', 'processing', 'shipped', 'delivered', 'cancelled'])],
             'carrier'            => ['sometimes', 'nullable', 'string', 'max:100'],
-            'carrier_type'       => ['sometimes', 'nullable', Rule::in(['sea', 'air', 'dhl', 'road', 'bus'])],
+            'carrier_type'       => ['sometimes', 'nullable', Rule::in(['sea', 'air', 'dhl', 'road', 'truck'])],
             'tracking_number'    => ['sometimes', 'nullable', 'string', 'max:100'],
             'container_number'   => ['sometimes', 'nullable', 'string', 'max:30'],
             'estimated_delivery' => ['sometimes', 'nullable', 'date'],
@@ -479,6 +479,7 @@ class AdminOrderController extends Controller
             'tracking_number'    => $o->tracking_number,
             'container_number'   => $o->container_number,
             'tracking_status'    => $o->tracking_status,
+            'tracking_device_id' => $o->tracking_device_id,
             'estimated_delivery' => $o->estimated_delivery,
             'eta'                => $o->eta,
             'payment_status'     => $o->payment_status,

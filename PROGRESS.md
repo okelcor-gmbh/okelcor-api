@@ -348,7 +348,11 @@ customer-facing per-order delivery tracking. Config-driven, graceful degradation
 | Customer endpoint | 🔧 | `GET /auth/orders/{ref}/tracking` — scoped to own order, lean payload, `available:false` when none |
 | `tracking.view` permission added | 🔧 | super_admin / admin / order_manager / sales_manager |
 | Migration `orders.tracking_device_id` | 🔧 | guarded/additive (12th… 13th pending migration) |
-| Backend feature tests (10, MySQL) | ✅ | `TraccarTrackingTest` (Http::fake) — 10 passed; full suite 126 passed / 419 assertions |
+| Customer tracking tied to shipment status | 🔧 | live only when order `shipped`; `delivered` state (no live route); reasons `no_device`/`not_shipped`/`order_cancelled`/`unavailable`; returns `order_status`+`delivered` |
+| Customer trail = current trip | 🔧 | `currentTripRoute()` bounds route to latest trip start, capped at `TRACCAR_ROUTE_HOURS` (default 12) |
+| Admin order payload exposes `tracking_device_id` | 🔧 | links order ↔ fleet device |
+| Carrier type `bus` → `truck` | 🔧 | enum migration (data-safe) + validation + PDF labels ("Truck Freight"); Okelcor runs no bus freight |
+| Backend feature tests (15, MySQL) | ✅ | `TraccarTrackingTest` (Http::fake) — 15 passed; full suite 131 passed / 431 assertions |
 
 Setup: `TRACCAR_SETUP.md`. Frontend: `FRONTEND_NOTE_tracking.md`. Distinct from
 the freight tracking (DHL + ShipsGo `GET /tracking/{container}`), which stays.
@@ -562,5 +566,6 @@ composer install --no-dev
 11. `2026_06_25_000001_add_preferred_language_to_customers_table` (localized emails/documents)
 12. `2026_06_28_000001_create_customer_notifications_table` (customer portal notifications + notification_preferences)
 13. `2026_06_28_000002_add_tracking_device_to_orders_table` (Traccar GPS — orders.tracking_device_id)
+14. `2026_06_29_000001_change_carrier_type_bus_to_truck_on_orders` (carrier_type bus → truck, data-safe)
 
-All 13 verified to apply cleanly on MySQL via CI (`migrate:fresh`) and `LeadFunnelAnalyticsTest`'s `RefreshDatabase`. See `DEPLOY_RUNBOOK.md` for the ordered deploy + rollback plan.
+All 14 verified to apply cleanly on MySQL via CI (`migrate:fresh`) and `LeadFunnelAnalyticsTest`'s `RefreshDatabase`. See `DEPLOY_RUNBOOK.md` for the ordered deploy + rollback plan.

@@ -19,7 +19,7 @@
         'air'  => 'Air Freight',
         'dhl'  => 'DHL Express',
         'road' => 'Road Freight',
-        'bus'  => 'Bus / Courier',
+        'truck' => 'Truck Freight',
     ];
     $carrierTypeLabel = $carrierTypeMap[$order->carrier_type ?? ''] ?? ucfirst($order->carrier_type ?? '');
 

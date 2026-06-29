@@ -62,28 +62,42 @@ All under the admin Sanctum area, permission **`tracking.view`**
 GET /api/v1/auth/orders/{ref}/tracking      (customer bearer)
 ```
 
-Always `200`. Two shapes:
+Always `200`. **Tracking is tied to the order's shipment status** so it's never
+misleading — a live truck only appears once the order is actually shipped.
 
 ```jsonc
-// No device assigned, or tracking temporarily down → just hide the map
-{ "data": { "available": false, "reason": "no_device" | "unavailable" }, "message": "…" }
+// Not live — render a status note (or nothing), no map
+{
+  "data": {
+    "available": false,
+    "reason": "no_device" | "not_shipped" | "order_cancelled" | "unavailable",
+    "order_ref": "AB-1042",
+    "order_status": "processing"
+  },
+  "message": "Your order is being prepared. Live tracking starts once it ships."
+}
 
-// Live
+// Live (order_status = shipped or delivered)
 {
   "data": {
     "available": true,
     "order_ref": "AB-1042",
+    "order_status": "shipped",          // shipped | delivered
+    "delivered": false,                 // true → show "Delivered", stop polling
     "name": "Truck 1",
-    "status": "online",
+    "status": "online",                 // device online/offline
     "last_update": "2026-06-28T10:00:00Z",
     "position": { "latitude":52.52, "longitude":13.40, "speed_kmh":18.5, "course":90, "address":"Berlin", "fix_time":"…" },
-    "route": [ { "latitude":…, "longitude":…, "fix_time":"…" } ]   // CURRENT TRIP trail (bounded to latest trip start, capped at TRACCAR_ROUTE_HOURS)
+    "route": [ { "latitude":…, "longitude":…, "fix_time":"…" } ]   // CURRENT TRIP trail; [] when delivered
   }
 }
 ```
 
-Scoped to the signed-in customer's own order (others → 404). Lean payload — no
-internal device attributes are exposed.
+Reason meanings: `no_device` (none assigned) · `not_shipped` (still being
+prepared — show "tracking starts when it ships") · `order_cancelled` · `unavailable`
+(Traccar down — just hide). When `delivered: true`, show the final position and
+stop the 30s poll. Scoped to the signed-in customer's own order (others → 404);
+lean payload, no internal device attributes.
 
 ---
 
@@ -96,12 +110,23 @@ internal device attributes are exposed.
 2. **Admin order page:** a small "assign tracking device" control →
    `PUT /admin/tracking/orders/{id}/device` (dropdown sourced from
    `/admin/tracking/devices`, or a free-text device id; send `null` to clear).
+   The admin order detail payload now returns **`tracking_device_id`** so you can
+   pre-select the current device.
 3. **Customer order page:** call `/auth/orders/{ref}/tracking`; if
-   `available:true` show a live map (position marker + `route` polyline) and a
-   "last updated" stamp; if `false`, render nothing (or a subtle "live tracking
-   not available" note). Safe to poll every ~30s while the order is in transit.
+   `available:true` show a live map (position marker + `route` polyline) + "last
+   updated" stamp, and poll ~30s **only while `order_status === "shipped"`** (stop
+   when `delivered:true`). If `available:false`, use `reason`: show "tracking
+   starts once your order ships" for `not_shipped`, otherwise render nothing.
+   The endpoint already enforces this — the FE just mirrors it.
 4. **Map library is your call** (Leaflet/Mapbox/Google). Backend only supplies
    lat/lng + WKT; no tiles.
+
+## ⚠️ Carrier types changed (admin order form)
+
+The `carrier_type` enum dropped **`bus`** and added **`truck`**. Valid values are
+now: `sea`, `air`, `dhl`, `road`, `truck`. **Update the admin order carrier-type
+`<select>`** to replace the "Bus / Courier" option with **"Truck Freight"**
+(value `truck`). Any existing `bus` orders were migrated to `truck` server-side.
 
 ## Resolved / status
 - ✅ **Customer trail = current trip** (done): `route` is now bounded to the most

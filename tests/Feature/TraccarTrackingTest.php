@@ -152,6 +152,9 @@ class TraccarTrackingTest extends TestCase
 
     public function test_current_trip_route_bounds_from_latest_trip_start(): void
     {
+        // Freeze "now" just after the trip so it sits inside the cap window.
+        \Illuminate\Support\Carbon::setTestNow('2026-06-28T10:30:00Z');
+
         $captured = [];
         Http::fake([
             'https://demo.traccar.org/api/reports/trips*' => Http::response([
@@ -274,6 +277,44 @@ class TraccarTrackingTest extends TestCase
         $this->assertSame('Truck 1', $payload['data']['name']);
         $this->assertSame(52.52, $payload['data']['position']['latitude']);
         $this->assertCount(1, $payload['data']['route']);
+    }
+
+    public function test_customer_tracking_hidden_until_order_shipped(): void
+    {
+        $c = $this->customer();
+        // Device assigned, but order still being prepared.
+        $order = $this->order($c, ['tracking_device_id' => '7', 'status' => 'processing']);
+
+        $payload = app(CustomerTrackingController::class)
+            ->show($this->customerRequest($c), $order->ref)
+            ->getData(true);
+
+        $this->assertFalse($payload['data']['available']);
+        $this->assertSame('not_shipped', $payload['data']['reason']);
+        $this->assertSame('processing', $payload['data']['order_status']);
+    }
+
+    public function test_customer_tracking_delivered_state_has_no_live_route(): void
+    {
+        Http::fake([
+            'https://demo.traccar.org/api/devices*'   => Http::response([
+                ['id' => 7, 'name' => 'Truck 1', 'status' => 'offline', 'lastUpdate' => '2026-06-28T18:00:00Z'],
+            ]),
+            'https://demo.traccar.org/api/positions*' => Http::response([
+                ['deviceId' => 7, 'latitude' => 48.13, 'longitude' => 11.58, 'fixTime' => '2026-06-28T18:00:00Z', 'valid' => true],
+            ]),
+        ]);
+
+        $c = $this->customer();
+        $order = $this->order($c, ['tracking_device_id' => '7', 'status' => 'delivered']);
+
+        $payload = app(CustomerTrackingController::class)
+            ->show($this->customerRequest($c), $order->ref)
+            ->getData(true);
+
+        $this->assertTrue($payload['data']['available']);
+        $this->assertTrue($payload['data']['delivered']);
+        $this->assertSame([], $payload['data']['route'], 'Delivered orders show final position, not a live route.');
     }
 
     public function test_customer_cannot_track_another_customers_order(): void
