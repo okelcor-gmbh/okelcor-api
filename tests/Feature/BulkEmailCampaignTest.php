@@ -164,6 +164,48 @@ class BulkEmailCampaignTest extends TestCase
         unlink($path);
     }
 
+    public function test_import_accepts_alternate_3_column_header_format(): void
+    {
+        // Real-world example: UAE contacts export uses "Company name",
+        // "Bussines type", "Email" instead of the Wix header set.
+        $csv = "Company name ,Bussines type ,Email\n"
+            . "ABC Cargo,Logistics,abc@abccargo.ae\n"
+            . "Abrar Tyres,Supplier,info@abrartyres.com\n";
+
+        $path = tempnam(sys_get_temp_dir(), 'contacts') . '.csv';
+        file_put_contents($path, $csv);
+
+        $result = (new MarketingContactImportService())->import($path);
+
+        $this->assertSame(2, $result['imported']);
+        $this->assertSame(0, $result['skipped_no_email']);
+
+        $contact = MarketingContact::where('email', 'abc@abccargo.ae')->first();
+        $this->assertNotNull($contact);
+        $this->assertSame('ABC Cargo', $contact->company);
+        $this->assertSame('Logistics', $contact->labels);
+        $this->assertSame('unknown', $contact->status);
+
+        unlink($path);
+    }
+
+    public function test_import_throws_when_no_email_column_present(): void
+    {
+        $csv = "Name,Phone\nJane,123\n";
+
+        $path = tempnam(sys_get_temp_dir(), 'contacts') . '.csv';
+        file_put_contents($path, $csv);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('No email column found');
+
+        try {
+            (new MarketingContactImportService())->import($path);
+        } finally {
+            unlink($path);
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Permissions
     // -------------------------------------------------------------------------

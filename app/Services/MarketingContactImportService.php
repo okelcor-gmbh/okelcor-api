@@ -6,11 +6,13 @@ use App\Models\MarketingContact;
 use Illuminate\Support\Str;
 
 /**
- * Imports a Wix-style contact export (same column layout as
- * WixCustomerImportService) into the marketing_contacts list used for admin
- * bulk-email campaigns. Unlike WixCustomerImportService this never creates a
- * Customer/login account and never sends a welcome email — it only builds
- * the mailing list.
+ * Imports a contact CSV into the marketing_contacts list used for admin
+ * bulk-email campaigns. Column headers are matched case-insensitively
+ * against a set of known aliases per field (not a single fixed header row),
+ * because real-world exports vary — Wix's export uses "Email 1", other
+ * sources use "Email", "Company name", etc. Unlike WixCustomerImportService
+ * this never creates a Customer/login account and never sends a welcome
+ * email — it only builds the mailing list.
  */
 class MarketingContactImportService
 {
@@ -18,6 +20,24 @@ class MarketingContactImportService
         'subscribed'       => 'subscribed',
         'unsubscribed'     => 'unsubscribed',
         'never subscribed' => 'unknown',
+    ];
+
+    /**
+     * Logical field => accepted header names (lowercase, trimmed).
+     * First match wins. Add new aliases here when a new export format
+     * shows up — never hardcode a single header string in the parse loop.
+     */
+    private const FIELD_ALIASES = [
+        'email'      => ['email 1', 'email', 'email address', 'e-mail', 'e-mail address'],
+        'first_name' => ['first name', 'firstname', 'first_name'],
+        'last_name'  => ['last name', 'lastname', 'last_name'],
+        'phone'      => ['phone 1', 'phone', 'phone number', 'mobile', 'tel'],
+        'company'    => ['company', 'company name', 'business name', 'organization', 'organisation'],
+        'country'    => ['address 1 - country', 'country'],
+        'vat_id'     => ['vat id', 'vat', 'vat number'],
+        'labels'     => ['labels', 'business type', 'bussines type', 'type', 'category'],
+        'source'     => ['source'],
+        'status'     => ['email subscriber status', 'subscriber status', 'status'],
     ];
 
     public function import(string $filePath): array
@@ -32,8 +52,15 @@ class MarketingContactImportService
         }
 
         $rawHeaders    = fgetcsv($handle);
-        $rawHeaders[0] = ltrim($rawHeaders[0], "\xEF\xBB\xBF");
-        $headers       = array_map('trim', $rawHeaders);
+        $rawHeaders[0] = ltrim($rawHeaders[0] ?? '', "\xEF\xBB\xBF");
+        $headers       = array_map(fn ($h) => strtolower(trim($h)), $rawHeaders);
+
+        if (! in_array(true, array_map(fn ($h) => in_array($h, self::FIELD_ALIASES['email'], true), $headers), true)) {
+            fclose($handle);
+            throw new \RuntimeException(
+                'No email column found. Expected one of: ' . implode(', ', self::FIELD_ALIASES['email']) . '.'
+            );
+        }
 
         $stats = [
             'imported'         => 0,
@@ -55,7 +82,7 @@ class MarketingContactImportService
             $record = array_combine($headers, $data);
             $record = array_map('trim', $record);
 
-            $email = strtolower($record['Email 1'] ?? '');
+            $email = strtolower($this->field($record, 'email') ?? '');
 
             if (empty($email) || ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
                 $stats['skipped_no_email']++;
@@ -63,7 +90,7 @@ class MarketingContactImportService
             }
 
             try {
-                $status  = $this->mapStatus($record['Email subscriber status'] ?? '');
+                $status   = $this->mapStatus($this->field($record, 'status') ?? '');
                 $existing = MarketingContact::where('email', $email)->first();
 
                 // Never let a re-import silently re-subscribe someone who opted out.
@@ -72,15 +99,15 @@ class MarketingContactImportService
                 }
 
                 $attributes = [
-                    'first_name' => $record['First Name'] ?? null ?: null,
-                    'last_name'  => $record['Last Name'] ?? null ?: null,
-                    'phone'      => $this->cleanPhone($record['Phone 1'] ?? ''),
-                    'company'    => $record['Company'] ?? null ?: null,
-                    'country'    => $record['Address 1 - Country'] ?? null ?: null,
-                    'vat_id'     => $record['VAT ID'] ?? null ?: null,
-                    'labels'     => $record['Labels'] ?? null ?: null,
-                    'source'     => $record['Source'] ?? null ?: null,
-                    'status'     => $status,
+                    'first_name'  => $this->field($record, 'first_name'),
+                    'last_name'   => $this->field($record, 'last_name'),
+                    'phone'       => $this->cleanPhone($this->field($record, 'phone') ?? ''),
+                    'company'     => $this->field($record, 'company'),
+                    'country'     => $this->field($record, 'country'),
+                    'vat_id'      => $this->field($record, 'vat_id'),
+                    'labels'      => $this->field($record, 'labels'),
+                    'source'      => $this->field($record, 'source'),
+                    'status'      => $status,
                     'imported_at' => now(),
                 ];
 
@@ -108,6 +135,21 @@ class MarketingContactImportService
         fclose($handle);
 
         return $stats;
+    }
+
+    /**
+     * Look up a logical field in an already-lowercased-header record via
+     * FIELD_ALIASES. Returns null for missing/blank so callers can `?:` it.
+     */
+    private function field(array $record, string $field): ?string
+    {
+        foreach (self::FIELD_ALIASES[$field] as $alias) {
+            if (array_key_exists($alias, $record) && $record[$alias] !== '') {
+                return $record[$alias];
+            }
+        }
+
+        return null;
     }
 
     private function mapStatus(string $raw): string
