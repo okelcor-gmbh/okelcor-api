@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-07-01 | Branch: `main` | Latest commit: `1eac7eb`
+Last updated: 2026-07-01 | Branch: `main` | Latest commit: `3438761`
 
 ---
 
@@ -371,16 +371,18 @@ account created) and from `contact_messages` (contact-form inbox).
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| `marketing_contacts` table | 🔧 | email/name/phone/company/country/vat_id/labels/source + `status` (subscribed/unsubscribed/unknown) + `unsubscribe_token` |
-| `MarketingContactImportService` | 🔧 | Same Wix CSV column layout as `WixCustomerImportService`; upserts by email; re-import can never silently flip an `unsubscribed` contact back to subscribed |
-| `POST /admin/marketing-contacts/import` | 🔧 | `marketing.manage` (super_admin/admin/order_manager); multipart CSV upload, same shape as the existing customer import endpoint |
-| `GET /admin/marketing-contacts` (+ `/stats`, `DELETE /{id}`) | 🔧 | Filters: status/company/country/search |
-| `bulk_email_campaigns` + `bulk_email_campaign_recipients` tables | 🔧 | Recipient list is snapshotted at send time; per-recipient sent/failed status so a queue retry never double-emails anyone |
-| `GET/POST /admin/bulk-emails`, `GET /{id}`, `GET /recipient-count` | 🔧 | `marketing.manage`; body_html run through the existing `ArticleHtmlSanitizer` (strips script/style/event handlers); `recipient-count` lets the UI preview audience size before sending |
-| `SendBulkEmailCampaignJob` (queued) | 🔧 | Resumable — only processes `pending` recipient rows; 150ms pacing between sends; unsubscribed contacts are hard-excluded, not just filtered |
-| `BulkCampaignEmail` mailable + unsubscribe footer link | 🔧 | `GET /marketing-contacts/unsubscribe/{token}` — public, token-based, same pattern as newsletter confirm |
-| `marketing.manage` permission | 🔧 | super_admin / admin / order_manager |
+| `marketing_contacts` table | ✅ | email/name/phone/company/country/vat_id/labels/source + `status` (subscribed/unsubscribed/unknown) + `unsubscribe_token` |
+| `MarketingContactImportService` | ✅ | Same Wix CSV column layout as `WixCustomerImportService`; upserts by email; re-import can never silently flip an `unsubscribed` contact back to subscribed |
+| `POST /admin/marketing-contacts/import` | ✅ | `marketing.manage` (super_admin/admin/order_manager); multipart CSV upload, same shape as the existing customer import endpoint |
+| `GET /admin/marketing-contacts` (+ `/stats`, `DELETE /{id}`) | ✅ | Filters: status/company/country/search |
+| `bulk_email_campaigns` + `bulk_email_campaign_recipients` tables | ✅ | Recipient list is snapshotted at send time; per-recipient sent/failed status so a queue retry never double-emails anyone |
+| `GET/POST /admin/bulk-emails`, `GET /{id}`, `GET /recipient-count` | ✅ | `marketing.manage`; body_html run through the existing `ArticleHtmlSanitizer` (strips script/style/event handlers); `recipient-count` lets the UI preview audience size before sending |
+| `SendBulkEmailCampaignJob` (queued) | ✅ | Resumable — only processes `pending` recipient rows; 150ms pacing between sends; unsubscribed contacts are hard-excluded, not just filtered |
+| `BulkCampaignEmail` mailable + unsubscribe footer link | ✅ | `GET /marketing-contacts/unsubscribe/{token}` — public, token-based, same pattern as newsletter confirm |
+| `marketing.manage` permission | ✅ | super_admin / admin / order_manager |
 | Backend feature tests (8) | ✅ | `BulkEmailCampaignTest` — import/dedupe, unsubscribe-never-resubscribed, permission gating, sanitization, resumable send job, unsubscribe endpoint |
+
+Deployed to production (migrations #16–18 applied).
 
 **⚠️ Production requirement:** `.env` currently has `QUEUE_CONNECTION=sync`,
 which means `SendBulkEmailCampaignJob` would run **inline during the HTTP
@@ -406,16 +408,18 @@ content ever became browsable/reusable from the Media panel.
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| `MediaLibraryService` (new, shared) | 🔧 | Extracted the upload/resize/store logic out of `MediaController::store` so any upload flow can register a `Media` row the same way |
-| `POST /admin/articles/{id}/body-image` now registers in Media Library | 🔧 | Collection `articles`; response gains `media_id` alongside existing `url`/`path` — this is the "while writing articles" moment the ask was about |
-| **Bug fix** — `Image::read()` / `->toJpeg()` calls | 🔧 | `intervention/image` is pinned to **v4.0.0** in `composer.lock`, which removed both methods (`read` → `decode`, `toJpeg` → `encode(new JpegEncoder(...))`). This was already broken in production for the existing `POST /admin/media` upload endpoint — silently, since there was no test coverage before this session. Fixed in the shared service; both upload paths now use the correct v4 API. |
-| **Bug fix** — `Media.created_at` not Carbon-cast | 🔧 | `Media` sets `$timestamps = false`, so Eloquent's automatic date casting (`getDates()`) never applied to `created_at` — `MediaController::formatMedia()`'s `$m->created_at?->toIso8601String()` would fatal on any real row. Added explicit `'created_at' => 'datetime'` cast. Also latent/pre-existing, also uncovered before this session. |
+| `MediaLibraryService` (new, shared) | ✅ | Extracted the upload/resize/store logic out of `MediaController::store` so any upload flow can register a `Media` row the same way |
+| `POST /admin/articles/{id}/body-image` now registers in Media Library | ✅ | Collection `articles`; response gains `media_id` alongside existing `url`/`path` — this is the "while writing articles" moment the ask was about |
+| **Bug fix** — `Image::read()` / `->toJpeg()` calls | ✅ | `intervention/image` is pinned to **v4.0.0** in `composer.lock`, which removed both methods (`read` → `decode`, `toJpeg` → `encode(new JpegEncoder(...))`). This was already broken in production for the existing `POST /admin/media` upload endpoint — silently, since there was no test coverage before this session. Fixed in the shared service; both upload paths now use the correct v4 API. |
+| **Bug fix** — `Media.created_at` not Carbon-cast | ✅ | `Media` sets `$timestamps = false`, so Eloquent's automatic date casting (`getDates()`) never applied to `created_at` — `MediaController::formatMedia()`'s `$m->created_at?->toIso8601String()` would fatal on any real row. Added explicit `'created_at' => 'datetime'` cast. Also latent/pre-existing, also uncovered before this session. |
 | Backend feature tests (5) | ✅ | `MediaLibraryTest` — upload/list/delete round trip, permission gating, article body-image → Media Library integration |
 
 Cover image and OG image uploads (`uploadImage`/`uploadOgImage`) were left as
 direct per-article uploads (not registered in the Media Library) — those are
 1:1 canonical assets replaced on re-upload, not something an editor browses
 and reuses across articles, so wiring them in wasn't part of this ask.
+
+Deployed to production — no migrations in this session (code-only fix).
 
 See `FRONTEND_NOTE_media-library.md` for the frontend-facing contract.
 
@@ -617,7 +621,7 @@ composer install --no-dev
 /opt/alt/php83/usr/bin/php artisan view:clear
 ```
 
-**Pending migrations (not yet run on production):**
+**Migrations 1–18 — deployed to production (2026-07-01):**
 1. `2026_06_02_000001_add_proposal_fields_to_quote_requests_table`
 2. `2026_06_03_000001_create_quote_request_items_table`
 3. `2026_06_08_000001_add_buyer_lifecycle_fields_to_customers_table` (CRM-8)
@@ -637,7 +641,10 @@ composer install --no-dev
 17. `2026_07_01_000002_create_bulk_email_campaigns_table` (Session 50 — bulk email)
 18. `2026_07_01_000003_create_bulk_email_campaign_recipients_table` (Session 50 — bulk email)
 
-1–15 verified to apply cleanly on MySQL via CI (`migrate:fresh`) and `LeadFunnelAnalyticsTest`'s `RefreshDatabase`. Migrations #16–18 (Session 50) are new, additive-only tables with no `up()`/`down()` surprises, checked via `php -l` and exercised against sqlite in `BulkEmailCampaignTest`, but **not yet run against MySQL** — this session deliberately avoided running `artisan migrate` locally since `.env` appears to point at the production database (`DB_HOST=localhost`, `DB_DATABASE=okelvaxj_okelcor`). Run them for real as part of the next deploy. See `DEPLOY_RUNBOOK.md` for the ordered deploy + rollback plan.
+All 18 verified to apply cleanly on MySQL via CI (`migrate:fresh`) and `LeadFunnelAnalyticsTest`'s `RefreshDatabase`; #16–18 were additionally exercised against sqlite in `BulkEmailCampaignTest`. Applied to production via `artisan migrate --force` as part of the 2026-07-01 deploy (which also shipped Session 51's code-only Media Library fix — no new migrations there). See `DEPLOY_RUNBOOK.md` for the ordered deploy + rollback plan. No migrations currently pending.
 
-⚠️ Before enabling bulk email in production, also set `QUEUE_CONNECTION=database`
-and run a queue worker — see Session 50 note above.
+⚠️ Bulk email is deployed but **not yet safe to use for a real send**: `.env`
+still has `QUEUE_CONNECTION=sync`, so `SendBulkEmailCampaignJob` would run
+inline during the HTTP request. Set `QUEUE_CONNECTION=database` and run a
+queue worker before the order manager sends to the full contact list — see
+Session 50 note above.
