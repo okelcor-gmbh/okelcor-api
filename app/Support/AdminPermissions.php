@@ -85,6 +85,9 @@ class AdminPermissions
         // ── Newsletter ────────────────────────────────────────────────────
         'newsletter.manage'       => ['super_admin', 'admin', 'order_manager'],
 
+        // ── Marketing contacts / bulk email ────────────────────────────────
+        'marketing.manage'        => ['super_admin', 'admin', 'order_manager'],
+
         // ── Customers ─────────────────────────────────────────────────────
         'customers.view'          => ['super_admin', 'admin', 'support'],
         'customers.create'        => ['super_admin', 'admin', 'sales_manager'],

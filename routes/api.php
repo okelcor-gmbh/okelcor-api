@@ -13,6 +13,7 @@ use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\HeroSlideController;
 use App\Http\Controllers\LocaleController;
+use App\Http\Controllers\MarketingContactController;
 use App\Http\Controllers\NewsletterController;
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\ProductController;
@@ -22,8 +23,10 @@ use App\Http\Controllers\SettingController;
 use App\Http\Controllers\Admin\AdminArticleController;
 use App\Http\Controllers\Admin\AdminBrandController;
 use App\Http\Controllers\Admin\AdminCategoryController;
+use App\Http\Controllers\Admin\AdminBulkEmailController;
 use App\Http\Controllers\Admin\AdminContactController;
 use App\Http\Controllers\Admin\AdminHeroSlideController;
+use App\Http\Controllers\Admin\AdminMarketingContactController;
 use App\Http\Controllers\Admin\AdminNewsletterController;
 use App\Http\Controllers\Admin\AdminOrderController;
 use App\Http\Controllers\Admin\AdminOrderShipmentEventController;
@@ -282,6 +285,9 @@ Route::prefix('v1')->group(function () {
 
     // Newsletter confirmation (GET — no rate limit needed)
     Route::get('newsletter/confirm/{token}', [NewsletterController::class, 'confirm']);
+
+    // Marketing contact unsubscribe (GET — no rate limit needed)
+    Route::get('marketing-contacts/unsubscribe/{token}', [MarketingContactController::class, 'unsubscribe']);
 
     // -------------------------------------------------------------------------
     // Admin auth (no Sanctum guard — these issue the token)
@@ -634,6 +640,21 @@ Route::prefix('v1')->group(function () {
         Route::middleware('permission:newsletter.manage')->group(function () {
             Route::get('newsletter', [AdminNewsletterController::class, 'index']);
             Route::delete('newsletter/{email}', [AdminNewsletterController::class, 'destroy']);
+        });
+
+        // -----------------------------------------------------------------
+        // Marketing contacts + bulk email — marketing.manage
+        // -----------------------------------------------------------------
+        Route::middleware('permission:marketing.manage')->group(function () {
+            Route::get('marketing-contacts', [AdminMarketingContactController::class, 'index']);
+            Route::get('marketing-contacts/stats', [AdminMarketingContactController::class, 'stats']);
+            Route::post('marketing-contacts/import', [AdminMarketingContactController::class, 'import']);
+            Route::delete('marketing-contacts/{id}', [AdminMarketingContactController::class, 'destroy']);
+
+            Route::get('bulk-emails', [AdminBulkEmailController::class, 'index']);
+            Route::get('bulk-emails/recipient-count', [AdminBulkEmailController::class, 'recipientCount']);
+            Route::get('bulk-emails/{id}', [AdminBulkEmailController::class, 'show']);
+            Route::post('bulk-emails', [AdminBulkEmailController::class, 'store']);
         });
 
         // -----------------------------------------------------------------

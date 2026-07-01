@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-06-28 | Branch: `main` | Latest commit: `1eac7eb`
+Last updated: 2026-07-01 | Branch: `main` | Latest commit: `1eac7eb`
 
 ---
 
@@ -362,6 +362,38 @@ the freight tracking (DHL + ShipsGo `GET /tracking/{container}`), which stays.
 
 ---
 
+## Marketing Contacts & Bulk Email (Session 50)
+
+Order manager needed to (1) import the contact database dropped in the repo
+root (`contacts.csv`, Wix export, ~1,720 valid-email rows) and (2) send bulk
+marketing emails to that list. New, separate from `customers` (no login
+account created) and from `contact_messages` (contact-form inbox).
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `marketing_contacts` table | 🔧 | email/name/phone/company/country/vat_id/labels/source + `status` (subscribed/unsubscribed/unknown) + `unsubscribe_token` |
+| `MarketingContactImportService` | 🔧 | Same Wix CSV column layout as `WixCustomerImportService`; upserts by email; re-import can never silently flip an `unsubscribed` contact back to subscribed |
+| `POST /admin/marketing-contacts/import` | 🔧 | `marketing.manage` (super_admin/admin/order_manager); multipart CSV upload, same shape as the existing customer import endpoint |
+| `GET /admin/marketing-contacts` (+ `/stats`, `DELETE /{id}`) | 🔧 | Filters: status/company/country/search |
+| `bulk_email_campaigns` + `bulk_email_campaign_recipients` tables | 🔧 | Recipient list is snapshotted at send time; per-recipient sent/failed status so a queue retry never double-emails anyone |
+| `GET/POST /admin/bulk-emails`, `GET /{id}`, `GET /recipient-count` | 🔧 | `marketing.manage`; body_html run through the existing `ArticleHtmlSanitizer` (strips script/style/event handlers); `recipient-count` lets the UI preview audience size before sending |
+| `SendBulkEmailCampaignJob` (queued) | 🔧 | Resumable — only processes `pending` recipient rows; 150ms pacing between sends; unsubscribed contacts are hard-excluded, not just filtered |
+| `BulkCampaignEmail` mailable + unsubscribe footer link | 🔧 | `GET /marketing-contacts/unsubscribe/{token}` — public, token-based, same pattern as newsletter confirm |
+| `marketing.manage` permission | 🔧 | super_admin / admin / order_manager |
+| Backend feature tests (8) | ✅ | `BulkEmailCampaignTest` — import/dedupe, unsubscribe-never-resubscribed, permission gating, sanitization, resumable send job, unsubscribe endpoint |
+
+**⚠️ Production requirement:** `.env` currently has `QUEUE_CONNECTION=sync`,
+which means `SendBulkEmailCampaignJob` would run **inline during the HTTP
+request** — sending ~1,700 emails synchronously will time out. Before using
+this in production, set `QUEUE_CONNECTION=database` and run a persistent
+worker (`php artisan queue:work`, under Supervisor) so campaign sends happen
+in the background. Nothing else needs to change — the job is already written
+to be queue-driver agnostic.
+
+See `FRONTEND_NOTE_bulk-email.md` for the frontend-facing contract.
+
+---
+
 ## eBay Integration (Sessions 15–25)
 
 | Phase | Feature | Status |
@@ -480,6 +512,9 @@ the freight tracking (DHL + ShipsGo `GET /tracking/{container}`), which stays.
 | `promotions` | Promotional pricing rules |
 | `newsletter_subscribers` | Newsletter opt-ins |
 | `contact_messages` | Contact form submissions |
+| `marketing_contacts` | Imported mailing list for admin bulk-email campaigns 🔧 |
+| `bulk_email_campaigns` | Bulk email sends (subject/body/filters/progress) 🔧 |
+| `bulk_email_campaign_recipients` | Per-recipient send status per campaign 🔧 |
 | `admin_security_events` | Security audit events |
 | `password_reset_tokens` | Customer password reset + invite tokens |
 | `failed_jobs` | Laravel queue failures |
@@ -571,5 +606,11 @@ composer install --no-dev
 13. `2026_06_28_000002_add_tracking_device_to_orders_table` (Traccar GPS — orders.tracking_device_id)
 14. `2026_06_29_000001_change_carrier_type_bus_to_truck_on_orders` (carrier_type bus → truck, data-safe)
 15. `2026_06_29_000002_add_delivery_eta_fields_to_orders` (dest_lat/dest_lon/route_total_km for ETA + progress)
+16. `2026_07_01_000001_create_marketing_contacts_table` (Session 50 — bulk email)
+17. `2026_07_01_000002_create_bulk_email_campaigns_table` (Session 50 — bulk email)
+18. `2026_07_01_000003_create_bulk_email_campaign_recipients_table` (Session 50 — bulk email)
 
-All 15 verified to apply cleanly on MySQL via CI (`migrate:fresh`) and `LeadFunnelAnalyticsTest`'s `RefreshDatabase`. See `DEPLOY_RUNBOOK.md` for the ordered deploy + rollback plan.
+1–15 verified to apply cleanly on MySQL via CI (`migrate:fresh`) and `LeadFunnelAnalyticsTest`'s `RefreshDatabase`. Migrations #16–18 (Session 50) are new, additive-only tables with no `up()`/`down()` surprises, checked via `php -l` and exercised against sqlite in `BulkEmailCampaignTest`, but **not yet run against MySQL** — this session deliberately avoided running `artisan migrate` locally since `.env` appears to point at the production database (`DB_HOST=localhost`, `DB_DATABASE=okelvaxj_okelcor`). Run them for real as part of the next deploy. See `DEPLOY_RUNBOOK.md` for the ordered deploy + rollback plan.
+
+⚠️ Before enabling bulk email in production, also set `QUEUE_CONNECTION=database`
+and run a queue worker — see Session 50 note above.
