@@ -30,7 +30,7 @@ Last updated: 2026-07-01 | Branch: `main` | Latest commit: `1eac7eb`
 | Categories CRUD + translations | ✅ | 4 fixed slugs: pcr/tbr/used/otr |
 | Hero Slides CRUD + translations | ✅ | |
 | Brands CRUD + logo upload | ✅ | |
-| Media library | ✅ | |
+| Media library | ✅ | Article body-image → Media Library integration + 2 latent bugfixes in Session 51 |
 | Site settings (key-value) | ✅ | |
 | Admin user management | ✅ | super_admin only |
 | Rapid product pricing (cost_price × discount%) | ✅ | PromotionPricingService |
@@ -391,6 +391,33 @@ in the background. Nothing else needs to change — the job is already written
 to be queue-driver agnostic.
 
 See `FRONTEND_NOTE_bulk-email.md` for the frontend-facing contract.
+
+---
+
+## Media Library ↔ Article Writer Integration (Session 51)
+
+Goal: while writing an article, an editor should be able to browse the
+existing Media Library and reuse/copy an image's URL instead of only being
+able to upload a brand-new file. The Media Library API already existed
+(`GET/POST/DELETE /admin/media`) but was an isolated bucket — none of the
+content-specific upload endpoints (article cover/OG/body, hero slides,
+brand logos, promotions) wrote into it, so nothing uploaded while writing
+content ever became browsable/reusable from the Media panel.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `MediaLibraryService` (new, shared) | 🔧 | Extracted the upload/resize/store logic out of `MediaController::store` so any upload flow can register a `Media` row the same way |
+| `POST /admin/articles/{id}/body-image` now registers in Media Library | 🔧 | Collection `articles`; response gains `media_id` alongside existing `url`/`path` — this is the "while writing articles" moment the ask was about |
+| **Bug fix** — `Image::read()` / `->toJpeg()` calls | 🔧 | `intervention/image` is pinned to **v4.0.0** in `composer.lock`, which removed both methods (`read` → `decode`, `toJpeg` → `encode(new JpegEncoder(...))`). This was already broken in production for the existing `POST /admin/media` upload endpoint — silently, since there was no test coverage before this session. Fixed in the shared service; both upload paths now use the correct v4 API. |
+| **Bug fix** — `Media.created_at` not Carbon-cast | 🔧 | `Media` sets `$timestamps = false`, so Eloquent's automatic date casting (`getDates()`) never applied to `created_at` — `MediaController::formatMedia()`'s `$m->created_at?->toIso8601String()` would fatal on any real row. Added explicit `'created_at' => 'datetime'` cast. Also latent/pre-existing, also uncovered before this session. |
+| Backend feature tests (5) | ✅ | `MediaLibraryTest` — upload/list/delete round trip, permission gating, article body-image → Media Library integration |
+
+Cover image and OG image uploads (`uploadImage`/`uploadOgImage`) were left as
+direct per-article uploads (not registered in the Media Library) — those are
+1:1 canonical assets replaced on re-upload, not something an editor browses
+and reuses across articles, so wiring them in wasn't part of this ask.
+
+See `FRONTEND_NOTE_media-library.md` for the frontend-facing contract.
 
 ---
 

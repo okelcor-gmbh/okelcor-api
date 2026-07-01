@@ -5,14 +5,15 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\UploadMediaRequest;
 use App\Models\Media;
+use App\Services\MediaLibraryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
-use Intervention\Image\Laravel\Facades\Image;
 
 class MediaController extends Controller
 {
+    public function __construct(private MediaLibraryService $mediaLibrary) {}
+
     public function index(Request $request): JsonResponse
     {
         $query = Media::orderByDesc('created_at');
@@ -40,52 +41,12 @@ class MediaController extends Controller
 
     public function store(UploadMediaRequest $request): JsonResponse
     {
-        $file       = $request->file('file');
-        $collection = $request->input('collection', 'general');
-        $altText    = $request->input('alt_text');
-        $mimeType   = $file->getMimeType();
-        $isSvg      = $mimeType === 'image/svg+xml';
-        $isVideo    = str_starts_with($mimeType, 'video/');
-
-        $uuid         = Str::uuid()->toString();
-        $ext          = $file->guessExtension() ?? 'bin';
-        $filename     = $uuid . '.' . $ext;
-        $originalName = $file->getClientOriginalName();
-
-        if ($isSvg || $isVideo) {
-            // SVGs and videos are stored as-is — no image processing
-            $path = $file->storeAs($collection, $filename, 'public');
-            $w    = null;
-            $h    = null;
-        } else {
-            // Resize to max 2000px on longest side, strip EXIF, save
-            $image = Image::read($file);
-            $image->scaleDown(2000, 2000);
-
-            $path    = $collection . '/' . $filename;
-            $content = $image->toJpeg(90);
-            Storage::disk('public')->put($path, $content);
-
-            $w = $image->width();
-            $h = $image->height();
-        }
-
-        $fullPath = Storage::disk('public')->path($path);
-        $size     = file_exists($fullPath) ? filesize($fullPath) : $file->getSize();
-
-        $media = Media::create([
-            'filename'      => $filename,
-            'original_name' => $originalName,
-            'path'          => $path,
-            'url'           => url('storage/' . $path),
-            'mime_type'     => $mimeType,
-            'size_bytes'    => $size,
-            'width'         => $w,
-            'height'        => $h,
-            'alt_text'      => $altText,
-            'collection'    => $collection,
-            'uploaded_by'   => $request->user()?->id,
-        ]);
+        $media = $this->mediaLibrary->store(
+            file: $request->file('file'),
+            collection: $request->input('collection', 'general'),
+            altText: $request->input('alt_text'),
+            uploadedBy: $request->user()?->id,
+        );
 
         return response()->json(['data' => $this->formatMedia($media)], 201);
     }

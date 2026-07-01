@@ -8,6 +8,7 @@ use App\Http\Requests\Admin\UpdateArticleRequest;
 use App\Models\Article;
 use App\Models\ArticleTranslation;
 use App\Services\ArticleHtmlSanitizer;
+use App\Services\MediaLibraryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -16,7 +17,10 @@ use Illuminate\Support\Str;
 
 class AdminArticleController extends Controller
 {
-    public function __construct(private ArticleHtmlSanitizer $sanitizer) {}
+    public function __construct(
+        private ArticleHtmlSanitizer $sanitizer,
+        private MediaLibraryService $mediaLibrary,
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -188,6 +192,10 @@ class AdminArticleController extends Controller
     /**
      * Upload an image embedded inside the article body (rich editor inline image).
      * Returns the public URL for the editor to inject as an <img src="...">.
+     *
+     * Also registers the upload in the shared Media Library (collection:
+     * "articles") so it's browsable/reusable later instead of becoming an
+     * orphaned file only this one article body links to.
      */
     public function uploadBodyImage(Request $request, int $id): JsonResponse
     {
@@ -197,15 +205,17 @@ class AdminArticleController extends Controller
 
         Article::findOrFail($id); // 404 if article not found
 
-        $file     = $request->file('image');
-        $filename = Str::uuid() . '.' . ($file->guessExtension() ?? 'bin');
-        $path     = $file->storeAs('articles/body', $filename, 'public');
-        $url      = url(Storage::url($path));
+        $media = $this->mediaLibrary->store(
+            file: $request->file('image'),
+            collection: 'articles',
+            uploadedBy: $request->user()?->id,
+        );
 
         return response()->json([
             'data' => [
-                'url'  => $url,
-                'path' => $path,
+                'url'      => $media->url,
+                'path'     => $media->path,
+                'media_id' => $media->id,
             ],
             'message' => 'Image uploaded.',
         ]);

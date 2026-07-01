@@ -24,6 +24,10 @@ class Media extends Model
         'uploaded_by',
     ];
 
+    protected $casts = [
+        'created_at' => 'datetime',
+    ];
+
     public function uploader()
     {
         return $this->belongsTo(AdminUser::class, 'uploaded_by')->withDefault();
