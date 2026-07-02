@@ -31,6 +31,12 @@ class BulkEmailCampaignTest extends TestCase
     {
         parent::setUp();
 
+        // Disabled around the drop/create dance: if a RefreshDatabase-based
+        // test ran earlier in the same process, the full migrated schema is
+        // still present and would block dropping these tables in isolation
+        // (e.g. other tables' FKs into admin_users beyond this test's own).
+        Schema::disableForeignKeyConstraints();
+
         foreach (['bulk_email_campaign_recipients', 'bulk_email_campaigns', 'marketing_contacts', 'admin_users'] as $table) {
             Schema::dropIfExists($table);
         }
@@ -88,13 +94,19 @@ class BulkEmailCampaignTest extends TestCase
             $table->timestamps();
             $table->unique(['campaign_id', 'contact_id']);
         });
+
+        Schema::enableForeignKeyConstraints();
     }
 
     protected function tearDown(): void
     {
+        Schema::disableForeignKeyConstraints();
+
         foreach (['bulk_email_campaign_recipients', 'bulk_email_campaigns', 'marketing_contacts', 'admin_users'] as $table) {
             Schema::dropIfExists($table);
         }
+
+        Schema::enableForeignKeyConstraints();
 
         parent::tearDown();
     }

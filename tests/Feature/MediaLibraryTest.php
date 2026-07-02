@@ -31,6 +31,14 @@ class MediaLibraryTest extends TestCase
 
         Storage::fake('public');
 
+        // Disabled around the drop/create dance: if a RefreshDatabase-based
+        // test ran earlier in the same process, the full migrated schema
+        // (e.g. article_translations -> articles, order_shipment_events ->
+        // admin_users) is still present and would block dropping these three
+        // tables in isolation. This test only cares about its own minimal
+        // schema, not FK integrity with tables it never touches.
+        Schema::disableForeignKeyConstraints();
+
         foreach (['media', 'articles', 'admin_users'] as $table) {
             Schema::dropIfExists($table);
         }
@@ -72,13 +80,19 @@ class MediaLibraryTest extends TestCase
             $table->unsignedBigInteger('uploaded_by')->nullable();
             $table->timestamp('created_at')->useCurrent();
         });
+
+        Schema::enableForeignKeyConstraints();
     }
 
     protected function tearDown(): void
     {
+        Schema::disableForeignKeyConstraints();
+
         foreach (['media', 'articles', 'admin_users'] as $table) {
             Schema::dropIfExists($table);
         }
+
+        Schema::enableForeignKeyConstraints();
 
         parent::tearDown();
     }

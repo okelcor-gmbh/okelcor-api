@@ -282,7 +282,8 @@ class CarrierTrackingTest extends TestCase
     {
         $order = $this->order(['carrier' => 'GLS', 'tracking_number' => '50044195855']);
 
-        $this->actingAs($this->admin('support'), 'sanctum')
+        // 'editor' — valid admin_users.role ENUM value, lacks tracking.view.
+        $this->actingAs($this->admin('editor'), 'sanctum')
             ->getJson("/api/v1/admin/orders/{$order->id}/shipment-tracking")
             ->assertForbidden();
     }

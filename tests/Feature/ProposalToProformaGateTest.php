@@ -69,6 +69,7 @@ class ProposalToProformaGateTest extends TestCase
             'tyre_category'         => 'pcr',
             'quantity'              => '100',
             'delivery_location'     => 'Berlin, DE',
+            'notes'                 => 'Test inquiry',
             'status'                => 'quoted',
             'qualification_status'  => 'new',
             'order_id'              => $order->id,
