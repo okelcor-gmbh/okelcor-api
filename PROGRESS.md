@@ -466,6 +466,24 @@ docs for the equivalent legacy endpoint — needs one real end-to-end run
 confirm before trusting this in production. DHL and ocean-freight (incl.
 Maersk) tracking are live now — both already had working credentials.
 
+**Decision (2026-07-02, post-deploy):** GLS's token exchange kept returning
+`400 invalid credentials` even after correcting the `.env` values, and
+debugging stalled on a production logging oddity (fresh calls — confirmed via
+direct `tinker` invocation, bypassing any HTTP/CDN caching — wrote no new log
+line to `storage/logs/laravel.log`, implying `LOG_CHANNEL` writes elsewhere in
+production, e.g. a daily-rotated file). Rather than keep burning time on GLS
+credentials/logging, **shipment tracking now runs on manual entry**: admin
+sets `carrier`/`tracking_number` on the order (existing fields) and adds
+shipment events by hand via the pre-existing (previously undocumented to
+frontend) `POST/PUT/DELETE /admin/orders/{id}/shipment-events` endpoints. The
+customer-facing `mode: "carrier"` view built this session works identically
+either way, since it was designed to read `order_shipment_events` regardless
+of whether entries are manual or auto-synced — no code change was needed to
+support this, only frontend documentation (now added). `GlsTrackingService` /
+`CarrierTrackingService` / `tracking:sync-carriers` remain in place, dormant
+until GLS access is revisited — they don't need to be removed, and DHL/ocean
+auto-sync will still run for orders using those carriers.
+
 See `FRONTEND_NOTE_tracking.md` (new sections) for the frontend-facing contract.
 
 ---
@@ -546,7 +564,7 @@ See `FRONTEND_NOTE_tracking.md` (new sections) for the frontend-facing contract.
 | Product translation table | Low | No multilingual products |
 | Preferred language on customers | Low | All emails English |
 | eBay production credentials rotation | **High** | `EBAY_CLIENT_SECRET` was exposed in a prior session — must rotate in eBay Developer Portal before listing live products |
-| GLS end-to-end verification | Medium | Both endpoints + auth flow now wired from confirmed portal docs (token exchange via Basic Auth, tracking via Bearer token); still needs one real end-to-end "Execute" run with a live parcel number to confirm the token response field name and whether the tracking response actually contains a status/event field (Session 52) |
+| GLS live tracking (on hold — manual entry active instead) | Low | Token exchange returns `400 invalid credentials` in production; also hit a logging oddity where fresh requests wrote no new `storage/logs/laravel.log` line, suggesting `LOG_CHANNEL` writes elsewhere (check for a daily-rotated log file) before debugging further. Not blocking — manual shipment-event entry (Session 52) is the active path |
 | Session 52 feature tests unexecuted | Medium | `ProposalToProformaGateTest` + `CarrierTrackingTest` written but not run against real MySQL in the dev environment used — run before deploying |
 
 ---

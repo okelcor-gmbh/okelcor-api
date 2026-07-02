@@ -188,7 +188,47 @@ now: `sea`, `air`, `dhl`, `road`, `truck`. **Update the admin order carrier-type
 
 ---
 
-## NEW — Real carrier tracking (GLS / DHL / ocean freight incl. Maersk)
+## NEW — Shipment tracking: build the MANUAL entry UI first (this is the active path)
+
+**Status: this is what to build now.** GLS's live API integration (below) hit
+persistent "invalid credentials" issues that cost more time than it saved, so
+for the time being **admin manually enters carrier/tracking info and shipment
+events** — no live carrier API calls involved. The backend was already built
+carrier-agnostic (manual and auto-synced events share the same table), so
+nothing changes about the response shapes documented below — an order tracked
+manually looks identical, on the wire, to one that would eventually be
+auto-synced. **Automatic GLS/DHL/ocean-freight sync (further down this
+section) is built and harmless but not the priority — don't block on it.**
+
+### Admin: two things to add to the order detail page
+
+1. **Carrier + tracking number fields** — already exist on the order update
+   form (`carrier`, `carrier_type`, `tracking_number`) via the existing
+   `PUT /admin/orders/{id}` / `PATCH /admin/orders/{id}/status`. If these
+   aren't on the form yet, add plain text/select inputs — no new endpoint.
+2. **A "Shipment events" timeline editor** — this endpoint has existed since
+   an earlier session but was never given a frontend note, so it's likely not
+   built yet:
+
+   | Endpoint | Body | Notes |
+   |---|---|---|
+   | `POST /admin/orders/{id}/shipment-events` | `{event_date, status_label, location?, description?}` | `event_date`: date; `status_label`: short heading (max 100 chars, e.g. "Arrived at parcel center"); `location`/`description` optional |
+   | `PUT /admin/orders/{id}/shipment-events/{eventId}` | same body | edit an existing event |
+   | `DELETE /admin/orders/{id}/shipment-events/{eventId}` | — | remove an event |
+
+   Simple UI: a form (date, short status text, optional location/description)
+   + a list of existing events below it (edit/delete), on the order detail
+   page — matches the eBay "Track shipment" timeline the order manager wants
+   to replicate, just filled in by hand instead of pulled live. Permission:
+   `orders.update` (same as the rest of the order edit form).
+
+Once both are set — carrier/tracking number on the order, plus at least one
+shipment event — the customer automatically sees it via the tracking endpoint
+below (`mode: "carrier"`), no extra step needed.
+
+---
+
+## Real carrier tracking (GLS / DHL / ocean freight incl. Maersk) — built, GLS on hold
 
 **Why:** Order manager wanted the same "Track shipment" view eBay shows for
 GLS parcels — a 3-stage stepper, a "Shipping overview" carrier/tracking-number
@@ -257,11 +297,10 @@ assigned either."
    stage, events}` shape (no `available`/`mode`/`order_ref` wrapper — just the
    tracking data) and does a **live** carrier-API call + persists any new
    events, unlike the customer endpoint which reads the persisted timeline.
-   Use this to power a "Track shipment" button/modal on the order detail
-   page, matching what the order manager currently only sees on eBay/GLS's
-   own sites — this now works for **eBay-sourced orders too**, since eBay
-   orders get the same `carrier`/`tracking_number` fields as any other order
-   once a staff member ships them.
+   **Hold off wiring a "live sync" button to this for now** — GLS isn't
+   working yet (see below), so today it would only do anything for DHL/ocean
+   orders. The manual entry UI above is what to build first; this endpoint
+   is a bonus once GLS is sorted, not a blocker.
 3. **No FE change needed for eBay orders specifically** — they flow through
    the exact same admin order carrier/tracking-number fields as manual
    orders, so no separate "eBay tracking" UI is needed.
