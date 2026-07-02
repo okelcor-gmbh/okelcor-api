@@ -6,12 +6,42 @@ use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Models\OrderLog;
 use App\Models\OrderShipmentEvent;
+use App\Services\CarrierTrackingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
 class AdminOrderShipmentEventController extends Controller
 {
+    public function __construct(private CarrierTrackingService $carrierTracking) {}
+
+    /**
+     * GET /api/v1/admin/orders/{id}/shipment-tracking
+     *
+     * Live carrier tracking (GLS / DHL / ocean freight incl. Maersk) for this
+     * order — pulls from the carrier API, persists new events into
+     * order_shipment_events (deduped), and returns the normalized timeline.
+     * Distinct from the Traccar-based /admin/tracking/* endpoints, which cover
+     * Okelcor's own fleet vehicles rather than third-party carriers.
+     */
+    public function liveSync(Request $request, int $id): JsonResponse
+    {
+        $order  = Order::findOrFail($id);
+        $result = $this->carrierTracking->trackAndSync($order);
+
+        if (isset($result['error'])) {
+            return response()->json([
+                'data'    => null,
+                'message' => $result['error'],
+            ], 503);
+        }
+
+        return response()->json([
+            'data'    => $result,
+            'message' => 'success',
+        ]);
+    }
+
     /**
      * POST /api/v1/admin/orders/{id}/shipment-events
      */

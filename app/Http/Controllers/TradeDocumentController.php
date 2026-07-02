@@ -40,7 +40,9 @@ class TradeDocumentController extends Controller
             ->whereIn('status', ['issued', 'sent'])
             ->whereIn('type', ['order_confirmation', 'proforma', 'commercial_invoice', 'packing_list', 'delivery_note', 'shipment_document'])
             ->orderByDesc('issued_at')
-            ->get();
+            ->get()
+            ->reject(fn ($d) => $d->type === 'commercial_invoice' && ! $order->isFullyPaid())
+            ->values();
 
         return response()->json([
             'data'    => $documents->map(fn ($d) => [
@@ -90,6 +92,10 @@ class TradeDocumentController extends Controller
         }
 
         if (! in_array($document->status, ['issued', 'sent'], true)) {
+            return response()->json(['message' => 'This document is not available for download.'], 404);
+        }
+
+        if ($document->type === 'commercial_invoice' && ! $order->isFullyPaid()) {
             return response()->json(['message' => 'This document is not available for download.'], 404);
         }
 

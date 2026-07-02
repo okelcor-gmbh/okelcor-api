@@ -37,3 +37,9 @@ Schedule::command('admin:notifications:due-followups')
     ->withoutOverlapping()
     ->onOneServer()
     ->appendOutputTo(storage_path('logs/admin-notifications.log'));
+
+Schedule::command('tracking:sync-carriers')
+    ->hourly()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/carrier-tracking-sync.log'));

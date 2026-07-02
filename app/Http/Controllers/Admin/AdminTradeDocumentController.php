@@ -71,11 +71,17 @@ class AdminTradeDocumentController extends Controller
      */
     public function generateProforma(Request $request, int $id): JsonResponse
     {
-        $order = Order::with('items')->findOrFail($id);
+        $order = Order::with(['items', 'quoteRequest'])->findOrFail($id);
         $admin = $request->user();
 
-        // Gate: require customer acceptance unless super_admin overrides explicitly
-        if ($order->customer_acceptance_status !== 'accepted') {
+        // Gate: require customer acceptance unless super_admin overrides explicitly.
+        // Orders that came from an already-accepted CRM-7 proposal skip this —
+        // the customer already accepted (accepting the proposal is what allowed
+        // the quote to convert to this order in the first place), so requiring a
+        // second "accept the order confirmation" click is redundant friction.
+        $proposalAlreadyAccepted = $order->quoteRequest?->proposal_accepted_at !== null;
+
+        if (! $proposalAlreadyAccepted && $order->customer_acceptance_status !== 'accepted') {
             $isOverride = $request->boolean('override_acceptance') && $admin?->role === 'super_admin';
 
             if (! $isOverride) {

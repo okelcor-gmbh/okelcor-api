@@ -186,6 +186,129 @@ now: `sea`, `air`, `dhl`, `road`, `truck`. **Update the admin order carrier-type
 `<select>`** to replace the "Bus / Courier" option with **"Truck Freight"**
 (value `truck`). Any existing `bus` orders were migrated to `truck` server-side.
 
+---
+
+## NEW — Real carrier tracking (GLS / DHL / ocean freight incl. Maersk)
+
+**Why:** Order manager wanted the same "Track shipment" view eBay shows for
+GLS parcels — a 3-stage stepper, a "Shipping overview" carrier/tracking-number
+line, and a chronological event log — available in Okelcor's own admin panel
+and customer portal, for any order (not just eBay-sourced ones), instead of
+having to log into eBay/GLS separately.
+
+This **reuses and extends the existing tracking endpoint** rather than adding
+a parallel one — `GET /api/v1/auth/orders/{ref}/tracking` now returns one of
+two shapes, discriminated by a new `mode` field. **Nothing changes for orders
+using Okelcor's own fleet** (`mode: "gps_live"` — identical to the shape
+documented above). What's new is `mode: "carrier"` for orders shipped with a
+third-party carrier (GLS, DHL, or ocean freight incl. Maersk — ShipsGo
+aggregates multiple shipping lines).
+
+```jsonc
+// mode: "carrier" — GLS / DHL / ocean freight, no fleet device assigned
+{
+  "data": {
+    "available": true,
+    "mode": "carrier",
+    "order_ref": "AB-1042",
+    "order_status": "shipped",     // shipped | delivered
+    "delivered": false,
+    "carrier": "GLS Germany",
+    "tracking_number": "50044195855",
+    "stage": "in_transit",         // preparing | in_transit | delivered
+    "events": [                    // newest first
+      {
+        "event_date": "2026-07-01",
+        "time": "10:40",
+        "location": "BORNHEIM, 53332",
+        "status_label": "The package has arrived at the parcel center.",
+        "description": "The package has arrived at the parcel center."
+      },
+      {
+        "event_date": "2026-06-29",
+        "time": "19:18",
+        "location": "BORNHEIM, 53332",
+        "status_label": "The sender has made the package available for collection by GLS.",
+        "description": "The sender has made the package available for collection by GLS."
+      }
+    ]
+  }
+}
+```
+
+`available: false` responses are unchanged (`reason: no_device | not_shipped |
+order_cancelled | unavailable`) — `no_device` now also covers "no carrier
+assigned either."
+
+### What the frontend needs to do
+1. **Branch on `mode`** wherever `/auth/orders/{ref}/tracking` is consumed:
+   `gps_live` → existing map UI (no change); `carrier` → new UI, modeled on
+   the eBay "Track shipment" modal:
+   - A simple 3-node stepper driven by `stage` (preparing → in_transit →
+     delivered).
+   - A "Shipping overview" line: `carrier` + `tracking_number`.
+   - The `events` list rendered newest-first (date, time, location,
+     description) — `status_label` is a short heading, `description` the
+     full text (identical today, kept as two fields in case the FE wants a
+     collapsed vs expanded view like eBay's "See more").
+2. **Admin order page:** new endpoint
+   `GET /admin/orders/{id}/shipment-tracking` (permission `tracking.view`,
+   same as the fleet endpoints) returns the same `{carrier, tracking_number,
+   stage, events}` shape (no `available`/`mode`/`order_ref` wrapper — just the
+   tracking data) and does a **live** carrier-API call + persists any new
+   events, unlike the customer endpoint which reads the persisted timeline.
+   Use this to power a "Track shipment" button/modal on the order detail
+   page, matching what the order manager currently only sees on eBay/GLS's
+   own sites — this now works for **eBay-sourced orders too**, since eBay
+   orders get the same `carrier`/`tracking_number` fields as any other order
+   once a staff member ships them.
+3. **No FE change needed for eBay orders specifically** — they flow through
+   the exact same admin order carrier/tracking-number fields as manual
+   orders, so no separate "eBay tracking" UI is needed.
+
+### Data freshness
+The customer endpoint reads the **persisted** timeline (kept fresh by an
+hourly backend job), not a live carrier call — so it stays fast even if a
+carrier API is slow/down. The admin endpoint **does** call live (for the "I
+need this right now" case) and persists what it finds.
+
+---
+
+## NEW — Proposal → Proforma: one less acceptance step
+
+**Why:** the order manager pointed out that requiring the customer to accept
+the Proposal *and then separately* accept an Order Confirmation before the
+Proforma Invoice can be issued was pure friction — both documents cover
+almost the same ground.
+
+**What changed:** for orders that came from an accepted CRM-7 proposal
+(`quote_requests.proposal_status === 'accepted'`), admin can now generate/send
+the Proforma Invoice **immediately after proposal acceptance** — no separate
+"customer accepts the Order Confirmation" step required. The Order
+Confirmation document itself still exists and still auto-generates (some
+customers still want it), it's just no longer a gate.
+
+**Frontend impact:** if any admin UI conditionally shows/hides the "Generate
+Proforma" action based on `customer_acceptance_status === 'accepted'`, that
+condition should now also pass when the order's originating quote has
+`proposal_accepted_at` set (the order detail payload doesn't currently expose
+this quote field directly — ask backend if the UI needs it surfaced). Direct/
+manual orders with no proposal history are **unaffected** — they still need
+explicit Order Confirmation acceptance before a Proforma can be issued.
+
+## NEW — Commercial Invoice hidden until fully paid
+
+**What changed:** on the customer side, an issued Commercial Invoice no
+longer appears in `trade_documents` (order detail / `/auth/orders/{ref}`)
+or downloads until the order is fully paid (`balance_paid` /
+`shipment_released`, or a simple non-milestone order marked `paid`). Admin
+visibility is unchanged. No FE action needed — this is enforced entirely
+server-side; if a customer UI was already just rendering whatever
+`trade_documents` returns, it will now correctly stop showing an unpaid
+order's CI without any code change.
+
+---
+
 ## Resolved / status
 - ✅ **Customer trail = current trip** (done): `route` is now bounded to the most
   recent trip's start (capped at `TRACCAR_ROUTE_HOURS`, default 12), not a flat

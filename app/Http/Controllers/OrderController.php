@@ -30,7 +30,7 @@ class OrderController extends Controller
     {
         $email = $request->user()->email;
 
-        $orders = Order::with(['items', 'shipmentEvents', 'euDeclaration', 'tradeDocuments', 'invoice'])
+        $orders = Order::with(['items', 'shipmentEvents', 'euDeclaration', 'tradeDocuments', 'invoice', 'quoteRequest'])
             ->where('customer_email', $email)
             ->orderByDesc('created_at')
             ->get();
@@ -51,7 +51,7 @@ class OrderController extends Controller
      */
     public function show(Request $request, string $ref): JsonResponse
     {
-        $order = Order::with(['items', 'shipmentEvents', 'euDeclaration', 'tradeDocuments', 'invoice'])
+        $order = Order::with(['items', 'shipmentEvents', 'euDeclaration', 'tradeDocuments', 'invoice', 'quoteRequest'])
             ->where('ref', $ref)
             ->where('customer_email', $request->user()->email)
             ->firstOrFail();
@@ -157,7 +157,14 @@ class OrderController extends Controller
                 ? $o->tradeDocuments
                     ->filter(fn ($d) => in_array($d->status, ['issued', 'sent'], true)
                         && in_array($d->type, ['order_confirmation', 'proforma', 'commercial_invoice', 'packing_list', 'delivery_note', 'shipment_document'], true)
-                        && ! ($d->type === 'proforma' && ($o->customer_acceptance_status ?? 'pending') !== 'accepted'))
+                        // Proforma is visible once the customer accepted the order
+                        // confirmation OR (for CRM-7 orders) already accepted the
+                        // proposal that led to this order — same relaxation as the
+                        // admin-side generation gate.
+                        && ! ($d->type === 'proforma'
+                            && ($o->customer_acceptance_status ?? 'pending') !== 'accepted'
+                            && $o->quoteRequest?->proposal_accepted_at === null)
+                        && ! ($d->type === 'commercial_invoice' && ! $o->isFullyPaid()))
                     ->map(fn ($d) => [
                         'id'                => $d->id,
                         'type'              => $d->type,

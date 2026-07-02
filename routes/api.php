@@ -765,6 +765,12 @@ Route::prefix('v1')->group(function () {
             Route::put('tracking/orders/{id}/destination', [AdminTrackingController::class, 'setDestination']);
         });
 
+        // Real carrier tracking (GLS / DHL / ocean freight incl. Maersk) for a
+        // specific order — distinct from Traccar's own-fleet GPS above.
+        Route::middleware('permission:tracking.view')->group(function () {
+            Route::get('orders/{id}/shipment-tracking', [AdminOrderShipmentEventController::class, 'liveSync']);
+        });
+
         // -----------------------------------------------------------------
         // Security dashboard — security.view (super_admin, admin)
         // -----------------------------------------------------------------

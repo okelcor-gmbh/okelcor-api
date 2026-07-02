@@ -127,6 +127,16 @@ class Order extends Model
         return $this->financials_locked_at !== null;
     }
 
+    /**
+     * True once the customer owes nothing further — either a non-milestone
+     * order paid in full, or a milestone order that reached balance_paid.
+     */
+    public function isFullyPaid(): bool
+    {
+        return $this->payment_status === 'paid'
+            || in_array($this->payment_stage, ['balance_paid', 'shipment_released'], true);
+    }
+
     public function items(): HasMany
     {
         return $this->hasMany(OrderItem::class);

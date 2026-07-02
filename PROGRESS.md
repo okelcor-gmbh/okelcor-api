@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-07-01 | Branch: `main` | Latest commit: `3438761`
+Last updated: 2026-07-02 | Branch: `main` | Latest commit: `3438761` (session below not yet committed)
 
 ---
 
@@ -425,6 +425,51 @@ See `FRONTEND_NOTE_media-library.md` for the frontend-facing contract.
 
 ---
 
+## Proposal→PI Friction Fix + Real Carrier Tracking (Session 52)
+
+Driven by a call with order manager Edinah Agalla (2026-07-02): (1) requiring
+a separate Order-Confirmation acceptance after the customer already accepted
+the Proposal was redundant friction; (2) she has to log into eBay/GLS
+separately to see shipment status that should live in Okelcor's own admin
+panel and customer portal — for eBay orders and directly-onboarded customers
+alike.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| **Fix** — Commercial Invoice hidden from customer until fully paid | 🔧 | `Order::isFullyPaid()` (new); gates `TradeDocumentController` (list + download) and `OrderController`'s `trade_documents` payload. Previously visible/downloadable as soon as issued (only needed `deposit_paid` to generate) — contradicted what was promised on the call. Admin visibility unchanged. |
+| Proposal→PI: Order Confirmation acceptance no longer mandatory | 🔧 | For CRM-7 proposal-driven orders (`quote_requests.proposal_accepted_at` set), `AdminTradeDocumentController::generateProforma()` now skips the OC-acceptance gate — proposal acceptance alone unlocks PI generation. Customer `trade_documents` visibility relaxed the same way. Direct/manual orders (no proposal history) keep the original gate unchanged. OC document itself still auto-generates and remains available, just isn't a hard prerequisite anymore. |
+| `GlsTrackingService` (new) | 🔧 | GLS parcel Track & Trace client (GLS Group Developer Portal). Credential model confirmed against GLS's own docs: App ID + API Key + API Secret issued together per registered app — no separate "customer ID" (App ID ≠ Customer ID; there isn't one for this API). User has App ID/Key/Secret now (`GLS_APP_ID`/`GLS_API_KEY`/`GLS_API_SECRET`). **Still not activated** — the token-exchange and tracking endpoint paths (`GLS_API_TOKEN_ENDPOINT`/`GLS_API_TRACKING_ENDPOINT`) couldn't be verified from public docs (GLS's real API reference sits behind portal login and differs by country/subsidiary); left blank on purpose. Degrades cleanly to `['error' => ...]` until set, same pattern as `TraccarService`/`DhlTrackingService`. |
+| `CarrierTrackingService` (new) | 🔧 | Routes an order to GLS / DHL (`DhlTrackingService`, reused) / ocean freight (`ShipsGoService`, reused — aggregates multiple lines incl. Maersk) by `carrier` name / `carrier_type` / `container_number`; normalizes to `{carrier, tracking_number, stage, events[]}`; persists events into the existing `order_shipment_events` table (deduped) so the admin's manual timeline and auto-synced data share one source of truth, and `orders.tracking_status` stays current. |
+| `GET /admin/orders/{id}/shipment-tracking` (new) | 🔧 | `tracking.view` permission (reused from the Traccar fleet endpoints). Live carrier-API call + persists new events. Works for **eBay-sourced orders too** — no separate eBay-tracking pull needed, since eBay orders get the same `carrier`/`tracking_number` fields as any other order once shipped. |
+| `GET /auth/orders/{ref}/tracking` extended with `mode` | 🔧 | Existing customer endpoint (Traccar GPS tracking) now returns `mode: "gps_live"` (unchanged behavior) or new `mode: "carrier"` when no fleet device is assigned but a carrier + tracking/container number is set. Carrier mode reads the persisted timeline (no live call on page view). `available:false` reasons unchanged. |
+| `tracking:sync-carriers` command (new) | 🔧 | Hourly (`routes/console.php`, same pattern as `admin:notifications:due-followups`) — syncs shipped orders with a carrier+tracking number and no fleet device, keeping the persisted timeline fresh without a live call per page view. |
+| Backend feature tests (16, MySQL, written not yet executed) | 🔧 | `ProposalToProformaGateTest` (6 tests) + `CarrierTrackingTest` (10 tests). **Not run against real MySQL in this session** — this dev environment's local MySQL root credentials don't match `.env`, so only `php -l` + bootstrap/autoload verification was possible. Run `php artisan test` before deploying. |
+
+**GLS — both endpoints now confirmed from the account's own portal ("Try this
+API" panels):**
+- Token exchange (Authentication API v2): standard OAuth2 client-credentials —
+  `POST /oauth2/v2/token`, HTTP Basic Auth (`api_key:api_secret`), form-encoded
+  `grant_type=client_credentials` body.
+- Tracking (ShipIT-Farm API v1): `POST /rs/tracking/parceldetails`, `Bearer`
+  token from the exchange above, `Content-Type: application/glsVersion1+json`
+  (GLS's own custom media type), body `{"ParcelNumber": "..."}`.
+
+Both wired into `GlsTrackingService` + defaults in `config/services.php`.
+**Still open:** the portal's tracking "Try it" panel returned "Unknown Error"
+when tested without an Authorization header — consistent with needing the
+Bearer token, but not yet proven end-to-end. Also still unconfirmed: the
+token response's exact field name (`access_token` assumed) and whether
+`parceldetails` actually contains a status/event-history field at all, or
+only static shipment attributes (weight/product/addresses) per GLS's public
+docs for the equivalent legacy endpoint — needs one real end-to-end run
+(token exchange → Bearer token → parceldetails with a live parcel number) to
+confirm before trusting this in production. DHL and ocean-freight (incl.
+Maersk) tracking are live now — both already had working credentials.
+
+See `FRONTEND_NOTE_tracking.md` (new sections) for the frontend-facing contract.
+
+---
+
 ## eBay Integration (Sessions 15–25)
 
 | Phase | Feature | Status |
@@ -501,6 +546,8 @@ See `FRONTEND_NOTE_media-library.md` for the frontend-facing contract.
 | Product translation table | Low | No multilingual products |
 | Preferred language on customers | Low | All emails English |
 | eBay production credentials rotation | **High** | `EBAY_CLIENT_SECRET` was exposed in a prior session — must rotate in eBay Developer Portal before listing live products |
+| GLS end-to-end verification | Medium | Both endpoints + auth flow now wired from confirmed portal docs (token exchange via Basic Auth, tracking via Bearer token); still needs one real end-to-end "Execute" run with a live parcel number to confirm the token response field name and whether the tracking response actually contains a status/event field (Session 52) |
+| Session 52 feature tests unexecuted | Medium | `ProposalToProformaGateTest` + `CarrierTrackingTest` written but not run against real MySQL in the dev environment used — run before deploying |
 
 ---
 
