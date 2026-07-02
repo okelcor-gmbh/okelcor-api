@@ -439,11 +439,13 @@ alike.
 | **Fix** — Commercial Invoice hidden from customer until fully paid | 🔧 | `Order::isFullyPaid()` (new); gates `TradeDocumentController` (list + download) and `OrderController`'s `trade_documents` payload. Previously visible/downloadable as soon as issued (only needed `deposit_paid` to generate) — contradicted what was promised on the call. Admin visibility unchanged. |
 | Proposal→PI: Order Confirmation acceptance no longer mandatory | 🔧 | For CRM-7 proposal-driven orders (`quote_requests.proposal_accepted_at` set), `AdminTradeDocumentController::generateProforma()` now skips the OC-acceptance gate — proposal acceptance alone unlocks PI generation. Customer `trade_documents` visibility relaxed the same way. Direct/manual orders (no proposal history) keep the original gate unchanged. OC document itself still auto-generates and remains available, just isn't a hard prerequisite anymore. |
 | `GlsTrackingService` (new) | 🔧 | GLS parcel Track & Trace client (GLS Group Developer Portal). Credential model confirmed against GLS's own docs: App ID + API Key + API Secret issued together per registered app — no separate "customer ID" (App ID ≠ Customer ID; there isn't one for this API). User has App ID/Key/Secret now (`GLS_APP_ID`/`GLS_API_KEY`/`GLS_API_SECRET`). **Still not activated** — the token-exchange and tracking endpoint paths (`GLS_API_TOKEN_ENDPOINT`/`GLS_API_TRACKING_ENDPOINT`) couldn't be verified from public docs (GLS's real API reference sits behind portal login and differs by country/subsidiary); left blank on purpose. Degrades cleanly to `['error' => ...]` until set, same pattern as `TraccarService`/`DhlTrackingService`. |
-| `CarrierTrackingService` (new) | 🔧 | Routes an order to GLS / DHL (`DhlTrackingService`, reused) / ocean freight (`ShipsGoService`, reused — aggregates multiple lines incl. Maersk) by `carrier` name / `carrier_type` / `container_number`; normalizes to `{carrier, tracking_number, stage, events[]}`; persists events into the existing `order_shipment_events` table (deduped) so the admin's manual timeline and auto-synced data share one source of truth, and `orders.tracking_status` stays current. |
-| `GET /admin/orders/{id}/shipment-tracking` (new) | 🔧 | `tracking.view` permission (reused from the Traccar fleet endpoints). Live carrier-API call + persists new events. Works for **eBay-sourced orders too** — no separate eBay-tracking pull needed, since eBay orders get the same `carrier`/`tracking_number` fields as any other order once shipped. |
-| `GET /auth/orders/{ref}/tracking` extended with `mode` | 🔧 | Existing customer endpoint (Traccar GPS tracking) now returns `mode: "gps_live"` (unchanged behavior) or new `mode: "carrier"` when no fleet device is assigned but a carrier + tracking/container number is set. Carrier mode reads the persisted timeline (no live call on page view). `available:false` reasons unchanged. |
+| `CarrierTrackingService` (new) | 🔧 | Routes an order to GLS / DHL (`DhlTrackingService`, reused) / ocean freight (`ShipsGoService`, reused — aggregates multiple lines incl. Maersk) by `carrier` name / `carrier_type` / `container_number`; normalizes to `{carrier, tracking_number, stage, tracking_url, events[]}`; persists events into the existing `order_shipment_events` table (deduped) so the admin's manual timeline and auto-synced data share one source of truth, and `orders.tracking_status` stays current. **Redesigned to never hard-fail**: a broken/unconfigured carrier API (GLS) no longer blocks the response — it just means `events` stays whatever's already persisted; `tracking_url` and `stage` are always present as long as carrier+tracking number are set. Only errors when the order has no carrier/tracking info at all. |
+| `tracking_url` — public carrier tracking page deep link (new) | 🔧 | Zero-credential fallback: `CarrierTrackingService::publicTrackingUrl()` builds a link to GLS/DHL/Maersk's own public tracking page from `carrier` + `tracking_number`/`container_number` — no API call, always works once those two fields are set. Directly answers "what if we don't know the process yet" — this is the zero-effort layer beneath both auto-sync and manual event entry. |
+| eBay carrier/tracking auto-backfill (new) | 🔧 | `EbaySellingService::fetchShippingFulfillments()` (new) + `EbayOrderSyncService::enrichCarrierFromEbay()` (new, private) — on the existing hourly `ebay:sync-orders` job, pulls `shippingCarrierCode`/`shipmentTrackingNumber` from eBay's own shipping-fulfillment record (whatever was used to mark the order shipped, whether via our system or manually in eBay's Seller Hub) and backfills `orders.carrier`/`tracking_number` **only if not already set** — never overrides a manual entry. Runs only when eBay reports the order as shipped/delivered. No new cron job. |
+| `GET /admin/orders/{id}/shipment-tracking` (new) | 🔧 | `tracking.view` permission (reused from the Traccar fleet endpoints). Attempts a live carrier-API call + persists new events, but — per the redesign above — always returns a usable response (incl. `tracking_url`) even when the live call fails; 503 only when the order has no carrier/tracking number at all. Works for **eBay-sourced orders too**. |
+| `GET /auth/orders/{ref}/tracking` extended with `mode` | 🔧 | Existing customer endpoint (Traccar GPS tracking) now returns `mode: "gps_live"` (unchanged behavior) or new `mode: "carrier"` when no fleet device is assigned but a carrier + tracking/container number is set. Carrier mode reads the persisted timeline (no live call on page view) + always includes `tracking_url`. `available:false` reasons unchanged. |
 | `tracking:sync-carriers` command (new) | 🔧 | Hourly (`routes/console.php`, same pattern as `admin:notifications:due-followups`) — syncs shipped orders with a carrier+tracking number and no fleet device, keeping the persisted timeline fresh without a live call per page view. |
-| Backend feature tests (16, MySQL, written not yet executed) | 🔧 | `ProposalToProformaGateTest` (6 tests) + `CarrierTrackingTest` (10 tests). **Not run against real MySQL in this session** — this dev environment's local MySQL root credentials don't match `.env`, so only `php -l` + bootstrap/autoload verification was possible. Run `php artisan test` before deploying. |
+| Backend feature tests (18, MySQL, written not yet executed) | 🔧 | `ProposalToProformaGateTest` (6 tests) + `CarrierTrackingTest` (12 tests, incl. `tracking_url` generation + graceful-degradation behavior). **Not run against real MySQL in this session** — this dev environment's local MySQL root credentials don't match `.env`, so only `php -l` + bootstrap/autoload verification was possible. `enrichCarrierFromEbay()` has no test coverage yet (needs eBay OAuth + fulfillment endpoint mocking — deferred given session length; low risk, mirrors the existing, working `fetchOrder()` pattern exactly). Run `php artisan test` before deploying. |
 
 **GLS — both endpoints now confirmed from the account's own portal ("Try this
 API" panels):**
@@ -472,17 +474,23 @@ debugging stalled on a production logging oddity (fresh calls — confirmed via
 direct `tinker` invocation, bypassing any HTTP/CDN caching — wrote no new log
 line to `storage/logs/laravel.log`, implying `LOG_CHANNEL` writes elsewhere in
 production, e.g. a daily-rotated file). Rather than keep burning time on GLS
-credentials/logging, **shipment tracking now runs on manual entry**: admin
-sets `carrier`/`tracking_number` on the order (existing fields) and adds
-shipment events by hand via the pre-existing (previously undocumented to
-frontend) `POST/PUT/DELETE /admin/orders/{id}/shipment-events` endpoints. The
-customer-facing `mode: "carrier"` view built this session works identically
-either way, since it was designed to read `order_shipment_events` regardless
-of whether entries are manual or auto-synced — no code change was needed to
-support this, only frontend documentation (now added). `GlsTrackingService` /
-`CarrierTrackingService` / `tracking:sync-carriers` remain in place, dormant
-until GLS access is revisited — they don't need to be removed, and DHL/ocean
-auto-sync will still run for orders using those carriers.
+credentials/logging, **`CarrierTrackingService` was redesigned around three
+independent, non-blocking layers** instead of an all-or-nothing live API:
+1. `tracking_url` — a zero-credential deep link to the carrier's own public
+   tracking page, present the moment `carrier` + `tracking_number` are set.
+   No API, no manual work, always works for GLS/DHL/Maersk.
+2. Automatic live sync for carriers with working credentials (DHL, ocean
+   freight/Maersk via ShipsGo) — unchanged, already live.
+3. Manual shipment-event entry (pre-existing `POST/PUT/DELETE
+   /admin/orders/{id}/shipment-events` endpoints, previously undocumented to
+   frontend) — optional richer history on top of layer 1, not a prerequisite.
+
+For eBay orders specifically, `carrier`/`tracking_number` now auto-backfill
+from eBay's own shipping-fulfillment record on the existing hourly
+`ebay:sync-orders` job — so even layer 1 requires no manual typing for eBay
+orders. `GlsTrackingService` remains in place, dormant until its credentials
+are sorted — no removal needed, and DHL/ocean auto-sync continues to run
+unaffected for orders using those carriers.
 
 See `FRONTEND_NOTE_tracking.md` (new sections) for the frontend-facing contract.
 

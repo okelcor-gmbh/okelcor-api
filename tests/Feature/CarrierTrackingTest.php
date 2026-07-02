@@ -202,7 +202,7 @@ class CarrierTrackingTest extends TestCase
         $this->assertCount(1, $result['events']);
     }
 
-    public function test_gls_not_configured_degrades_cleanly(): void
+    public function test_gls_not_configured_still_returns_usable_response_with_tracking_url(): void
     {
         config([
             'services.gls.app_id'         => null,
@@ -214,18 +214,55 @@ class CarrierTrackingTest extends TestCase
         $this->assertFalse(app(GlsTrackingService::class)->isConfigured());
         $this->assertArrayHasKey('error', app(GlsTrackingService::class)->track('123'));
 
+        // The service-level call fails, but CarrierTrackingService must not
+        // surface that as a hard error — a broken/unconfigured carrier API
+        // should never block the fallback (empty events + public tracking
+        // link) as long as carrier + tracking number are set on the order.
         $order  = $this->order(['carrier' => 'GLS', 'tracking_number' => '50044195855']);
+        $result = app(CarrierTrackingService::class)->trackAndSync($order);
+
+        $this->assertArrayNotHasKey('error', $result);
+        $this->assertSame([], $result['events']);
+        $this->assertStringContainsString('50044195855', $result['tracking_url']);
+    }
+
+    public function test_no_trackable_carrier_still_returns_response_without_url(): void
+    {
+        $order  = $this->order(['carrier' => 'Local Courier', 'tracking_number' => 'ABC123']);
+        $result = app(CarrierTrackingService::class)->trackAndSync($order);
+
+        $this->assertArrayNotHasKey('error', $result);
+        $this->assertSame([], $result['events']);
+        $this->assertNull($result['tracking_url']);
+    }
+
+    public function test_trackandsync_errors_only_when_nothing_to_track(): void
+    {
+        $order  = $this->order(); // no carrier, no tracking number at all
         $result = app(CarrierTrackingService::class)->trackAndSync($order);
 
         $this->assertArrayHasKey('error', $result);
     }
 
-    public function test_no_trackable_carrier_returns_error(): void
+    public function test_public_tracking_url_per_carrier(): void
     {
-        $order  = $this->order(['carrier' => 'Local Courier', 'tracking_number' => 'ABC123']);
-        $result = app(CarrierTrackingService::class)->trackAndSync($order);
+        $gls = $this->order(['carrier' => 'GLS Germany', 'tracking_number' => '50044195855']);
+        $this->assertSame(
+            'https://gls-group.eu/DE/en/parcel-tracking?match=50044195855',
+            app(CarrierTrackingService::class)->fromPersistedEvents($gls)['tracking_url']
+        );
 
-        $this->assertArrayHasKey('error', $result);
+        $dhl = $this->order(['carrier' => 'DHL', 'tracking_number' => '1Z999AA1']);
+        $this->assertSame(
+            'https://www.dhl.com/de-en/home/tracking.html?tracking-id=1Z999AA1',
+            app(CarrierTrackingService::class)->fromPersistedEvents($dhl)['tracking_url']
+        );
+
+        $maersk = $this->order(['carrier' => 'Maersk Line', 'container_number' => 'MAEU1234567']);
+        $this->assertSame(
+            'https://www.maersk.com/tracking/MAEU1234567',
+            app(CarrierTrackingService::class)->fromPersistedEvents($maersk)['tracking_url']
+        );
     }
 
     // ── Admin endpoint ────────────────────────────────────────────────────────

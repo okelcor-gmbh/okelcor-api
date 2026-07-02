@@ -596,6 +596,29 @@ class EbaySellingService
         return $response->json();
     }
 
+    /**
+     * Fetch the shipping fulfillments (carrier + tracking number) eBay has on
+     * file for an order — whatever was used to mark it shipped, whether that
+     * happened via our own system or manually in eBay's Seller Hub. Returns
+     * `['fulfillments' => [...]]`; empty array if the order has none yet.
+     */
+    public function fetchShippingFulfillments(string $ebayOrderId): array
+    {
+        $token    = $this->getAccessToken();
+        $encoded  = rawurlencode($ebayOrderId);
+        $endpoint = $this->fulfillmentBaseUrl() . "/order/{$encoded}/shipping_fulfillment";
+
+        $response = Http::withToken($token)
+            ->withHeaders($this->commonHeaders())
+            ->get($endpoint);
+
+        if (! $response->ok()) {
+            $this->handleFulfillmentApiError('fetch_shipping_fulfillments', $endpoint, $response, ['ebay_order_id' => $ebayOrderId]);
+        }
+
+        return $response->json();
+    }
+
     private function handleFulfillmentApiError(
         string $operation,
         string $endpoint,

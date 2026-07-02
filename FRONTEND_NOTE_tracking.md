@@ -188,17 +188,30 @@ now: `sea`, `air`, `dhl`, `road`, `truck`. **Update the admin order carrier-type
 
 ---
 
-## NEW — Shipment tracking: build the MANUAL entry UI first (this is the active path)
+## NEW — Shipment tracking: three layers, none of them blocking on each other
 
-**Status: this is what to build now.** GLS's live API integration (below) hit
-persistent "invalid credentials" issues that cost more time than it saved, so
-for the time being **admin manually enters carrier/tracking info and shipment
-events** — no live carrier API calls involved. The backend was already built
-carrier-agnostic (manual and auto-synced events share the same table), so
-nothing changes about the response shapes documented below — an order tracked
-manually looks identical, on the wire, to one that would eventually be
-auto-synced. **Automatic GLS/DHL/ocean-freight sync (further down this
-section) is built and harmless but not the priority — don't block on it.**
+**Status: build the carrier + tracking number fields and the `tracking_url`
+button first — that alone gets tracking working with zero manual effort per
+shipment.** GLS's live API integration hit persistent "invalid credentials"
+issues that cost more time than it saved, so it's parked (harmless, dormant,
+can be revisited later). Rather than one all-or-nothing feature, tracking now
+has three independent layers that stack — staff use whichever applies, no
+process to learn upfront:
+
+1. **Zero effort — `tracking_url` (see below).** The moment carrier +
+   tracking number are set on an order (whether admin typed them in, or eBay
+   auto-supplied them — see the eBay section below), a working deep link to
+   the carrier's own tracking page appears. No events, no API, nothing else
+   required. This directly covers "what if we don't know the process yet" —
+   there's no process to know; the link just works.
+2. **Automatic — DHL / ocean freight (Maersk etc.).** Already fully working
+   (real credentials in place) — events auto-populate hourly, no admin
+   action beyond setting carrier + tracking number.
+3. **Manual, optional — the shipment-events timeline.** For richer in-app
+   history (matching the eBay-style event log) beyond the link, or for GLS
+   parcels until its API access is sorted, admin can add events by hand. This
+   is a nice-to-have on top of layer 1, not a prerequisite for tracking to
+   show anything.
 
 ### Admin: two things to add to the order detail page
 
@@ -206,9 +219,11 @@ section) is built and harmless but not the priority — don't block on it.**
    form (`carrier`, `carrier_type`, `tracking_number`) via the existing
    `PUT /admin/orders/{id}` / `PATCH /admin/orders/{id}/status`. If these
    aren't on the form yet, add plain text/select inputs — no new endpoint.
-2. **A "Shipment events" timeline editor** — this endpoint has existed since
-   an earlier session but was never given a frontend note, so it's likely not
-   built yet:
+   **This is the one field admin actually needs to fill in — everything else
+   is optional on top.**
+2. **A "Shipment events" timeline editor (optional, layer 3 above)** — this
+   endpoint has existed since an earlier session but was never given a
+   frontend note, so it's likely not built yet:
 
    | Endpoint | Body | Notes |
    |---|---|---|
@@ -218,13 +233,13 @@ section) is built and harmless but not the priority — don't block on it.**
 
    Simple UI: a form (date, short status text, optional location/description)
    + a list of existing events below it (edit/delete), on the order detail
-   page — matches the eBay "Track shipment" timeline the order manager wants
-   to replicate, just filled in by hand instead of pulled live. Permission:
-   `orders.update` (same as the rest of the order edit form).
+   page. Permission: `orders.update` (same as the rest of the order edit
+   form). Build this after the carrier/tracking-number field + `tracking_url`
+   button — it's the richest option, not the required one.
 
-Once both are set — carrier/tracking number on the order, plus at least one
-shipment event — the customer automatically sees it via the tracking endpoint
-below (`mode: "carrier"`), no extra step needed.
+Once carrier + tracking number are set, the customer automatically sees
+something via the tracking endpoint below (`mode: "carrier"`) — at minimum
+the `tracking_url` link, plus whatever events exist (manual or auto-synced).
 
 ---
 
@@ -256,7 +271,8 @@ aggregates multiple shipping lines).
     "carrier": "GLS Germany",
     "tracking_number": "50044195855",
     "stage": "in_transit",         // preparing | in_transit | delivered
-    "events": [                    // newest first
+    "tracking_url": "https://gls-group.eu/DE/en/parcel-tracking?match=50044195855",  // see below
+    "events": [                    // newest first — [] if none entered/synced yet
       {
         "event_date": "2026-07-01",
         "time": "10:40",
@@ -280,36 +296,56 @@ aggregates multiple shipping lines).
 order_cancelled | unavailable`) — `no_device` now also covers "no carrier
 assigned either."
 
+### `tracking_url` — always render this if present, regardless of `events`
+A deep link to the carrier's own public tracking page (GLS/DHL/Maersk today),
+built from `carrier` + `tracking_number`/container number — **no API
+credentials needed, always works** as long as carrier + tracking number are
+set on the order. This is the fallback for exactly the "we don't know the
+process yet" case: even before any event has been entered manually or
+auto-synced, `tracking_url` is already there. **Build this first** — a
+"Track on GLS.com ↗" / "Track on DHL.com ↗" button that opens `tracking_url`
+in a new tab is the lowest-effort, always-working piece of this feature.
+`null` when the carrier isn't recognized (only GLS/DHL/Maersk have a known
+public URL pattern today) — hide the button in that case.
+
 ### What the frontend needs to do
 1. **Branch on `mode`** wherever `/auth/orders/{ref}/tracking` is consumed:
    `gps_live` → existing map UI (no change); `carrier` → new UI, modeled on
    the eBay "Track shipment" modal:
    - A simple 3-node stepper driven by `stage` (preparing → in_transit →
      delivered).
-   - A "Shipping overview" line: `carrier` + `tracking_number`.
+   - A "Shipping overview" line: `carrier` + `tracking_number` + the
+     `tracking_url` button described above.
    - The `events` list rendered newest-first (date, time, location,
      description) — `status_label` is a short heading, `description` the
      full text (identical today, kept as two fields in case the FE wants a
-     collapsed vs expanded view like eBay's "See more").
-2. **Admin order page:** new endpoint
-   `GET /admin/orders/{id}/shipment-tracking` (permission `tracking.view`,
-   same as the fleet endpoints) returns the same `{carrier, tracking_number,
-   stage, events}` shape (no `available`/`mode`/`order_ref` wrapper — just the
-   tracking data) and does a **live** carrier-API call + persists any new
-   events, unlike the customer endpoint which reads the persisted timeline.
-   **Hold off wiring a "live sync" button to this for now** — GLS isn't
-   working yet (see below), so today it would only do anything for DHL/ocean
-   orders. The manual entry UI above is what to build first; this endpoint
-   is a bonus once GLS is sorted, not a blocker.
-3. **No FE change needed for eBay orders specifically** — they flow through
-   the exact same admin order carrier/tracking-number fields as manual
-   orders, so no separate "eBay tracking" UI is needed.
+     collapsed vs expanded view like eBay's "See more"). Render an empty
+     state ("No updates yet — track directly on GLS.com") when `events` is
+     `[]`, rather than hiding the whole card — `tracking_url` still works.
+2. **Admin order page:** `GET /admin/orders/{id}/shipment-tracking`
+   (permission `tracking.view`) returns the same `{carrier, tracking_number,
+   stage, tracking_url, events}` shape (no `available`/`mode`/`order_ref`
+   wrapper) and attempts a **live** carrier-API call + persists any new
+   events — but now **always returns a usable response** (including
+   `tracking_url`) even when the live call fails or the carrier (GLS) isn't
+   configured; it only errors (503) when the order has no carrier/tracking
+   number at all. Safe to wire up now, not just once GLS is fixed.
+3. **No FE change needed for eBay orders specifically** — carrier/tracking
+   number now auto-backfill from eBay's own shipping fulfillment record
+   during the existing hourly `ebay:sync-orders` job (whatever carrier/
+   tracking eBay has on file — e.g. an order fulfilled manually in eBay's
+   Seller Hub), whenever they're not already set. So eBay orders flow through
+   the exact same `carrier`/`tracking_number` fields as manual orders — no
+   separate "eBay tracking" UI needed, and no manual copy-paste from eBay
+   into the admin panel required either.
 
 ### Data freshness
 The customer endpoint reads the **persisted** timeline (kept fresh by an
 hourly backend job), not a live carrier call — so it stays fast even if a
 carrier API is slow/down. The admin endpoint **does** call live (for the "I
-need this right now" case) and persists what it finds.
+need this right now" case) and persists what it finds — but degrades to
+persisted-only + `tracking_url` if the live call fails, same as the customer
+endpoint, never a hard error while there's still something to show.
 
 ---
 

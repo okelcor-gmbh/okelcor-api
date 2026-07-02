@@ -13,11 +13,20 @@ use Illuminate\Support\Carbon;
  * endpoints:
  *
  *   ['carrier' => ?string, 'tracking_number' => ?string, 'stage' => string,
+ *    'tracking_url' => ?string,
  *    'events' => [['event_date','time','location','status_label','description'], ...]]
  *
  * `stage` is derived from the order's own status (preparing/in_transit/
  * delivered) rather than parsed from carrier text — each carrier's event
  * vocabulary differs too much to infer a reliable 3-step stage from it.
+ *
+ * `tracking_url` is a best-effort deep link to the carrier's own public
+ * tracking page (GLS/DHL/Maersk) — always present whenever a carrier +
+ * tracking/container number is set, regardless of whether the API-driven
+ * event sync is working. This is the fallback so tracking is never fully
+ * blocked on a broken carrier integration (see GLS, currently inactive) or
+ * on someone manually logging events — worst case, "here's a link that
+ * definitely works" beats "nothing."
  *
  * Normalized events are persisted into the existing order_shipment_events
  * table (deduped) so the admin's manual timeline and this auto-synced data
@@ -32,29 +41,41 @@ class CarrierTrackingService
     ) {}
 
     /**
-     * Fetch live tracking for an order, persist any new events, and return
-     * the normalized shape. Never throws — returns ['error' => ...] instead.
+     * Best-effort live sync: attempts a carrier API call and persists any new
+     * events, then always returns the same shape as fromPersistedEvents()
+     * (carrier/tracking_number/stage/tracking_url/events) — a failed or
+     * unconfigured carrier API (e.g. GLS today) doesn't block the response,
+     * it just means events stays whatever was already persisted (manual
+     * entries still show, and tracking_url still works). Only returns
+     * ['error' => ...] when the order has no carrier/tracking info at all.
      */
     public function trackAndSync(Order $order): array
     {
-        $result = $this->fetch($order);
-
-        if (isset($result['error'])) {
-            return $result;
+        if (! $order->carrier || (! $order->tracking_number && ! $order->container_number)) {
+            return ['error' => 'No carrier or tracking number set on this order'];
         }
 
-        $this->persistEvents($order, $result['events']);
+        $result = $this->fetch($order);
 
-        return array_merge($result, ['stage' => $this->stage($order)]);
+        if (! isset($result['error'])) {
+            $this->persistEvents($order, $result['events']);
+        }
+
+        return $this->buildResponse($order);
     }
 
     /**
-     * Same as trackAndSync() but does not call out to the carrier — reads
-     * whatever has already been persisted in order_shipment_events. Used by
-     * the customer endpoint so a page view never blocks on a live carrier
-     * API call; freshness comes from the hourly tracking:sync-carriers job.
+     * Does not call out to any carrier — reads whatever's already persisted
+     * in order_shipment_events (manual entries and/or prior auto-syncs) plus
+     * the always-available tracking_url. Used by the customer endpoint so a
+     * page view never blocks on a live carrier API call.
      */
     public function fromPersistedEvents(Order $order): array
+    {
+        return $this->buildResponse($order);
+    }
+
+    private function buildResponse(Order $order): array
     {
         $events = OrderShipmentEvent::where('order_id', $order->id)
             ->orderByDesc('event_date')
@@ -74,8 +95,36 @@ class CarrierTrackingService
             'carrier'         => $order->carrier,
             'tracking_number' => $order->tracking_number ?: $order->container_number,
             'stage'           => $this->stage($order),
+            'tracking_url'    => $this->publicTrackingUrl($order),
             'events'          => $events,
         ];
+    }
+
+    /**
+     * Deep link to the carrier's own public tracking page — no credentials,
+     * no API, just a URL template per carrier. Best-effort patterns (worth
+     * spot-checking against a real shipment); worst case a broken link is
+     * far cheaper to notice/fix than a broken API integration.
+     */
+    private function publicTrackingUrl(Order $order): ?string
+    {
+        $carrier        = (string) ($order->carrier ?? '');
+        $trackingNumber = $order->tracking_number;
+        $container      = $order->container_number;
+
+        if ($trackingNumber && stripos($carrier, 'gls') !== false) {
+            return 'https://gls-group.eu/DE/en/parcel-tracking?match=' . urlencode($trackingNumber);
+        }
+
+        if ($trackingNumber && (stripos($carrier, 'dhl') !== false || $order->carrier_type === 'dhl')) {
+            return 'https://www.dhl.com/de-en/home/tracking.html?tracking-id=' . urlencode($trackingNumber);
+        }
+
+        if ($container && stripos($carrier, 'maersk') !== false) {
+            return 'https://www.maersk.com/tracking/' . urlencode($container);
+        }
+
+        return null;
     }
 
     // -------------------------------------------------------------------------

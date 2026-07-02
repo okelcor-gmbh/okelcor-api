@@ -187,6 +187,10 @@ class EbayOrderSyncService
             return $order;
         });
 
+        if (in_array($orderStatus, ['shipped', 'delivered'], true)) {
+            $this->enrichCarrierFromEbay($order, $ebayOrderId);
+        }
+
         EbayOrderSyncLog::create([
             'ebay_order_id'   => $ebayOrderId,
             'order_id'        => $order->id,
@@ -231,6 +235,10 @@ class EbayOrderSyncService
             'status'                  => $updatedOrderStatus,
         ]);
 
+        if (in_array($updatedOrderStatus, ['shipped', 'delivered'], true)) {
+            $this->enrichCarrierFromEbay($order, $eb['orderId']);
+        }
+
         EbayOrderSyncLog::create([
             'ebay_order_id'   => $eb['orderId'],
             'order_id'        => $order->id,
@@ -238,6 +246,56 @@ class EbayOrderSyncService
             'status'          => $updatedPaymentStatus,
             'payload_summary' => $this->buildPayloadSummary($eb),
         ]);
+    }
+
+    /**
+     * Pull carrier + tracking number from eBay's own shipping fulfillment
+     * record (whatever was used to mark the order shipped — whether that
+     * happened via our system or manually in eBay's Seller Hub) and backfill
+     * the order's carrier/tracking_number fields if they're not already set.
+     *
+     * Never overrides a value staff already entered — this only fills gaps,
+     * so an admin's manual entry always wins. Best-effort: logs and moves on
+     * on any failure, never breaks the sync.
+     */
+    private function enrichCarrierFromEbay(Order $order, string $ebayOrderId): void
+    {
+        if ($order->carrier && $order->tracking_number) {
+            return;
+        }
+
+        try {
+            $data        = $this->ebay->fetchShippingFulfillments($ebayOrderId);
+            $fulfillment = $data['fulfillments'][0] ?? null;
+
+            if (! $fulfillment) {
+                return;
+            }
+
+            $carrier        = $fulfillment['shippingCarrierCode'] ?? null;
+            $trackingNumber = $fulfillment['shipmentTrackingNumber'] ?? null;
+
+            if (! $carrier && ! $trackingNumber) {
+                return;
+            }
+
+            $order->update(array_filter([
+                'carrier'         => $order->carrier ?: $carrier,
+                'tracking_number' => $order->tracking_number ?: $trackingNumber,
+            ], fn ($v) => $v !== null));
+
+            Log::info('eBay carrier/tracking backfilled from shipping fulfillment', [
+                'ebay_order_id' => $ebayOrderId,
+                'order_ref'     => $order->ref,
+                'carrier'       => $carrier,
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('eBay shipping fulfillment fetch failed (non-blocking)', [
+                'ebay_order_id' => $ebayOrderId,
+                'order_ref'     => $order->ref,
+                'error'         => $e->getMessage(),
+            ]);
+        }
     }
 
     // -------------------------------------------------------------------------
