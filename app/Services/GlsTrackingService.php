@@ -83,6 +83,7 @@ class GlsTrackingService
 
             $response = Http::withToken($token)
                 ->acceptJson()
+                ->timeout(10)
                 ->get($url, [
                     'showEvents' => 'true',
                 ]);
@@ -141,6 +142,7 @@ class GlsTrackingService
         try {
             $response = Http::asForm()
                 ->acceptJson()
+                ->timeout(10)
                 ->withBasicAuth(config('services.gls.api_key'), config('services.gls.api_secret'))
                 ->post(config('services.gls.token_endpoint'), [
                     'grant_type' => 'client_credentials',
