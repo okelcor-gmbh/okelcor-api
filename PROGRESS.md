@@ -438,8 +438,8 @@ alike.
 |---------|--------|-------|
 | **Fix** — Commercial Invoice hidden from customer until fully paid | 🔧 | `Order::isFullyPaid()` (new); gates `TradeDocumentController` (list + download) and `OrderController`'s `trade_documents` payload. Previously visible/downloadable as soon as issued (only needed `deposit_paid` to generate) — contradicted what was promised on the call. Admin visibility unchanged. |
 | Proposal→PI: Order Confirmation acceptance no longer mandatory | 🔧 | For CRM-7 proposal-driven orders (`quote_requests.proposal_accepted_at` set), `AdminTradeDocumentController::generateProforma()` now skips the OC-acceptance gate — proposal acceptance alone unlocks PI generation. Customer `trade_documents` visibility relaxed the same way. Direct/manual orders (no proposal history) keep the original gate unchanged. OC document itself still auto-generates and remains available, just isn't a hard prerequisite anymore. |
-| `GlsTrackingService` (new) | 🔧 | GLS parcel Track & Trace client (GLS Group Developer Portal). Credential model confirmed against GLS's own docs: App ID + API Key + API Secret issued together per registered app — no separate "customer ID" (App ID ≠ Customer ID; there isn't one for this API). User has App ID/Key/Secret now (`GLS_APP_ID`/`GLS_API_KEY`/`GLS_API_SECRET`). **Still not activated** — the token-exchange and tracking endpoint paths (`GLS_API_TOKEN_ENDPOINT`/`GLS_API_TRACKING_ENDPOINT`) couldn't be verified from public docs (GLS's real API reference sits behind portal login and differs by country/subsidiary); left blank on purpose. Degrades cleanly to `['error' => ...]` until set, same pattern as `TraccarService`/`DhlTrackingService`. |
-| `CarrierTrackingService` (new) | 🔧 | Routes an order to GLS / DHL (`DhlTrackingService`, reused) / ocean freight (`ShipsGoService`, reused — aggregates multiple lines incl. Maersk) by `carrier` name / `carrier_type` / `container_number`; normalizes to `{carrier, tracking_number, stage, tracking_url, events[]}`; persists events into the existing `order_shipment_events` table (deduped) so the admin's manual timeline and auto-synced data share one source of truth, and `orders.tracking_status` stays current. **Redesigned to never hard-fail**: a broken/unconfigured carrier API (GLS) no longer blocks the response — it just means `events` stays whatever's already persisted; `tracking_url` and `stage` are always present as long as carrier+tracking number are set. Only errors when the order has no carrier/tracking info at all. |
+| `GlsTrackingService` (new) | ✅ | GLS parcel Track & Trace client — Track And Trace API v1 (GLS Group Developer Portal). App ID + API Key + API Secret issued together per registered app — no separate "customer ID". **Live and verified** — `GET /tracking/simple/trackids/{unitno}?showEvents=true`, OAuth2 client-credentials auth. Real credentials confirmed working via direct `curl` from production; end-to-end `tinker` test against a real order returned 9 real tracking events. Degrades cleanly to `['error' => ...]` if ever unconfigured, same pattern as `TraccarService`/`DhlTrackingService`. |
+| `CarrierTrackingService` (new) | ✅ | Routes an order to GLS / DHL (`DhlTrackingService`, reused) / ocean freight (`ShipsGoService`, reused — aggregates multiple lines incl. Maersk) by `carrier` name / `carrier_type` / `container_number`; normalizes to `{carrier, tracking_number, stage, tracking_url, events[]}`; persists events into the existing `order_shipment_events` table (deduped) so the admin's manual timeline and auto-synced data share one source of truth, and `orders.tracking_status` stays current. Designed to never hard-fail: even if a carrier API were ever down/unconfigured, `events` just stays whatever's already persisted while `tracking_url`/`stage` remain available — only errors when the order has no carrier/tracking info at all. All three carriers (GLS, DHL, ocean freight) now confirmed live. |
 | `tracking_url` — public carrier tracking page deep link (new) | 🔧 | Zero-credential fallback: `CarrierTrackingService::publicTrackingUrl()` builds a link to GLS/DHL/Maersk's own public tracking page from `carrier` + `tracking_number`/`container_number` — no API call, always works once those two fields are set. Directly answers "what if we don't know the process yet" — this is the zero-effort layer beneath both auto-sync and manual event entry. |
 | eBay carrier/tracking auto-backfill (new) | 🔧 | `EbaySellingService::fetchShippingFulfillments()` (new) + `EbayOrderSyncService::enrichCarrierFromEbay()` (new, private) — on the existing hourly `ebay:sync-orders` job, pulls `shippingCarrierCode`/`shipmentTrackingNumber` from eBay's own shipping-fulfillment record (whatever was used to mark the order shipped, whether via our system or manually in eBay's Seller Hub) and backfills `orders.carrier`/`tracking_number` **only if not already set** — never overrides a manual entry. Runs only when eBay reports the order as shipped/delivered. No new cron job. |
 | `GET /admin/orders/{id}/shipment-tracking` (new) | 🔧 | `tracking.view` permission (reused from the Traccar fleet endpoints). Attempts a live carrier-API call + persists new events, but — per the redesign above — always returns a usable response (incl. `tracking_url`) even when the live call fails; 503 only when the order has no carrier/tracking number at all. Works for **eBay-sourced orders too**. |
@@ -448,28 +448,39 @@ alike.
 | Backend feature tests (18, MySQL) | ✅ | `ProposalToProformaGateTest` (6 tests) + `CarrierTrackingTest` (12 tests, incl. `tracking_url` generation + graceful-degradation behavior) — GitHub Actions CI (real MySQL 8) caught 3 real bugs the local sqlite bootstrap check couldn't: an invalid `role='support'` in a test (see role/ENUM gap below), a missing `NOT NULL` `notes` field in a `QuoteRequest` test helper, and an FK-drop ordering issue in `MediaLibraryTest`/`BulkEmailCampaignTest` (both wrapped in `disableForeignKeyConstraints()`/`enableForeignKeyConstraints()` — the actual root-cause fix, robust regardless of test execution order). All fixed and green. `enrichCarrierFromEbay()` has no test coverage yet (needs eBay OAuth + fulfillment endpoint mocking — deferred given session length; low risk, mirrors the existing, working `fetchOrder()` pattern exactly). |
 | **Found via CI** — `admin_users.role` ENUM doesn't match documented roles | 🔧 | The DB column is a MySQL ENUM allowing only `super_admin/admin/editor/order_manager`, but `AdminPermissions.php` (and this doc's own role list) references `sales_manager`/`support`/`content_manager`/`viewer` throughout — those roles can't actually be stored under MySQL strict mode. Pre-existing, unrelated to this session's feature work; not fixed here (needs its own migration + audit of every affected admin account). See Known Gaps. |
 | **Fix** — eBay multi-quantity line items showed the line total as the per-item price | 🔧 | eBay's `lineItemCost` is documented as `unit price × quantity` (i.e. already the line total), but `EbayOrderSyncService::importOrder()` treated it as per-unit and multiplied by quantity again — e.g. 2 items at a true €75.14 each showed as "€150.28 each." Only affected lines with quantity > 1 (confirmed against a real order). Fixed for new imports; new `php artisan ebay:audit-line-item-pricing` command (report-only by default, `--apply` to write) finds/corrects historical orders — only touches items where the order's eBay-sourced `subtotal` doesn't match the summed line items, so already-correct data is untouched. Order-level `total`/`subtotal` were never wrong (computed independently from eBay's `pricingSummary`). |
-| eBay tracking-event richness — confirmed not available via API | ✅ | Checked eBay's Fulfillment API docs directly: sellers can only pull `shippingCarrierCode`/`trackingNumber`/ship date (already built), not the detailed per-event history eBay shows buyers — that's eBay's internal carrier integration, not exposed via API. Confirms the existing design (carrier+tracking backfill → own carrier integration or `tracking_url`) is the correct approach; the real gap is GLS being unconfigured, not a missing eBay pull. |
+| eBay tracking-event richness — confirmed not available via API, moot now anyway | ✅ | Checked eBay's Fulfillment API docs directly: sellers can only pull `shippingCarrierCode`/`trackingNumber`/ship date (already built), not the detailed per-event history eBay shows buyers — that's eBay's internal carrier integration, not exposed via API. Doesn't matter in practice: now that GLS is live (see below), the events we show for a GLS-carried eBay order are the same events eBay itself is showing — both read from GLS directly. |
 | Backend feature tests (5, new) | 🔧 | `EbayOrderPricingTest` — multi-qty division via `importOrder()` (reflection, no OAuth mocking needed since it's pure data transform), single-qty unaffected, and 3 tests for the audit command (dry-run doesn't write, `--apply` corrects, already-correct orders untouched). Not run against real MySQL in this session — see caveat above. |
 
-**GLS — rewired to the real product (2026-07-03).** `ShipIT-Farm API v1` /
+**GLS — ✅ live and verified end-to-end (2026-07-03).** `ShipIT-Farm API v1` /
 `parceldetails` (what we'd wired in first) turned out to be a dead end — its
 response only contains ParcelShop pickup-location details, not shipment
 status. Found the actual product in the portal: **Track And Trace V1**,
 `GET /tracking/simple/trackids/{unitno}?showEvents=true`, with a fully
 documented `EventDTO` response schema (`code`, `city`, `postalCode`,
 `country`, `description`, `eventDateTime`) — confirmed from GLS's own
-published docs, not guessed. Also switched both the token exchange and
-tracking base URL to the **sandbox** host (`api-sandbox.gls-group.net`) —
-every portal panel checked for this account defaulted to sandbox; production
-needs a separate GLS approval step not yet completed. Sandbox may return
-test data rather than real parcel status.
+published docs, not guessed.
 
-**Still open:** a real end-to-end execute (token → Bearer → tracking call
-with a live parcel number) hasn't been run yet, so the outer response
-envelope (what wraps the `events` array — handled defensively in code) isn't
-100% confirmed, and it's unknown whether sandbox returns real or dummy data
-for this account. DHL and ocean-freight (incl. Maersk) tracking are live
-now — both already had working credentials.
+Root cause of the persistent `400 invalid credentials`: a stray `_KEY` suffix
+had been copy-pasted onto the end of the actual API key value in production
+`.env` — not a code or environment-mismatch issue at all. Confirmed via a
+direct `curl` from the server once trimmed: real `access_token` returned.
+
+Verified live via `tinker` against a real order (`OKL-C06OT`, eBay-sourced,
+tracking number `50044195855` — the same parcel from Edinah's original
+screenshots): **9 real events returned**, wording matching what eBay itself
+was showing ("The parcel was handed over to GLS," "provided by the sender
+for collection," etc.) — this is genuinely live tracking data, not sandbox
+dummy data, even though both endpoints are on the `api-sandbox.gls-group.net`
+host (tracking lookups appear to be live regardless of environment; only
+shipment-creation-type operations would likely differ — not something this
+integration does). `location` comes back `null` on every event in practice
+(GLS isn't populating `city`/`postalCode` at the event level for this
+account) — handled gracefully, not a bug.
+
+Events auto-persist into `order_shipment_events` on every call (admin
+"live sync" endpoint, and the hourly `tracking:sync-carriers` job for
+shipped orders). DHL and ocean-freight (incl. Maersk) tracking are also
+live — all three carrier integrations are now fully working.
 
 **Decision (2026-07-02, post-deploy):** GLS's token exchange kept returning
 `400 invalid credentials` even after correcting the `.env` values, and
@@ -575,7 +586,8 @@ See `FRONTEND_NOTE_tracking.md` (new sections) for the frontend-facing contract.
 | Product translation table | Low | No multilingual products |
 | Preferred language on customers | Low | All emails English |
 | eBay production credentials rotation | **High** | `EBAY_CLIENT_SECRET` was exposed in a prior session — must rotate in eBay Developer Portal before listing live products |
-| GLS live tracking — rewired to Track And Trace V1, needs a real end-to-end test | Low | `400 invalid credentials` earlier was likely from hitting production with sandbox-only credentials — both endpoints now default to sandbox. Still needs: (1) one real execute in the portal (or via `tinker`) to confirm auth + response envelope, (2) the `storage/logs/laravel.log` mystery resolved first — check `ls -lat storage/logs/` for the actual active log file before debugging further, (3) confirm whether sandbox returns real or dummy tracking data for this account. Not blocking — `tracking_url` link-out + manual shipment-event entry (Session 52) remain the active path meanwhile |
+| `storage/logs/laravel.log` doesn't receive writes on production | Medium | Confirmed during GLS debugging — fresh `Log::` calls (even ones proven to run, via `tinker`) never appeared in that file, and it wasn't even the most-recently-modified file in `storage/logs/`. `LOG_CHANNEL`/`LOG_STACK` in production `.env` were never actually checked/reported — worth resolving so future debugging doesn't lose hours to this again |
+| GLS production API access | Low | Currently running on the sandbox host (`api-sandbox.gls-group.net`) for both auth and tracking — verified to return real live data for real parcels, so not urgent, but production access requires a separate GLS approval step if sandbox ever proves unreliable long-term |
 | `admin_users.role` ENUM missing documented roles | **High** | Column only allows `super_admin/admin/editor/order_manager`; `sales_manager`, `support`, `content_manager`, `viewer` are referenced throughout `AdminPermissions.php` and this doc but can't be stored under MySQL strict mode — creating an admin with any of those roles fails outright. Found via CI in Session 52; needs a migration widening the ENUM (or switching to a plain string column) plus a check for any admin accounts already silently affected |
 
 ---

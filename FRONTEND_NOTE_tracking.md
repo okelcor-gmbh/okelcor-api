@@ -188,15 +188,18 @@ now: `sea`, `air`, `dhl`, `road`, `truck`. **Update the admin order carrier-type
 
 ---
 
-## NEW — Shipment tracking: three layers, none of them blocking on each other
+## NEW — Shipment tracking: fully live for GLS, DHL, and ocean freight
 
-**Status: build the carrier + tracking number fields and the `tracking_url`
-button first — that alone gets tracking working with zero manual effort per
-shipment.** GLS's live API integration hit persistent "invalid credentials"
-issues that cost more time than it saved, so it's parked (harmless, dormant,
-can be revisited later). Rather than one all-or-nothing feature, tracking now
-has three independent layers that stack — staff use whichever applies, no
-process to learn upfront:
+**Status: all carrier auto-sync is now working — GLS, DHL, and ocean
+freight/Maersk.** Earlier notes here said GLS was parked after hitting
+persistent "invalid credentials" errors; root cause turned out to be a
+stray extra character copy-pasted into the API key in production `.env`,
+not a real integration problem. Verified live against a real order — real
+tracking events came back, matching what eBay itself shows for the same
+parcel. **Build the full experience now** — no need to treat GLS
+differently from DHL/ocean freight anymore. Tracking still has three
+layers that stack (in case any future carrier isn't configured), but all
+three now apply to every supported carrier including GLS:
 
 1. **Zero effort — `tracking_url` (see below).** The moment carrier +
    tracking number are set on an order (whether admin typed them in, or eBay
@@ -204,14 +207,14 @@ process to learn upfront:
    the carrier's own tracking page appears. No events, no API, nothing else
    required. This directly covers "what if we don't know the process yet" —
    there's no process to know; the link just works.
-2. **Automatic — DHL / ocean freight (Maersk etc.).** Already fully working
-   (real credentials in place) — events auto-populate hourly, no admin
-   action beyond setting carrier + tracking number.
-3. **Manual, optional — the shipment-events timeline.** For richer in-app
-   history (matching the eBay-style event log) beyond the link, or for GLS
-   parcels until its API access is sorted, admin can add events by hand. This
-   is a nice-to-have on top of layer 1, not a prerequisite for tracking to
-   show anything.
+2. **Automatic — GLS / DHL / ocean freight (Maersk etc.).** All fully
+   working now (real credentials in place for all three) — events
+   auto-populate hourly, no admin action beyond setting carrier + tracking
+   number.
+3. **Manual, optional — the shipment-events timeline.** For hand-adding
+   events on a carrier that isn't one of the three above, or annotating
+   with internal notes. A nice-to-have on top of layer 1/2, not a
+   prerequisite for tracking to show anything.
 
 ### Admin: two things to add to the order detail page
 
@@ -220,8 +223,8 @@ process to learn upfront:
    `PUT /admin/orders/{id}` / `PATCH /admin/orders/{id}/status`. If these
    aren't on the form yet, add plain text/select inputs — no new endpoint.
    **This is the one field admin actually needs to fill in — everything else
-   is optional on top.**
-2. **A "Shipment events" timeline editor (optional, layer 3 above)** — this
+   is automatic or optional on top.**
+2. **A "Shipment events" timeline editor (optional)** — this
    endpoint has existed since an earlier session but was never given a
    frontend note, so it's likely not built yet:
 
@@ -243,7 +246,7 @@ the `tracking_url` link, plus whatever events exist (manual or auto-synced).
 
 ---
 
-## Real carrier tracking (GLS / DHL / ocean freight incl. Maersk) — built, GLS on hold
+## Real carrier tracking (GLS / DHL / ocean freight incl. Maersk) — all live
 
 **Why:** Order manager wanted the same "Track shipment" view eBay shows for
 GLS parcels — a 3-stage stepper, a "Shipping overview" carrier/tracking-number
@@ -325,11 +328,12 @@ public URL pattern today) — hide the button in that case.
 2. **Admin order page:** `GET /admin/orders/{id}/shipment-tracking`
    (permission `tracking.view`) returns the same `{carrier, tracking_number,
    stage, tracking_url, events}` shape (no `available`/`mode`/`order_ref`
-   wrapper) and attempts a **live** carrier-API call + persists any new
-   events — but now **always returns a usable response** (including
-   `tracking_url`) even when the live call fails or the carrier (GLS) isn't
-   configured; it only errors (503) when the order has no carrier/tracking
-   number at all. Safe to wire up now, not just once GLS is fixed.
+   wrapper) and does a **live** carrier-API call + persists any new events —
+   now confirmed working for GLS, DHL, and ocean freight. Even if a call
+   ever fails (network blip, carrier outage), it still returns a usable
+   response (including `tracking_url`); it only errors (503) when the order
+   has no carrier/tracking number at all. Safe to wire up as the "refresh
+   tracking" button on the order page.
 3. **No FE change needed for eBay orders specifically** — carrier/tracking
    number now auto-backfill from eBay's own shipping fulfillment record
    during the existing hourly `ebay:sync-orders` job (whatever carrier/
@@ -341,14 +345,14 @@ public URL pattern today) — hide the button in that case.
 
 > **Can we show eBay's exact tracking timeline (the rich "arrived at parcel
 > center" style history)?** Checked against eBay's own Fulfillment API docs —
-> no. eBay's Sell API only exposes `shippingCarrierCode` + `trackingNumber` +
-> ship date (which we already pull, point 3 above); the detailed event
-> history shown in eBay's own buyer-facing widget is eBay's internal carrier
-> integration, not exposed to sellers via API. What's built here — pulling
-> carrier + tracking number from eBay, then relying on our own GLS/DHL/ocean
-> integration (or the `tracking_url` fallback) for the actual events — is the
-> closest legitimate equivalent. The visible gap today is specifically GLS
-> being unconfigured, not a missing eBay integration.
+> no direct pull, but it doesn't matter in practice anymore: eBay's Sell API
+> only exposes `shippingCarrierCode` + `trackingNumber` + ship date (which we
+> already pull, point 3 above), never the detailed event history itself
+> (that's eBay's internal carrier integration, not exposed to sellers via
+> API). But now that our own GLS integration is live and verified against a
+> real eBay-sourced order, the events we show **are** the same events eBay
+> is showing — we're both reading from GLS, we just do it ourselves instead
+> of relying on eBay's copy.
 
 ### Data freshness
 The customer endpoint reads the **persisted** timeline (kept fresh by an
