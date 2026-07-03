@@ -158,6 +158,38 @@
 
     @include('pdf.partials._bank')
 
+    {{-- Customer acceptance — signature confirms acceptance of this proposal.
+         Print, sign, and return via the customer portal — an alternative to
+         the digital "Accept" link below for customers who prefer a signed
+         paper trail. --}}
+    <p class="terms-p" style="margin-top:14px;margin-bottom:6px;">
+        <strong>Acceptance:</strong> by signing below, the customer confirms acceptance of this proposal.
+    </p>
+    <table class="sig-table">
+        <tr>
+            <td style="width:34%;padding-right:10px;">
+                <div class="sig-box">
+                    <div class="sig-lbl">Date</div>
+                    <div class="sig-line"></div>
+                </div>
+            </td>
+            <td style="width:33%;padding-right:10px;">
+                <div class="sig-box">
+                    <div class="sig-lbl">Signature</div>
+                    <div class="sig-line"></div>
+                    <div class="sig-caption">Authorised representative</div>
+                </div>
+            </td>
+            <td style="width:33%;">
+                <div class="sig-box">
+                    <div class="sig-lbl">Company Stamp</div>
+                    <div class="sig-line"></div>
+                    <div class="sig-caption">If applicable</div>
+                </div>
+            </td>
+        </tr>
+    </table>
+
     {{-- Validity disclaimer --}}
     <p class="terms-p" style="font-size:10px;color:#555;margin-top:14px;font-style:italic;">
         This proposal is valid until
@@ -167,7 +199,8 @@
     </p>
 
     <p class="terms-p" style="margin-top:12px;">
-        To accept this proposal, please reply to this email or use the acceptance link provided in your email.
+        To accept this proposal, use the acceptance link provided in your email, or reply with the printed,
+        signed copy above uploaded via your customer portal account.
         For questions, contact us at
         <strong>support@okelcor.com</strong>
         quoting proposal {{ $quote->proposal_number }}.

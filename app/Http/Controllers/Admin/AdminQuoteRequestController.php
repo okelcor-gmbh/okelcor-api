@@ -995,6 +995,11 @@ class AdminQuoteRequestController extends Controller
             'proposal_download_url'      => $r->getRawOriginal('proposal_pdf_path')
                                             ? url('/api/v1/admin/quote-requests/' . $r->id . '/proposal/download')
                                             : null,
+            'proposal_signed_copy_uploaded_at' => $r->proposal_signed_copy_uploaded_at?->toIso8601String(),
+            'proposal_signed_copy_filename'    => $r->proposal_signed_copy_original_filename,
+            'proposal_signed_copy_download_url' => $r->getRawOriginal('proposal_signed_copy_path')
+                                            ? url('/api/v1/admin/quote-requests/' . $r->id . '/proposal/signed-copy/download')
+                                            : null,
         ];
     }
 

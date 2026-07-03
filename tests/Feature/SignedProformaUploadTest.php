@@ -199,4 +199,59 @@ class SignedProformaUploadTest extends TestCase
 
         $this->assertContains('proforma_signed', $types);
     }
+
+    // ── Payment-gated document types (balance against bill of lading) ───────
+
+    public function test_packing_list_and_delivery_note_hidden_until_fully_paid(): void
+    {
+        $c     = $this->customer();
+        $order = $this->order($c, ['payment_status' => 'pending']); // not fully paid
+
+        TradeDocument::create([
+            'order_id' => $order->id, 'order_ref' => $order->ref,
+            'type' => 'packing_list', 'number' => 'PL-2026-0001', 'status' => 'issued', 'issued_at' => now(),
+        ]);
+        TradeDocument::create([
+            'order_id' => $order->id, 'order_ref' => $order->ref,
+            'type' => 'delivery_note', 'number' => 'DN-2026-0001', 'status' => 'issued', 'issued_at' => now(),
+        ]);
+        TradeDocument::create([
+            'order_id' => $order->id, 'order_ref' => $order->ref,
+            'type' => 'shipment_document', 'type_label' => 'Bill of Lading', 'status' => 'issued', 'issued_at' => now(),
+        ]);
+
+        $req = Request::create('/', 'GET');
+        $req->setUserResolver(fn () => $c);
+
+        $payload = app(TradeDocumentController::class)->index($req, $order->ref)->getData(true);
+        $types   = array_column($payload['data'], 'type');
+
+        $this->assertNotContains('packing_list', $types);
+        $this->assertNotContains('delivery_note', $types);
+        $this->assertNotContains('shipment_document', $types);
+    }
+
+    public function test_packing_list_and_delivery_note_visible_once_fully_paid(): void
+    {
+        $c     = $this->customer();
+        $order = $this->order($c, ['payment_status' => 'paid']);
+
+        TradeDocument::create([
+            'order_id' => $order->id, 'order_ref' => $order->ref,
+            'type' => 'packing_list', 'number' => 'PL-2026-0002', 'status' => 'issued', 'issued_at' => now(),
+        ]);
+        TradeDocument::create([
+            'order_id' => $order->id, 'order_ref' => $order->ref,
+            'type' => 'delivery_note', 'number' => 'DN-2026-0002', 'status' => 'issued', 'issued_at' => now(),
+        ]);
+
+        $req = Request::create('/', 'GET');
+        $req->setUserResolver(fn () => $c);
+
+        $payload = app(TradeDocumentController::class)->index($req, $order->ref)->getData(true);
+        $types   = array_column($payload['data'], 'type');
+
+        $this->assertContains('packing_list', $types);
+        $this->assertContains('delivery_note', $types);
+    }
 }

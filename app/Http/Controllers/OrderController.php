@@ -156,7 +156,7 @@ class OrderController extends Controller
             'trade_documents' => $o->relationLoaded('tradeDocuments')
                 ? $o->tradeDocuments
                     ->filter(fn ($d) => in_array($d->status, ['issued', 'sent'], true)
-                        && in_array($d->type, ['order_confirmation', 'proforma', 'commercial_invoice', 'packing_list', 'delivery_note', 'shipment_document'], true)
+                        && in_array($d->type, ['order_confirmation', 'proforma', 'proforma_signed', 'commercial_invoice', 'packing_list', 'delivery_note', 'shipment_document'], true)
                         // Proforma is visible once the customer accepted the order
                         // confirmation OR (for CRM-7 orders) already accepted the
                         // proposal that led to this order — same relaxation as the
@@ -164,7 +164,9 @@ class OrderController extends Controller
                         && ! ($d->type === 'proforma'
                             && ($o->customer_acceptance_status ?? 'pending') !== 'accepted'
                             && $o->quoteRequest?->proposal_accepted_at === null)
-                        && ! ($d->type === 'commercial_invoice' && ! $o->isFullyPaid()))
+                        // Balance-due documents (per "balance against bill of
+                        // lading" terms) — same gate as TradeDocumentController.
+                        && ! (in_array($d->type, ['commercial_invoice', 'packing_list', 'delivery_note', 'shipment_document'], true) && ! $o->isFullyPaid()))
                     ->map(fn ($d) => [
                         'id'                => $d->id,
                         'type'              => $d->type,

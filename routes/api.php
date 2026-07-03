@@ -129,6 +129,7 @@ Route::prefix('v1')->group(function () {
         // CRM-7: Proposal acceptance/rejection by quote ref (authenticated)
         Route::post('quotes/{ref}/accept-proposal', [CustomerQuoteAcceptanceController::class, 'acceptProposal']);
         Route::post('quotes/{ref}/reject-proposal', [CustomerQuoteAcceptanceController::class, 'rejectProposal']);
+        Route::post('quotes/{ref}/proposal/signed-copy', [CustomerQuoteAcceptanceController::class, 'uploadSignedProposal']);
         Route::post('orders/{ref}/reject-order-confirmation', [CustomerQuoteAcceptanceController::class, 'rejectOrderConfirmation']);
 
         // CRM-8: Customer-initiated access requests (portal)
@@ -585,6 +586,7 @@ Route::prefix('v1')->group(function () {
             Route::post('quote-requests/{id}/proposal/generate-link', [AdminProposalController::class, 'generateLink']);
             Route::post('quote-requests/{id}/proposal/void',          [AdminProposalController::class, 'void']);
             Route::get('quote-requests/{id}/proposal/download',       [AdminProposalController::class, 'download']);
+            Route::get('quote-requests/{id}/proposal/signed-copy/download', [AdminProposalController::class, 'downloadSignedCopy']);
         });
 
         // -----------------------------------------------------------------

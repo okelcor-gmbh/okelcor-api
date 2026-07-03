@@ -522,24 +522,27 @@ See `FRONTEND_NOTE_tracking.md` (new sections) for the frontend-facing contract.
 
 ---
 
-## Proforma Invoice — signature + return upload (Session 53)
+## Signed document return (Proposal + Proforma) + payment-gated documents (Session 53)
 
-Order manager's ask: without a signed copy on file, a customer could dispute
-having agreed to the proforma's price/terms — nothing on the document or in
-the system captured their acceptance. Legal/business paper-trail
-requirement.
+Order manager's ask, across two calls: (1) without a signed copy on file, a
+customer could dispute having agreed to a proposal or proforma's price/terms
+— nothing on either document (or in the system) captured their acceptance;
+this needs to work at **both** stages, not just the Proforma. (2) documents
+that only make sense once the balance is paid (per Okelcor's stated terms —
+"balance against bill of lading") shouldn't be visible before that point,
+same rule as the Commercial Invoice already had.
 
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Signature block on Proforma Invoice PDF | ✅ | Date / Signature / Company Stamp boxes added to `resources/views/pdf/proforma-invoice.blade.php`, positioned after the bank/payment-reference section and before the "not a final tax invoice" disclaimer. Reuses the existing `.sig-table`/`.sig-box` styles already used on commercial-invoice/delivery-note/packing-list — no new CSS. |
-| `POST /auth/orders/{ref}/proforma/signed-copy` (new) | ✅ | Customer uploads a scan/photo of the printed-and-signed proforma (pdf/jpg/jpeg/png, max 20MB). Requires an issued `proforma` document to exist first (422 `no_proforma` otherwise); same `approved_for_documents` (CRM-4) gate as the rest of trade-documents. Re-uploading supersedes the previous signed copy — always at most one current one. Reuses the existing `TradeDocument` model/storage pattern (same as admin's shipment-document upload) — no schema change, `type`/`status` were already plain strings, not ENUMs. |
+| `POST /auth/orders/{ref}/proforma/signed-copy` (new) | ✅ | Customer uploads a scan/photo of the printed-and-signed proforma (pdf/jpg/jpeg/png, max 20MB). Requires an issued `proforma` document to exist first (422 `no_proforma` otherwise); same `approved_for_documents` (CRM-4) gate as the rest of trade-documents. Re-uploading supersedes the previous signed copy — always at most one current one. Does **not** change order status — evidentiary only. Reuses the existing `TradeDocument` model/storage pattern (same as admin's shipment-document upload) — no schema change, `type`/`status` were already plain strings, not ENUMs. |
 | New `TradeDocument` type: `proforma_signed` | ✅ | Shows up in the existing customer `trade_documents` list and downloads via the existing generic download endpoint — no new admin code needed; `AdminTradeDocumentController::indexForOrder`/`download` are already type-agnostic. |
-| Admin notification on signed return | ✅ | `orders.update` permission fan-out, `proforma_signed_returned` type. Customer also gets an in-app confirmation twin (`CustomerNotifier`). `OrderLog` entry recorded. |
-| Backend feature tests (6, MySQL, written not yet executed) | 🔧 | `SignedProformaUploadTest` — upload success, blocked without an issued proforma, blocked without document approval, ownership check, supersede behavior, appears in the customer document list. Not run against real MySQL in this session — same local environment limitation as prior sessions; verify before deploying. |
-
-**Scoped to the Proforma Invoice specifically**, per what was discussed — the
-Order Confirmation could get the same signature-block treatment as a quick
-follow-up if wanted, not built yet.
+| Admin notification on signed proforma return | ✅ | `orders.update` permission fan-out, `proforma_signed_returned` type. Customer also gets an in-app confirmation twin (`CustomerNotifier`). `OrderLog` entry recorded. |
+| Signature block on Proposal PDF | ✅ | Same Date/Signature/Company Stamp treatment added to `resources/views/pdf/proposal.blade.php`. Acceptance paragraph updated to mention both the digital link and the print-sign-upload path. |
+| `POST /auth/quotes/{ref}/proposal/signed-copy` (new) | ✅ | Alternative to the digital `accept-proposal` click — **uploading a signed copy IS an acceptance**, same effect as `acceptProposal()` (`proposal_status` → `accepted`, timeline entry, admin notification). Same guards reused (active proposal required, not expired, not already accepted). New nullable columns on `quote_requests` (`proposal_signed_copy_path`/`_original_filename`/`_mime_type`/`_uploaded_at`) via a guarded/additive migration — proposals predate an `Order`/`TradeDocument`, so this couldn't reuse the `TradeDocument` table the way the Proforma flow did. |
+| Admin visibility for signed proposal | ✅ | `AdminQuoteRequestController` quote-detail payload gains `proposal_signed_copy_uploaded_at`/`_filename`/`_download_url`; new `GET /admin/quote-requests/{id}/proposal/signed-copy/download` (mirrors the existing proposal-PDF download pattern). |
+| **Fix** — payment-gated documents expanded beyond Commercial Invoice | ✅ | `TradeDocumentController` (customer list + download) and `OrderController`'s duplicated `trade_documents` filter both now gate `packing_list`, `delivery_note`, and `shipment_document` behind `Order::isFullyPaid()` — previously only `commercial_invoice` was gated, so a customer could see/download Bills of Lading etc. before paying the balance, contradicting the "balance against bill of lading" terms already stated on the Proposal/Proforma PDFs. |
+| Backend feature tests (12, MySQL, written not yet executed) | 🔧 | `SignedProformaUploadTest` (8 tests, incl. the new payment-gate coverage for packing_list/delivery_note) + `SignedProposalUploadTest` (4 tests). Not run against real MySQL in this session — same local environment limitation as prior sessions; verify before deploying. |
 
 See `FRONTEND_NOTE_proforma-signature.md` for the frontend-facing contract.
 

@@ -12,6 +12,8 @@ use App\Services\CustomerTimelineService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 class CustomerQuoteAcceptanceController extends Controller
 {
@@ -596,6 +598,98 @@ class CustomerQuoteAcceptanceController extends Controller
             'data'    => ['proposal_status' => 'accepted'],
             'message' => 'Proposal accepted. Okelcor will proceed to create your order.',
         ]);
+    }
+
+    /**
+     * POST /api/v1/auth/quotes/{ref}/proposal/signed-copy
+     *
+     * Alternative to the digital "Accept" click: customer prints the
+     * proposal, signs it (and stamps it, if applicable), and uploads a
+     * scan/photo back. This IS an acceptance — same effect as acceptProposal()
+     * (proposal_status becomes 'accepted'), for customers who prefer/need a
+     * wet-signature paper trail over a click-to-accept flow. Same guards as
+     * acceptProposal() (active proposal required, not expired, not already
+     * accepted).
+     */
+    public function uploadSignedProposal(Request $request, string $ref): JsonResponse
+    {
+        $customer = $request->user();
+
+        $quote = QuoteRequest::where('ref_number', $ref)->first();
+
+        if (! $quote || ! $this->customerOwnsQuote($customer, $quote)) {
+            return response()->json(['message' => 'Quote not found.'], 404);
+        }
+
+        if (! in_array($quote->proposal_status, ['sent', 'ready'], true)) {
+            return response()->json([
+                'message' => 'No active proposal is available for acceptance.',
+                'code'    => 'no_active_proposal',
+                'proposal_status' => $quote->proposal_status ?? 'none',
+            ], 422);
+        }
+
+        if ($quote->proposal_expires_at && $quote->proposal_expires_at->isPast()) {
+            $quote->update(['proposal_status' => 'expired', 'proposal_acceptance_token' => null]);
+            return response()->json([
+                'message' => 'This proposal has expired. Please contact Okelcor for an updated proposal.',
+                'code'    => 'proposal_expired',
+            ], 410);
+        }
+
+        $request->validate([
+            'file' => ['required', 'file', 'max:20480', 'mimes:pdf,jpg,jpeg,png'],
+        ]);
+
+        $uploaded     = $request->file('file');
+        $originalName = $uploaded->getClientOriginalName();
+        $safeName     = Str::slug(pathinfo($originalName, PATHINFO_FILENAME), '_');
+        $ext          = strtolower($uploaded->getClientOriginalExtension());
+        $storedName   = now()->format('YmdHis') . '_' . $safeName . '.' . $ext;
+        $storagePath  = 'proposals/signed/' . $quote->ref_number . '/' . $storedName;
+
+        try {
+            Storage::disk('local')->put($storagePath, file_get_contents($uploaded->getRealPath()));
+        } catch (\Throwable $e) {
+            Log::error('Signed proposal upload failed (storage write)', [
+                'quote_ref' => $quote->ref_number,
+                'error'     => $e->getMessage(),
+            ]);
+            return response()->json(['message' => 'File could not be saved. Please try again.'], 500);
+        }
+
+        $quote->update([
+            'proposal_status'                        => 'accepted',
+            'proposal_accepted_at'                    => now(),
+            'proposal_accepted_ip'                     => $request->ip(),
+            'proposal_accepted_user_agent'              => $request->userAgent(),
+            'proposal_acceptance_note'                  => 'Accepted via signed document upload.',
+            'proposal_acceptance_token'                 => null,
+            'proposal_signed_copy_path'                 => $storagePath,
+            'proposal_signed_copy_original_filename'    => $originalName,
+            'proposal_signed_copy_mime_type'            => $uploaded->getClientMimeType(),
+            'proposal_signed_copy_uploaded_at'          => now(),
+        ]);
+
+        Log::info('[proposal_accepted] Customer accepted proposal via signed document upload', [
+            'event'           => 'proposal_accepted',
+            'quote_ref'       => $quote->ref_number,
+            'proposal_number' => $quote->proposal_number,
+            'customer_id'     => $customer->id,
+        ]);
+
+        CustomerTimelineService::record(
+            $customer->id, 'proposal_accepted', 'Proposal accepted (signed copy)',
+            "Customer accepted proposal {$quote->proposal_number} (quote {$quote->ref_number}) via signed document upload.",
+            ['quote_ref' => $quote->ref_number, 'proposal_number' => $quote->proposal_number]
+        );
+
+        $this->notifyProposalAccepted($quote);
+
+        return response()->json([
+            'data'    => ['proposal_status' => 'accepted'],
+            'message' => 'Signed proposal received. Okelcor will proceed to create your order.',
+        ], 201);
     }
 
     /**

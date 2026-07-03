@@ -17,6 +17,15 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 class TradeDocumentController extends Controller
 {
     /**
+     * Documents that only make sense once the balance is paid — per
+     * Okelcor's stated terms ("balance against bill of lading"), packing
+     * lists, delivery notes, and shipment documents (BoL/CMR etc.) all sit
+     * at/after the balance-due point in the flow, same as the commercial
+     * invoice.
+     */
+    private const PAYMENT_GATED_TYPES = ['commercial_invoice', 'packing_list', 'delivery_note', 'shipment_document'];
+
+    /**
      * GET /api/v1/auth/orders/{ref}/trade-documents
      *
      * List valid trade documents for a customer's order.
@@ -46,7 +55,7 @@ class TradeDocumentController extends Controller
             ->whereIn('type', ['order_confirmation', 'proforma', 'proforma_signed', 'commercial_invoice', 'packing_list', 'delivery_note', 'shipment_document'])
             ->orderByDesc('issued_at')
             ->get()
-            ->reject(fn ($d) => $d->type === 'commercial_invoice' && ! $order->isFullyPaid())
+            ->reject(fn ($d) => in_array($d->type, self::PAYMENT_GATED_TYPES, true) && ! $order->isFullyPaid())
             ->values();
 
         return response()->json([
@@ -100,7 +109,7 @@ class TradeDocumentController extends Controller
             return response()->json(['message' => 'This document is not available for download.'], 404);
         }
 
-        if ($document->type === 'commercial_invoice' && ! $order->isFullyPaid()) {
+        if (in_array($document->type, self::PAYMENT_GATED_TYPES, true) && ! $order->isFullyPaid()) {
             return response()->json(['message' => 'This document is not available for download.'], 404);
         }
 

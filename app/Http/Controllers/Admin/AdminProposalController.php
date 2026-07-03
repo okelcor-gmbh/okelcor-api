@@ -457,6 +457,40 @@ class AdminProposalController extends Controller
         }, $filename, ['Content-Type' => 'application/pdf']);
     }
 
+    /**
+     * GET /admin/quote-requests/{id}/proposal/signed-copy/download
+     *
+     * Download the customer-uploaded signed copy of the proposal (their
+     * print-sign-return acceptance) from private disk.
+     */
+    public function downloadSignedCopy(int $id)
+    {
+        $quote = QuoteRequest::findOrFail($id);
+
+        $path = $quote->getRawOriginal('proposal_signed_copy_path');
+
+        if (! $path) {
+            return response()->json([
+                'message' => 'No signed copy has been uploaded for this proposal yet.',
+                'code'    => 'no_signed_copy',
+            ], 404);
+        }
+
+        if (! Storage::disk('local')->exists($path)) {
+            return response()->json([
+                'message' => 'Signed proposal file was not found on disk.',
+                'code'    => 'signed_copy_missing',
+            ], 404);
+        }
+
+        $filename = $quote->proposal_signed_copy_original_filename
+            ?? (($quote->proposal_number ?? 'proposal') . '-signed');
+
+        return response()->streamDownload(function () use ($path) {
+            echo Storage::disk('local')->get($path);
+        }, $filename);
+    }
+
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------

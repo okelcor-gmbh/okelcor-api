@@ -92,6 +92,10 @@ class QuoteRequest extends Model
         'proposal_accepted_ip',
         'proposal_accepted_user_agent',
         'proposal_acceptance_note',
+        'proposal_signed_copy_path',
+        'proposal_signed_copy_original_filename',
+        'proposal_signed_copy_mime_type',
+        'proposal_signed_copy_uploaded_at',
     ];
 
     protected $casts = [
@@ -112,6 +116,7 @@ class QuoteRequest extends Model
         'proposal_rejected_at'     => 'datetime',
         'proposal_expires_at'      => 'datetime',
         'proposal_voided_at'       => 'datetime',
+        'proposal_signed_copy_uploaded_at' => 'datetime',
     ];
 
     protected $hidden = [
