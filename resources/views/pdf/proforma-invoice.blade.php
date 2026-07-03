@@ -90,6 +90,37 @@
     {{-- Bank (always show on proforma — it IS the payment instruction) --}}
     @include('pdf.partials._bank')
 
+    {{-- Customer acceptance — signature confirms agreement to price, products, and terms above.
+         Print, sign, and return via the customer portal. --}}
+    <p class="terms-p" style="margin-top:14px;margin-bottom:6px;">
+        <strong>Acceptance:</strong> by signing below, the customer confirms acceptance of the
+        products, pricing, and terms stated in this proforma invoice.
+    </p>
+    <table class="sig-table">
+        <tr>
+            <td style="width:34%;padding-right:10px;">
+                <div class="sig-box">
+                    <div class="sig-lbl">Date</div>
+                    <div class="sig-line"></div>
+                </div>
+            </td>
+            <td style="width:33%;padding-right:10px;">
+                <div class="sig-box">
+                    <div class="sig-lbl">Signature</div>
+                    <div class="sig-line"></div>
+                    <div class="sig-caption">Authorised representative</div>
+                </div>
+            </td>
+            <td style="width:33%;">
+                <div class="sig-box">
+                    <div class="sig-lbl">Company Stamp</div>
+                    <div class="sig-line"></div>
+                    <div class="sig-caption">If applicable</div>
+                </div>
+            </td>
+        </tr>
+    </table>
+
     <p class="terms-p" style="font-size:10px;color:#555;margin-top:10px;font-style:italic;">
         This document is a proforma invoice only and does not constitute a final tax invoice.
         A final invoice will be issued upon confirmation of payment.

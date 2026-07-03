@@ -156,6 +156,7 @@ Route::prefix('v1')->group(function () {
         Route::get('orders/{ref}/declaration/download', [EuDeclarationController::class, 'download']);
         Route::get('orders/{ref}/trade-documents', [TradeDocumentController::class, 'index']);
         Route::get('trade-documents/{id}/download', [TradeDocumentController::class, 'download']);
+        Route::post('orders/{ref}/proforma/signed-copy', [TradeDocumentController::class, 'uploadSignedProforma']);
 
         // Carrier shipment tracking — scoped to the customer's own order
         Route::get('orders/{ref}/tracking', [CustomerTrackingController::class, 'show'])
