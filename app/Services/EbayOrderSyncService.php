@@ -168,8 +168,13 @@ class EbayOrderSyncService
             ]);
 
             foreach ($lineItems as $item) {
-                $unitPrice = (float) ($item['lineItemCost']['value'] ?? 0);
+                // eBay's lineItemCost is the TOTAL for the line (unit price x
+                // quantity), not a per-unit price — confirmed against eBay's
+                // own Fulfillment API docs. Divide it back down to per-unit;
+                // line_total is the line cost as eBay already reports it.
                 $quantity  = (int) ($item['quantity'] ?? 1);
+                $lineTotal = (float) ($item['lineItemCost']['value'] ?? 0);
+                $unitPrice = $quantity > 0 ? round($lineTotal / $quantity, 2) : $lineTotal;
 
                 OrderItem::create([
                     'order_id'   => $order->id,
@@ -180,7 +185,7 @@ class EbayOrderSyncService
                     'size'       => '',
                     'unit_price' => $unitPrice,
                     'quantity'   => $quantity,
-                    'line_total' => round($unitPrice * $quantity, 2),
+                    'line_total' => round($lineTotal, 2),
                 ]);
             }
 

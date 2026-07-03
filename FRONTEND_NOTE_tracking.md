@@ -339,6 +339,17 @@ public URL pattern today) — hide the button in that case.
    separate "eBay tracking" UI needed, and no manual copy-paste from eBay
    into the admin panel required either.
 
+> **Can we show eBay's exact tracking timeline (the rich "arrived at parcel
+> center" style history)?** Checked against eBay's own Fulfillment API docs —
+> no. eBay's Sell API only exposes `shippingCarrierCode` + `trackingNumber` +
+> ship date (which we already pull, point 3 above); the detailed event
+> history shown in eBay's own buyer-facing widget is eBay's internal carrier
+> integration, not exposed to sellers via API. What's built here — pulling
+> carrier + tracking number from eBay, then relying on our own GLS/DHL/ocean
+> integration (or the `tracking_url` fallback) for the actual events — is the
+> closest legitimate equivalent. The visible gap today is specifically GLS
+> being unconfigured, not a missing eBay integration.
+
 ### Data freshness
 The customer endpoint reads the **persisted** timeline (kept fresh by an
 hourly backend job), not a live carrier call — so it stays fast even if a
