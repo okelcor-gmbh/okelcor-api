@@ -105,13 +105,13 @@ class CarrierTrackingTest extends TestCase
             'services.gls.app_id'            => 'test-app',
             'services.gls.api_key'           => 'test-key',
             'services.gls.api_secret'        => 'test-secret',
-            'services.gls.token_endpoint'    => 'https://api.gls-group.net/oauth2/v2/token',
-            'services.gls.tracking_endpoint' => 'https://api.gls-group.net/shipit-farm/v1/backend/rs/tracking/parceldetails',
+            'services.gls.token_endpoint'    => 'https://api-sandbox.gls-group.net/oauth2/v2/token',
+            'services.gls.tracking_endpoint' => 'https://api-sandbox.gls-group.net/track-and-trace-v1/tracking/simple/trackids',
         ]);
 
         Http::fake([
-            'api.gls-group.net/oauth2/*'                   => Http::response(['access_token' => 'fake-token']),
-            'api.gls-group.net/shipit-farm/*/tracking/*'   => Http::response($trackingResponse),
+            'api-sandbox.gls-group.net/oauth2/*'                        => Http::response(['access_token' => 'fake-token']),
+            'api-sandbox.gls-group.net/track-and-trace-v1/tracking/*'   => Http::response($trackingResponse),
         ]);
     }
 
@@ -119,15 +119,13 @@ class CarrierTrackingTest extends TestCase
 
     public function test_gls_carrier_routes_to_gls_service_and_persists_events(): void
     {
-        $this->configureGls([
-            'UnitDetail' => [
-                'Status'  => 'Delivered',
-                'History' => [
-                    ['Timestamp' => '2026-07-01T10:40:00Z', 'Description' => 'The package has arrived at the parcel center.', 'Location' => 'Bornheim, 53332'],
-                    ['Timestamp' => '2026-06-29T19:18:00Z', 'Description' => 'The sender has made the package available for collection by GLS.', 'Location' => 'Bornheim, 53332'],
-                ],
+        $this->configureGls([[
+            'status' => 'IN_TRANSIT',
+            'events' => [
+                ['code' => 'DELIVD.PARCELSHOP', 'city' => 'Bornheim', 'postalCode' => '53332', 'country' => 'DE', 'description' => 'The package has arrived at the parcel center.', 'eventDateTime' => '2026-07-01T10:40:00+0200'],
+                ['code' => 'IB', 'city' => 'Bornheim', 'postalCode' => '53332', 'country' => 'DE', 'description' => 'The sender has made the package available for collection by GLS.', 'eventDateTime' => '2026-06-29T19:18:00+0200'],
             ],
-        ]);
+        ]]);
 
         $order = $this->order(['carrier' => 'GLS Germany', 'tracking_number' => '50044195855']);
 
@@ -142,14 +140,12 @@ class CarrierTrackingTest extends TestCase
 
     public function test_repeat_sync_does_not_duplicate_events(): void
     {
-        $this->configureGls([
-            'UnitDetail' => [
-                'Status'  => 'Delivered',
-                'History' => [
-                    ['Timestamp' => '2026-07-01T10:40:00Z', 'Description' => 'Delivered.', 'Location' => 'Bornheim, 53332'],
-                ],
+        $this->configureGls([[
+            'status' => 'DELIVERED',
+            'events' => [
+                ['code' => 'DELIVD', 'city' => 'Bornheim', 'postalCode' => '53332', 'country' => 'DE', 'description' => 'Delivered.', 'eventDateTime' => '2026-07-01T10:40:00+0200'],
             ],
-        ]);
+        ]]);
 
         $order = $this->order(['carrier' => 'GLS', 'tracking_number' => '50044195855']);
 
@@ -269,7 +265,7 @@ class CarrierTrackingTest extends TestCase
 
     public function test_admin_with_permission_can_fetch_shipment_tracking(): void
     {
-        $this->configureGls(['UnitDetail' => ['Status' => 'Delivered', 'History' => []]]);
+        $this->configureGls([['status' => 'DELIVERED', 'events' => []]]);
 
         $order = $this->order(['carrier' => 'GLS', 'tracking_number' => '50044195855']);
 

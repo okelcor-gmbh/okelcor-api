@@ -56,26 +56,27 @@ return [
         'api_key' => env('DHL_API_KEY'),
     ],
 
-    // GLS parcel Track & Trace API — ShipIT-Farm API v1 + Authentication API v2
-    // (GLS Group Developer Portal). App ID + API Key + API Secret are issued
-    // together per registered app — no separate "customer ID". Base URL,
-    // tracking endpoint, and the token-exchange shape are all confirmed
-    // directly from the account's own portal ("Try this API" panels) — see
-    // GlsTrackingService for the exact request/response shapes and remaining
-    // open items. Degrades cleanly (['error' => ...]) until fully set.
+    // GLS parcel Track & Trace API v1 + Authentication API v2 (GLS Group
+    // Developer Portal). App ID + API Key + API Secret are issued together
+    // per registered app — no separate "customer ID". Base URL, tracking
+    // endpoint, response schema, and the token-exchange shape are all
+    // confirmed directly from the account's own portal ("Try this API"
+    // panels + published EventDTO schema) — see GlsTrackingService for the
+    // full detail. Degrades cleanly (['error' => ...]) until fully set.
     //
-    // NOTE: the token-exchange screenshot showed the SANDBOX host
-    // (api-sandbox.gls-group.net) while the tracking endpoint screenshot
-    // showed PRODUCTION (api.gls-group.net) — the default below assumes both
-    // should be on the same (production) host; override GLS_API_TOKEN_ENDPOINT
-    // explicitly if sandbox testing is actually intended.
+    // Defaults to the SANDBOX host — every confirmed portal panel for this
+    // account showed api-sandbox.gls-group.net; production access needs a
+    // separate GLS approval step not yet completed. Sandbox may return
+    // test data rather than real parcel status — verify before trusting
+    // this for real customers. Swap both envs to the api.gls-group.net host
+    // once production access is granted.
     'gls' => [
         'app_id'            => env('GLS_APP_ID'),
         'api_key'           => env('GLS_API_KEY'),
         'api_secret'        => env('GLS_API_SECRET'),
-        'base_url'          => rtrim((string) env('GLS_API_BASE_URL', 'https://api.gls-group.net/shipit-farm/v1/backend'), '/'),
-        'token_endpoint'    => env('GLS_API_TOKEN_ENDPOINT', 'https://api.gls-group.net/oauth2/v2/token'),
-        'tracking_endpoint' => env('GLS_API_TRACKING_ENDPOINT', rtrim((string) env('GLS_API_BASE_URL', 'https://api.gls-group.net/shipit-farm/v1/backend'), '/') . '/rs/tracking/parceldetails'),
+        'base_url'          => rtrim((string) env('GLS_API_BASE_URL', 'https://api-sandbox.gls-group.net/track-and-trace-v1'), '/'),
+        'token_endpoint'    => env('GLS_API_TOKEN_ENDPOINT', 'https://api-sandbox.gls-group.net/oauth2/v2/token'),
+        'tracking_endpoint' => env('GLS_API_TRACKING_ENDPOINT', rtrim((string) env('GLS_API_BASE_URL', 'https://api-sandbox.gls-group.net/track-and-trace-v1'), '/') . '/tracking/simple/trackids'),
     ],
 
     // Traccar — open-source GPS/fleet tracking server (REST client).

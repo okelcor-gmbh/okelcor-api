@@ -7,44 +7,54 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 /**
- * GLS parcel Track & Trace client — ShipIT-Farm API v1 (GLS Group Developer
- * Portal, api.gls-group.net).
+ * GLS parcel Track & Trace client — Track And Trace API v1 (GLS Group
+ * Developer Portal, api-sandbox.gls-group.net).
  *
- * Both confirmed directly from the account's own portal ("Try this API" panels):
+ * Both confirmed directly from the account's own portal ("Try this API"
+ * panels + published schema docs — not guessed):
  *
- *   Token exchange (Authentication API v2), standard OAuth2 client-credentials:
- *     POST {token_endpoint}                      e.g. https://api-sandbox.gls-group.net/oauth2/v2/token
+ *   Token exchange (Authentication API v2), OAuth2 client-credentials:
+ *     POST {token_endpoint}   https://api-sandbox.gls-group.net/oauth2/v2/token
  *     Authorization: Basic base64(api_key:api_secret)
  *     Content-Type: application/x-www-form-urlencoded
  *     Body: grant_type=client_credentials
  *
  *   Tracking:
- *     POST {tracking_endpoint}                   https://api.gls-group.net/shipit-farm/v1/backend/rs/tracking/parceldetails
+ *     GET {tracking_endpoint}/{trackingNumber}?showEvents=true
+ *       e.g. https://api-sandbox.gls-group.net/track-and-trace-v1/tracking/simple/trackids/{unitno}
  *     Authorization: Bearer {access_token}
  *     Accept: application/json
- *     Content-Type: application/glsVersion1+json  (GLS's own custom media type)
+ *
+ *   EventDTO (confirmed schema, per-event fields):
+ *     code           — event type code, e.g. "DELIVD.PARCELSHOP"
+ *     city           — e.g. "Berlin"
+ *     postalCode     — e.g. "10437"
+ *     country        — ISO 3166-1 alpha-2, e.g. "DE"
+ *     description    — human-readable, in the request language (Accept-Language)
+ *     eventDateTime  — ISO 8601, e.g. "2024-10-07T10:46:14+0200"
  *
  * App ID + API Key + API Secret are issued together per registered app — no
- * separate "customer ID". The Basic Auth credential pair is api_key:api_secret
- * (standard OAuth2 client_id:client_secret convention) — App ID isn't used at
- * runtime, only for the portal/sales-approval side per GLS's own docs.
+ * separate "customer ID"; App ID isn't used at runtime, only for the portal/
+ * sales-approval side per GLS's own docs. The Basic Auth pair is
+ * api_key:api_secret (standard OAuth2 client_id:client_secret convention).
  *
- * ⚠️ STILL UNVERIFIED (the portal's tracking "Try it" panel returned "Unknown
- * Error" with no Authorization header set — consistent with this theory, but
- * not yet proven; run the token exchange for a real access_token, then retry
- * `parceldetails` with `Authorization: Bearer <token>` and share the result):
- *   - Exact token response field name (`access_token` assumed — standard OAuth2).
- *   - Exact request body field names for `parceldetails` — GLS's public docs
- *     for the equivalent legacy endpoint show DateFrom/DateTo (mandatory) +
- *     ParcelNumber (identifier); the portal's own curl example only showed
- *     `{"ParcelNumber": "..."}` with no dates, so DateFrom/DateTo are omitted
- *     below to match what's actually confirmed working in the portal.
- *   - Whether the response includes a status/event-history field at all, or
- *     only static shipment attributes (weight/product/addresses) — GLS's
- *     public docs for the equivalent endpoint suggest the latter, which
- *     would mean this endpoint can't power a status timeline. Degrades
- *     safely to an empty events list either way, but flag this back once
- *     confirmed — a different GLS product might be needed for full history.
+ * There's a sibling endpoint, `/tracking/simple/references/{reference}`,
+ * keyed by shipment reference instead of GLS's own tracking number — not
+ * used here since we always have the GLS tracking number once assigned.
+ *
+ * ⚠️ SANDBOX vs PRODUCTION: every confirmed portal panel for this account
+ * defaults to the `api-sandbox.gls-group.net` host. GLS gates production API
+ * access behind a separate approval step ("Prod requirements" noted on every
+ * endpoint page) that hasn't been completed. Sandbox may return test/dummy
+ * data rather than real parcel status — verify with a real tracking number
+ * whether the response looks live before trusting this for real customers.
+ * Swap `GLS_API_BASE_URL`/`GLS_API_TOKEN_ENDPOINT` to the `api.gls-group.net`
+ * host once production access is granted — no other code change needed.
+ *
+ * ⚠️ Still not confirmed live end-to-end — the outer response envelope
+ * (which field holds the parcel/status list before `events`) is inferred
+ * defensively below; the EventDTO fields inside each event ARE from GLS's
+ * published schema and authoritative.
  */
 class GlsTrackingService
 {
@@ -69,13 +79,12 @@ class GlsTrackingService
         }
 
         try {
+            $url = rtrim(config('services.gls.tracking_endpoint'), '/') . '/' . rawurlencode($trackingNumber);
+
             $response = Http::withToken($token)
-                ->withHeaders([
-                    'Accept'       => 'application/json',
-                    'Content-Type' => 'application/glsVersion1+json',
-                ])
-                ->post(config('services.gls.tracking_endpoint'), [
-                    'ParcelNumber' => $trackingNumber,
+                ->acceptJson()
+                ->get($url, [
+                    'showEvents' => 'true',
                 ]);
 
             Log::info('GLS tracking response', [
@@ -88,17 +97,26 @@ class GlsTrackingService
             }
 
             $data = $response->json();
-            $unit = $data['UnitDetail'] ?? ($data['UnitItems'][0] ?? []);
-            // Best-effort — history field name unconfirmed; several plausible
-            // shapes checked so a real response has a decent chance of matching.
-            $states = $unit['History'] ?? $unit['Events'] ?? $unit['history'] ?? [];
+
+            // Envelope shape not confirmed live yet — the API docs describe a
+            // multi-parcel-capable response (up to 10 IDs per request), so
+            // this is most likely a list; handle both a bare list and a
+            // wrapped object defensively. EventDTO fields inside are exact.
+            $parcels = match (true) {
+                isset($data[0])              => $data,
+                isset($data['parcels'])      => $data['parcels'],
+                isset($data['trackingInfo']) => $data['trackingInfo'],
+                default                      => [$data],
+            };
+            $parcel = $parcels[0] ?? [];
+            $events = $parcel['events'] ?? $data['events'] ?? [];
 
             return [
-                'status' => $unit['Status'] ?? null,
-                'events' => collect($states)->map(fn ($e) => [
-                    'timestamp'   => $e['Timestamp'] ?? $e['Date'] ?? $e['timestamp'] ?? null,
-                    'description' => $e['Description'] ?? $e['Status'] ?? $e['description'] ?? null,
-                    'location'    => $e['Location'] ?? $e['City'] ?? $e['location'] ?? null,
+                'status' => $parcel['status'] ?? $parcel['code'] ?? null,
+                'events' => collect($events)->map(fn ($e) => [
+                    'timestamp'   => $e['eventDateTime'] ?? null,
+                    'description' => $e['description'] ?? $e['code'] ?? null,
+                    'location'    => trim(($e['city'] ?? '') . ($e['postalCode'] ? ', ' . $e['postalCode'] : '')) ?: null,
                 ])->toArray(),
             ];
         } catch (\Throwable) {
