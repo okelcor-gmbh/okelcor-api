@@ -103,6 +103,25 @@ class CustomerHealthService
     }
 
     /**
+     * Recalculate by customer email — convenience for call sites that only
+     * have an Order (which links to a Customer by email, not a FK). No-ops
+     * silently when there's no matching onboarded Customer (guest/eBay
+     * orders) or on any failure — health recompute must never block an
+     * order-paid or proposal-accepted flow.
+     */
+    public function recalculateForEmail(string $email, ?AdminUser $admin = null): void
+    {
+        try {
+            $customer = Customer::where('email', $email)->first();
+            if ($customer) {
+                $this->recalculateAndSave($customer, $admin);
+            }
+        } catch (\Throwable) {
+            // Best-effort — never block the caller's real work.
+        }
+    }
+
+    /**
      * Recompute, persist, and log a risk_level_changed timeline event when the
      * band moves. Returns the same payload as calculate().
      */

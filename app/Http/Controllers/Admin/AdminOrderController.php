@@ -8,6 +8,7 @@ use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderLog;
 use App\Services\AdminAuditLogger;
+use App\Services\CustomerHealthService;
 use App\Services\CustomerNotifier;
 use App\Services\InvoiceService;
 use Illuminate\Http\JsonResponse;
@@ -223,6 +224,10 @@ class AdminOrderController extends Controller
         ]);
 
         $fresh = $order->fresh(['items']);
+
+        // Health/risk feeds off completed-order count — keep it current, not
+        // just recomputed whenever an admin happens to click "recalculate".
+        app(CustomerHealthService::class)->recalculateForEmail($fresh->customer_email, $request->user());
 
         // Invoice — idempotent; won't duplicate if one already exists
         $invoice = app(InvoiceService::class)->createForOrder($fresh);

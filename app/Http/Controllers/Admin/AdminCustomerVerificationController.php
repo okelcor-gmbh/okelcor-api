@@ -172,10 +172,14 @@ class AdminCustomerVerificationController extends Controller
             return;
         }
 
+        // Rejected/pending must win over an unrelated verified record — e.g.
+        // a verified company registration must not mask a rejected VAT
+        // number as overall "verified". Only call it fully verified once
+        // nothing is outstanding.
         $rollUp = match (true) {
-            $statuses->contains('verified')       => 'verified',
-            $statuses->contains('pending_review') => 'pending_review',
             $statuses->contains('rejected')       => 'rejected',
+            $statuses->contains('pending_review') => 'pending_review',
+            $statuses->contains('verified')       => 'verified',
             default                               => $customer->verification_status ?? 'not_started',
         };
 

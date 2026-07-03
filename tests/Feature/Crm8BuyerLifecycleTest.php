@@ -303,6 +303,27 @@ class Crm8BuyerLifecycleTest extends TestCase
         ]);
     }
 
+    public function test_rejected_verification_wins_the_rollup_over_an_unrelated_verified_one(): void
+    {
+        $c = $this->customer();
+        $admin = $this->admin();
+        $controller = app(AdminCustomerVerificationController::class);
+
+        // Company registration verified first...
+        $controller->store($this->adminRequest($admin, [
+            'type' => 'company_registration', 'status' => 'verified',
+        ]), $c->id);
+        $this->assertSame('verified', $c->fresh()->verification_status);
+
+        // ...then an unrelated VAT check comes back rejected. Overall status
+        // must surface the rejection, not stay masked as "verified".
+        $controller->store($this->adminRequest($admin, [
+            'type' => 'vat_number', 'status' => 'rejected',
+        ]), $c->id);
+
+        $this->assertSame('rejected', $c->fresh()->verification_status);
+    }
+
     // ── Access requests (customer → admin) ───────────────────────────────────
 
     public function test_customer_access_request_then_admin_approval_grants_flag(): void
@@ -445,5 +466,62 @@ class Crm8BuyerLifecycleTest extends TestCase
         $this->assertTrue((bool) $a->fresh()->approved_for_checkout);
         $this->assertTrue((bool) $a->fresh()->is_active);
         $this->assertSame('approved_buyer', $a->fresh()->access_level);
+    }
+
+    // ── Health auto-recalculation wiring (Session 54 audit) ─────────────────
+    //
+    // Health/risk previously only recalculated on a verification change or a
+    // manual "recalculate" click — order-paid and proposal-accepted events
+    // (both scored factors) never touched it, so the score/band went stale
+    // almost immediately after initial approval. These verify the fix.
+
+    public function test_recalculate_for_email_updates_matching_customer(): void
+    {
+        // Complete profile (phone/country/company/email all present) scores
+        // +15 under the formula — starting from a forced null proves the
+        // lookup-by-email + recalculate + persist chain actually ran.
+        $c = $this->customer(['health_score' => null]);
+
+        app(CustomerHealthService::class)->recalculateForEmail($c->email);
+
+        $this->assertSame(15, $c->fresh()->health_score);
+    }
+
+    public function test_recalculate_for_email_noops_when_no_matching_customer(): void
+    {
+        // Must not throw for a guest/eBay order email with no onboarded Customer row.
+        app(CustomerHealthService::class)->recalculateForEmail('nobody-' . uniqid() . '@example.com');
+        $this->assertTrue(true);
+    }
+
+    public function test_proposal_acceptance_triggers_health_recalculation(): void
+    {
+        $c = $this->customer(['health_score' => 0, 'risk_level' => 'critical']);
+
+        $quote = \App\Models\QuoteRequest::create([
+            'ref_number'            => 'QR-' . uniqid(),
+            'full_name'             => $c->full_name,
+            'email'                 => $c->email,
+            'customer_id'           => $c->id,
+            'country'               => 'DE',
+            'tyre_category'         => 'pcr',
+            'quantity'              => '100',
+            'delivery_location'     => 'Berlin, DE',
+            'notes'                 => 'Test inquiry',
+            'status'                => 'quoted',
+            'qualification_status'  => 'new',
+            'proposal_status'       => 'sent',
+            'proposal_number'       => 'QT-2026-0002',
+        ]);
+
+        $req = Request::create('/', 'POST');
+        $req->setUserResolver(fn () => $c);
+
+        app(\App\Http\Controllers\CustomerQuoteAcceptanceController::class)
+            ->acceptProposal($req, $quote->ref_number);
+
+        // "Accepted a proposal" is worth +20 in the scoring formula — a
+        // customer starting at a forced 0 must move once this fires.
+        $this->assertGreaterThan(0, $c->fresh()->health_score);
     }
 }

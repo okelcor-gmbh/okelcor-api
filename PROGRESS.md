@@ -548,6 +548,29 @@ See `FRONTEND_NOTE_proforma-signature.md` for the frontend-facing contract.
 
 ---
 
+## CRM-8 audit — Tier / Verification / Health (Session 54)
+
+Order manager asked for a review of the customer-approval Tier/Verification/
+Health section from CRM-8 (Session 40) to confirm it actually works, rather
+than trusting the ✅ in this doc. Real gaps found — same pattern as this
+session's other audits (CI catching bugs, the eBay pricing bug):
+
+| Finding | Status | Notes |
+|---------|--------|-------|
+| **Bug** — health score never recalculated on the events it scores | ✅ fixed | `CustomerHealthService::recalculateAndSave()` only ever fired from a verification change or the manual admin "recalculate" click — never when an order is paid (`completedOrderCount`, worth up to +40) or a proposal is accepted (`hasAcceptedProposal`, +20). Scores/risk bands went stale immediately after initial approval. New `recalculateForEmail()` convenience method (orders link to customers by email, not a FK) wired into `AdminOrderController::markPaid`, `PaymentController::markOrderPaid` (Stripe webhook), and both `CustomerQuoteAcceptanceController::acceptProposal()`/`uploadSignedProposal()`. Best-effort/never blocks the caller's real work. |
+| **Bug** — verification roll-up let `verified` mask `rejected` | ✅ fixed | `rollUpVerificationStatus()` prioritized *any* verified record over a rejected one — e.g. a verified company registration hid a rejected VAT check, both showing overall `verified` and silently earning health-score points for it. Priority reordered: rejected > pending_review > verified. |
+| **Gap** — Tier is purely decorative | 🔲 needs a decision | `buyer_tier` (bronze/silver/gold/platinum/vip) is set via approval profile / manual override, but nothing in the codebase reads it to affect pricing, credit terms, priority, or any other behavior — it only ever appears in API responses. Not fixed — needs a business decision on what tier should actually *do* before building it (see PROGRESS.md follow-up note below). |
+| **Gap** — no customer self-service verification submission | 🔲 needs a decision | `customer_verifications` CRUD is 100% admin-only (`AdminCustomerVerificationController`) — there's no customer-portal endpoint for a buyer to submit their own VAT number/company registration/website for review. Every verification requires an admin to manually type it in after receiving it some other way (email/phone). VAT verification specifically *is* automatic (VIES check on registration/profile update, separate from this table) — the gap is the other four types. Not fixed — bigger build, needs scope confirmation. |
+| Risk/health remain informational, not gating | 🔲 flagged | `risk_level` is only ever displayed/counted (system health dashboard, admin filter) — never used to block or flag an action (e.g. hold checkout for a critical-risk buyer). Not necessarily wrong — may be intentional — flagged for the order manager to confirm rather than changed unilaterally. |
+| Backend feature tests (5 new, MySQL, written not yet executed) | 🔧 | Added to `Crm8BuyerLifecycleTest`: `recalculateForEmail` (match + no-match), proposal-acceptance auto-triggers recalculation, verification roll-up priority fix. Not run against real MySQL in this session — verify before deploying. |
+
+**Still open — needs the order manager's input:**
+1. What should `buyer_tier` actually control? (pricing/discount modifier, credit/deposit terms, priority support, checkout limits, or something else)
+2. Should customers be able to self-submit verification info through the portal, or should it stay admin-entry-only?
+3. Should `risk_level`/health ever gate a real action (e.g. flag critical-risk buyers for extra review before checkout), or stay purely informational?
+
+---
+
 ## eBay Integration (Sessions 15–25)
 
 | Phase | Feature | Status |

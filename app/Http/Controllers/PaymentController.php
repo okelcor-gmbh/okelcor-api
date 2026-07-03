@@ -8,6 +8,7 @@ use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Product;
+use App\Services\CustomerHealthService;
 use App\Services\CustomerNotifier;
 use App\Services\InvoiceService;
 use App\Services\PromoCodeService;
@@ -34,6 +35,7 @@ class PaymentController extends Controller
         private TaxService $taxService,
         private PromoCodeService $promoService,
         private InvoiceService $invoiceService,
+        private CustomerHealthService $healthService,
     ) {}
 
     /**
@@ -601,6 +603,9 @@ class PaymentController extends Controller
         ]);
 
         $order->load('items');
+
+        // Health/risk feeds off completed-order count — keep it current.
+        $this->healthService->recalculateForEmail($order->customer_email);
 
         $invoice = $this->invoiceService->createForOrder($order);
 

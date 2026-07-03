@@ -7,6 +7,7 @@ use App\Models\OrderLog;
 use App\Models\QuoteRequest;
 use App\Models\TradeDocument;
 use App\Services\AdminNotificationService;
+use App\Services\CustomerHealthService;
 use App\Services\CustomerNotifier;
 use App\Services\CustomerTimelineService;
 use Illuminate\Http\JsonResponse;
@@ -594,6 +595,9 @@ class CustomerQuoteAcceptanceController extends Controller
         // CRM-3B — alert the assigned owner / sales queue to convert it.
         $this->notifyProposalAccepted($quote);
 
+        // Health/risk feeds off "accepted a proposal" — keep it current.
+        app(CustomerHealthService::class)->recalculateForEmail($customer->email);
+
         return response()->json([
             'data'    => ['proposal_status' => 'accepted'],
             'message' => 'Proposal accepted. Okelcor will proceed to create your order.',
@@ -685,6 +689,9 @@ class CustomerQuoteAcceptanceController extends Controller
         );
 
         $this->notifyProposalAccepted($quote);
+
+        // Health/risk feeds off "accepted a proposal" — keep it current.
+        app(CustomerHealthService::class)->recalculateForEmail($customer->email);
 
         return response()->json([
             'data'    => ['proposal_status' => 'accepted'],
