@@ -372,14 +372,14 @@ class AdminOrderController extends Controller
             return;
         }
 
-        $hasLiveTracking = ! empty($order->tracking_device_id);
+        $hasLiveTracking = (bool) $order->carrier && ((bool) $order->tracking_number || (bool) $order->container_number);
 
         if ($order->status === 'shipped') {
             $type     = 'order_shipped';
             $title    = "Order {$order->ref} has shipped";
             $severity = 'info';
             $trackingSuffix = $order->tracking_number ? " Tracking number: {$order->tracking_number}." : '';
-            // "Track it live" only when a GPS device is actually assigned.
+            // "Track it live" only when a carrier + tracking number are actually set.
             $body = $hasLiveTracking
                 ? "Your order is on its way — track it live in your account.{$trackingSuffix}"
                 : "Your order is on its way." . ($trackingSuffix ?: ' Tracking details will follow shortly.');
@@ -485,9 +485,6 @@ class AdminOrderController extends Controller
             'tracking_number'    => $o->tracking_number,
             'container_number'   => $o->container_number,
             'tracking_status'    => $o->tracking_status,
-            'tracking_device_id' => $o->tracking_device_id,
-            'dest_lat'           => $o->dest_lat !== null ? (float) $o->dest_lat : null,
-            'dest_lon'           => $o->dest_lon !== null ? (float) $o->dest_lon : null,
             'estimated_delivery' => $o->estimated_delivery,
             'eta'                => $o->eta,
             'payment_status'     => $o->payment_status,

@@ -52,7 +52,6 @@ use App\Http\Controllers\CustomerAccessRequestController;
 use App\Http\Controllers\CustomerNotificationController;
 use App\Http\Controllers\CustomerNotificationPreferenceController;
 use App\Http\Controllers\CustomerTrackingController;
-use App\Http\Controllers\Admin\AdminTrackingController;
 use App\Http\Controllers\Admin\AdminCrmFollowUpController;
 use App\Http\Controllers\Admin\AdminCommunicationController;
 use App\Http\Controllers\Admin\AdminCrmEmailController;
@@ -158,7 +157,7 @@ Route::prefix('v1')->group(function () {
         Route::get('orders/{ref}/trade-documents', [TradeDocumentController::class, 'index']);
         Route::get('trade-documents/{id}/download', [TradeDocumentController::class, 'download']);
 
-        // Live delivery tracking (Traccar) — scoped to the customer's own order
+        // Carrier shipment tracking — scoped to the customer's own order
         Route::get('orders/{ref}/tracking', [CustomerTrackingController::class, 'show'])
             ->middleware('throttle:tracking');
     });
@@ -748,25 +747,9 @@ Route::prefix('v1')->group(function () {
         });
 
         // -----------------------------------------------------------------
-        // Fleet / GPS tracking (Traccar) — reads (tracking.view)
-        // -----------------------------------------------------------------
-        Route::middleware('permission:tracking.view')->prefix('tracking')->group(function () {
-            Route::get('status', [AdminTrackingController::class, 'status']);
-            Route::get('devices', [AdminTrackingController::class, 'devices']);
-            Route::get('geofences', [AdminTrackingController::class, 'geofences']);
-            Route::get('devices/{id}', [AdminTrackingController::class, 'device']);
-            Route::get('devices/{id}/route', [AdminTrackingController::class, 'route']);
-            Route::get('devices/{id}/trips', [AdminTrackingController::class, 'trips']);
-        });
-
-        // Assign a Traccar device to an order (write) — orders.update
-        Route::middleware('permission:orders.update')->group(function () {
-            Route::put('tracking/orders/{id}/device', [AdminTrackingController::class, 'assignDevice']);
-            Route::put('tracking/orders/{id}/destination', [AdminTrackingController::class, 'setDestination']);
-        });
-
         // Real carrier tracking (GLS / DHL / ocean freight incl. Maersk) for a
-        // specific order — distinct from Traccar's own-fleet GPS above.
+        // specific order.
+        // -----------------------------------------------------------------
         Route::middleware('permission:tracking.view')->group(function () {
             Route::get('orders/{id}/shipment-tracking', [AdminOrderShipmentEventController::class, 'liveSync']);
         });

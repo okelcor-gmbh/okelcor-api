@@ -21,8 +21,6 @@ class AdminOrderShipmentEventController extends Controller
      * Live carrier tracking (GLS / DHL / ocean freight incl. Maersk) for this
      * order — pulls from the carrier API, persists new events into
      * order_shipment_events (deduped), and returns the normalized timeline.
-     * Distinct from the Traccar-based /admin/tracking/* endpoints, which cover
-     * Okelcor's own fleet vehicles rather than third-party carriers.
      */
     public function liveSync(Request $request, int $id): JsonResponse
     {

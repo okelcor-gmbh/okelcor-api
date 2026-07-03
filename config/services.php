@@ -79,34 +79,6 @@ return [
         'tracking_endpoint' => env('GLS_API_TRACKING_ENDPOINT', rtrim((string) env('GLS_API_BASE_URL', 'https://api-sandbox.gls-group.net/track-and-trace-v1'), '/') . '/tracking/simple/trackids'),
     ],
 
-    // Traccar — open-source GPS/fleet tracking server (REST client).
-    // We are a CLIENT of a Traccar instance; the server runs elsewhere
-    // (own VPS/cloud, or the public demo server for trials).
-    //   TRACCAR_URL      e.g. https://demo.traccar.org  (no trailing /api)
-    //   TRACCAR_TOKEN    preferred: a Traccar API token (Bearer)
-    //   TRACCAR_EMAIL/PASSWORD  fallback: Basic auth (e.g. a demo account)
-    'traccar' => [
-        'url'      => rtrim((string) env('TRACCAR_URL', ''), '/'),
-        'token'    => env('TRACCAR_TOKEN'),
-        'email'    => env('TRACCAR_EMAIL'),
-        'password' => env('TRACCAR_PASSWORD'),
-        'timeout'  => (int) env('TRACCAR_TIMEOUT', 15),
-        // Max hours of history for the customer "current trip" trail (safety cap).
-        'route_hours' => (int) env('TRACCAR_ROUTE_HOURS', 12),
-        // Delivery ETA tuning: straight-line distance × road factor, ÷ speed.
-        'road_factor'       => (float) env('TRACCAR_ROAD_FACTOR', 1.3),
-        'default_speed_kmh' => (float) env('TRACCAR_DEFAULT_SPEED_KMH', 60),
-    ],
-
-    // OpenStreetMap Nominatim — free forward geocoding (address → lat/lng) for
-    // delivery destinations. Results are cached + persisted on the order, so we
-    // call it at most once per address. Nominatim policy requires a User-Agent
-    // with a contact, so set NOMINATIM_EMAIL (falls back to MAIL_FROM_ADDRESS).
-    'nominatim' => [
-        'url'   => rtrim((string) env('NOMINATIM_URL', 'https://nominatim.openstreetmap.org'), '/'),
-        'email' => env('NOMINATIM_EMAIL', env('MAIL_FROM_ADDRESS', 'support@okelcor.com')),
-    ],
-
     'ebay' => [
         'client_id'     => env('EBAY_CLIENT_ID'),
         'client_secret' => env('EBAY_CLIENT_SECRET'),

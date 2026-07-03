@@ -333,7 +333,18 @@ See `FRONTEND_NOTE_invoices.md` for the frontend-facing summary + contract.
 
 ---
 
-## Traccar GPS / Fleet Tracking (Session 49)
+## Traccar GPS / Fleet Tracking (Session 49) — ❌ REMOVED in Session 52
+
+**Removed 2026-07-03**, superseded by real carrier tracking (GLS/DHL/ocean
+freight — see Session 52 below), which made this redundant. Deleted:
+`TraccarService`, `DeliveryEtaService`, `GeocodingService`,
+`AdminTrackingController`, all `/admin/tracking/*` routes, the
+`gps_live` mode on the customer tracking endpoint, `TRACCAR_SETUP.md`,
+`TraccarTrackingTest`, and the `traccar`/`nominatim` config blocks. Left
+untouched (dormant, harmless): the `orders.tracking_device_id` /
+`dest_lat` / `dest_lon` / `route_total_km` columns — no destructive
+migration was run, so no data was lost; they're just unused now. Original
+session notes below, kept for history.
 
 Open-source GPS tracking integration — Okelcor API as a REST client of a Traccar
 server (runs elsewhere; demo server for trials). Admin fleet visibility +
@@ -443,7 +454,8 @@ alike.
 | `tracking_url` — public carrier tracking page deep link (new) | 🔧 | Zero-credential fallback: `CarrierTrackingService::publicTrackingUrl()` builds a link to GLS/DHL/Maersk's own public tracking page from `carrier` + `tracking_number`/`container_number` — no API call, always works once those two fields are set. Directly answers "what if we don't know the process yet" — this is the zero-effort layer beneath both auto-sync and manual event entry. |
 | eBay carrier/tracking auto-backfill (new) | 🔧 | `EbaySellingService::fetchShippingFulfillments()` (new) + `EbayOrderSyncService::enrichCarrierFromEbay()` (new, private) — on the existing hourly `ebay:sync-orders` job, pulls `shippingCarrierCode`/`shipmentTrackingNumber` from eBay's own shipping-fulfillment record (whatever was used to mark the order shipped, whether via our system or manually in eBay's Seller Hub) and backfills `orders.carrier`/`tracking_number` **only if not already set** — never overrides a manual entry. Runs only when eBay reports the order as shipped/delivered. No new cron job. |
 | `GET /admin/orders/{id}/shipment-tracking` (new) | 🔧 | `tracking.view` permission (reused from the Traccar fleet endpoints). Attempts a live carrier-API call + persists new events, but — per the redesign above — always returns a usable response (incl. `tracking_url`) even when the live call fails; 503 only when the order has no carrier/tracking number at all. Works for **eBay-sourced orders too**. |
-| `GET /auth/orders/{ref}/tracking` extended with `mode` | 🔧 | Existing customer endpoint (Traccar GPS tracking) now returns `mode: "gps_live"` (unchanged behavior) or new `mode: "carrier"` when no fleet device is assigned but a carrier + tracking/container number is set. Carrier mode reads the persisted timeline (no live call on page view) + always includes `tracking_url`. `available:false` reasons unchanged. |
+| `GET /auth/orders/{ref}/tracking` extended with `mode` | ✅ | Originally added a `mode: "carrier"` branch alongside Traccar's `gps_live`; once Traccar was removed (below) this became the only mode. Reads the persisted timeline (no live call on page view) + always includes `tracking_url`. `available:false` reasons unchanged. |
+| **Removal** — Traccar GPS/fleet tracking | ✅ | Deleted entirely (`TraccarService`, `DeliveryEtaService`, `GeocodingService`, `AdminTrackingController`, all `/admin/tracking/*` routes, `gps_live` mode, `TRACCAR_SETUP.md`, `TraccarTrackingTest`) — see the Session 49 entry above for full detail. Carrier tracking (GLS/DHL/ocean freight) made it redundant. DB columns left dormant, untouched. |
 | `tracking:sync-carriers` command (new) | 🔧 | Hourly (`routes/console.php`, same pattern as `admin:notifications:due-followups`) — syncs shipped orders with a carrier+tracking number and no fleet device, keeping the persisted timeline fresh without a live call per page view. |
 | Backend feature tests (18, MySQL) | ✅ | `ProposalToProformaGateTest` (6 tests) + `CarrierTrackingTest` (12 tests, incl. `tracking_url` generation + graceful-degradation behavior) — GitHub Actions CI (real MySQL 8) caught 3 real bugs the local sqlite bootstrap check couldn't: an invalid `role='support'` in a test (see role/ENUM gap below), a missing `NOT NULL` `notes` field in a `QuoteRequest` test helper, and an FK-drop ordering issue in `MediaLibraryTest`/`BulkEmailCampaignTest` (both wrapped in `disableForeignKeyConstraints()`/`enableForeignKeyConstraints()` — the actual root-cause fix, robust regardless of test execution order). All fixed and green. `enrichCarrierFromEbay()` has no test coverage yet (needs eBay OAuth + fulfillment endpoint mocking — deferred given session length; low risk, mirrors the existing, working `fetchOrder()` pattern exactly). |
 | **Found via CI** — `admin_users.role` ENUM doesn't match documented roles | 🔧 | The DB column is a MySQL ENUM allowing only `super_admin/admin/editor/order_manager`, but `AdminPermissions.php` (and this doc's own role list) references `sales_manager`/`support`/`content_manager`/`viewer` throughout — those roles can't actually be stored under MySQL strict mode. Pre-existing, unrelated to this session's feature work; not fixed here (needs its own migration + audit of every affected admin account). See Known Gaps. |

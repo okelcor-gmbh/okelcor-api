@@ -98,7 +98,7 @@ class AdminPermissions
         // ── Supplier intelligence ─────────────────────────────────────────
         'supplier.view'           => ['super_admin', 'admin', 'order_manager'],
 
-        // ── Fleet / GPS tracking (Traccar) ────────────────────────────────
+        // ── Carrier shipment tracking (GLS / DHL / ocean freight) ─────────
         'tracking.view'           => ['super_admin', 'admin', 'order_manager', 'sales_manager'],
 
         // ── eBay ──────────────────────────────────────────────────────────

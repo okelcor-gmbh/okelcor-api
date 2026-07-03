@@ -12,9 +12,8 @@ use Illuminate\Support\Facades\Log;
  * in-transit orders so the customer/admin views never need to call a
  * carrier API live on page load. Runs hourly.
  *
- * Only covers orders using a third-party carrier (GLS / DHL / ocean freight)
- * with a tracking/container number set and no Traccar device assigned — own
- * fleet deliveries are already live via TraccarService.
+ * Covers orders using a third-party carrier (GLS / DHL / ocean freight) with
+ * a tracking/container number set.
  */
 class SyncCarrierTracking extends Command
 {
@@ -25,7 +24,6 @@ class SyncCarrierTracking extends Command
     public function handle(CarrierTrackingService $carrierTracking): int
     {
         $orders = Order::where('status', 'shipped')
-            ->whereNull('tracking_device_id')
             ->where(function ($q) {
                 $q->whereNotNull('tracking_number')->orWhereNotNull('container_number');
             })
