@@ -451,26 +451,25 @@ alike.
 | eBay tracking-event richness — confirmed not available via API | ✅ | Checked eBay's Fulfillment API docs directly: sellers can only pull `shippingCarrierCode`/`trackingNumber`/ship date (already built), not the detailed per-event history eBay shows buyers — that's eBay's internal carrier integration, not exposed via API. Confirms the existing design (carrier+tracking backfill → own carrier integration or `tracking_url`) is the correct approach; the real gap is GLS being unconfigured, not a missing eBay pull. |
 | Backend feature tests (5, new) | 🔧 | `EbayOrderPricingTest` — multi-qty division via `importOrder()` (reflection, no OAuth mocking needed since it's pure data transform), single-qty unaffected, and 3 tests for the audit command (dry-run doesn't write, `--apply` corrects, already-correct orders untouched). Not run against real MySQL in this session — see caveat above. |
 
-**GLS — both endpoints now confirmed from the account's own portal ("Try this
-API" panels):**
-- Token exchange (Authentication API v2): standard OAuth2 client-credentials —
-  `POST /oauth2/v2/token`, HTTP Basic Auth (`api_key:api_secret`), form-encoded
-  `grant_type=client_credentials` body.
-- Tracking (ShipIT-Farm API v1): `POST /rs/tracking/parceldetails`, `Bearer`
-  token from the exchange above, `Content-Type: application/glsVersion1+json`
-  (GLS's own custom media type), body `{"ParcelNumber": "..."}`.
+**GLS — rewired to the real product (2026-07-03).** `ShipIT-Farm API v1` /
+`parceldetails` (what we'd wired in first) turned out to be a dead end — its
+response only contains ParcelShop pickup-location details, not shipment
+status. Found the actual product in the portal: **Track And Trace V1**,
+`GET /tracking/simple/trackids/{unitno}?showEvents=true`, with a fully
+documented `EventDTO` response schema (`code`, `city`, `postalCode`,
+`country`, `description`, `eventDateTime`) — confirmed from GLS's own
+published docs, not guessed. Also switched both the token exchange and
+tracking base URL to the **sandbox** host (`api-sandbox.gls-group.net`) —
+every portal panel checked for this account defaulted to sandbox; production
+needs a separate GLS approval step not yet completed. Sandbox may return
+test data rather than real parcel status.
 
-Both wired into `GlsTrackingService` + defaults in `config/services.php`.
-**Still open:** the portal's tracking "Try it" panel returned "Unknown Error"
-when tested without an Authorization header — consistent with needing the
-Bearer token, but not yet proven end-to-end. Also still unconfirmed: the
-token response's exact field name (`access_token` assumed) and whether
-`parceldetails` actually contains a status/event-history field at all, or
-only static shipment attributes (weight/product/addresses) per GLS's public
-docs for the equivalent legacy endpoint — needs one real end-to-end run
-(token exchange → Bearer token → parceldetails with a live parcel number) to
-confirm before trusting this in production. DHL and ocean-freight (incl.
-Maersk) tracking are live now — both already had working credentials.
+**Still open:** a real end-to-end execute (token → Bearer → tracking call
+with a live parcel number) hasn't been run yet, so the outer response
+envelope (what wraps the `events` array — handled defensively in code) isn't
+100% confirmed, and it's unknown whether sandbox returns real or dummy data
+for this account. DHL and ocean-freight (incl. Maersk) tracking are live
+now — both already had working credentials.
 
 **Decision (2026-07-02, post-deploy):** GLS's token exchange kept returning
 `400 invalid credentials` even after correcting the `.env` values, and
@@ -576,7 +575,7 @@ See `FRONTEND_NOTE_tracking.md` (new sections) for the frontend-facing contract.
 | Product translation table | Low | No multilingual products |
 | Preferred language on customers | Low | All emails English |
 | eBay production credentials rotation | **High** | `EBAY_CLIENT_SECRET` was exposed in a prior session — must rotate in eBay Developer Portal before listing live products |
-| GLS live tracking (on hold — manual entry active instead) | Low | Token exchange returns `400 invalid credentials` in production; also hit a logging oddity where fresh requests wrote no new `storage/logs/laravel.log` line, suggesting `LOG_CHANNEL` writes elsewhere (check for a daily-rotated log file) before debugging further. Not blocking — manual shipment-event entry (Session 52) is the active path |
+| GLS live tracking — rewired to Track And Trace V1, needs a real end-to-end test | Low | `400 invalid credentials` earlier was likely from hitting production with sandbox-only credentials — both endpoints now default to sandbox. Still needs: (1) one real execute in the portal (or via `tinker`) to confirm auth + response envelope, (2) the `storage/logs/laravel.log` mystery resolved first — check `ls -lat storage/logs/` for the actual active log file before debugging further, (3) confirm whether sandbox returns real or dummy tracking data for this account. Not blocking — `tracking_url` link-out + manual shipment-event entry (Session 52) remain the active path meanwhile |
 | `admin_users.role` ENUM missing documented roles | **High** | Column only allows `super_admin/admin/editor/order_manager`; `sales_manager`, `support`, `content_manager`, `viewer` are referenced throughout `AdminPermissions.php` and this doc but can't be stored under MySQL strict mode — creating an admin with any of those roles fails outright. Found via CI in Session 52; needs a migration widening the ENUM (or switching to a plain string column) plus a check for any admin accounts already silently affected |
 
 ---
