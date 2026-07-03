@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-07-02 | Branch: `main` | Latest commit: `3438761` (session below not yet committed)
+Last updated: 2026-07-03 | Branch: `main` | Latest commit: `8020ad2`
 
 ---
 
@@ -789,8 +789,9 @@ composer install --no-dev
 16. `2026_07_01_000001_create_marketing_contacts_table` (Session 50 — bulk email)
 17. `2026_07_01_000002_create_bulk_email_campaigns_table` (Session 50 — bulk email)
 18. `2026_07_01_000003_create_bulk_email_campaign_recipients_table` (Session 50 — bulk email)
+19. `2026_07_03_103842_add_proposal_signed_copy_to_quote_requests_table` (Session 53 — proposal sign-and-return)
 
-All 18 verified to apply cleanly on MySQL via CI (`migrate:fresh`) and `LeadFunnelAnalyticsTest`'s `RefreshDatabase`; #16–18 were additionally exercised against sqlite in `BulkEmailCampaignTest`. Applied to production via `artisan migrate --force` as part of the 2026-07-01 deploy (which also shipped Session 51's code-only Media Library fix — no new migrations there). See `DEPLOY_RUNBOOK.md` for the ordered deploy + rollback plan. No migrations currently pending.
+Migrations 1–18 verified to apply cleanly on MySQL via CI (`migrate:fresh`) and `LeadFunnelAnalyticsTest`'s `RefreshDatabase`; #16–18 were additionally exercised against sqlite in `BulkEmailCampaignTest`. Applied to production via `artisan migrate --force` as part of the 2026-07-01 deploy (which also shipped Session 51's code-only Media Library fix — no new migrations there). #19 is guarded/additive (`Schema::hasColumn` check) and ready to deploy via the same command — not yet confirmed run against production as of this note. See `DEPLOY_RUNBOOK.md` for the ordered deploy + rollback plan.
 
 ⚠️ Bulk email is deployed but **not yet safe to use for a real send**: `.env`
 still has `QUEUE_CONNECTION=sync`, so `SendBulkEmailCampaignJob` would run
