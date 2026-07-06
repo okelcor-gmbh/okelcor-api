@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-07-03 | Branch: `main` | Latest commit: `8020ad2`
+Last updated: 2026-07-06 | Branch: `main` | Latest commit: `45040dd`
 
 ---
 
@@ -568,6 +568,23 @@ session's other audits (CI catching bugs, the eBay pricing bug):
 1. What should `buyer_tier` actually control? (pricing/discount modifier, credit/deposit terms, priority support, checkout limits, or something else)
 2. Should customers be able to self-submit verification info through the portal, or should it stay admin-entry-only?
 3. Should `risk_level`/health ever gate a real action (e.g. flag critical-risk buyers for extra review before checkout), or stay purely informational?
+
+---
+
+## DPD tracking gap (Session 55)
+
+Order manager reported `DPD · 06265020852310` showed no tracking events at
+all in the shipping overview. Root cause: DPD was never added as a
+recognized carrier in `CarrierTrackingService` — unlike GLS/DHL/ocean
+freight, there was no branch for it in either the live-sync `fetch()` or the
+zero-credential `publicTrackingUrl()` fallback, so a DPD order got nothing:
+no events, no tracking link.
+
+| Fix | Status | Notes |
+|-----|--------|-------|
+| DPD public tracking URL (Layer 1 only, by design decision) | ✅ | `CarrierTrackingService::publicTrackingUrl()` now recognizes `carrier` containing "dpd" → `https://tracking.dpd.de/status/en_US/parcel/{trackingNumber}`. Zero-credential, same pattern as the GLS/DHL/Maersk deep links. Fixes the immediate complaint — a working "Track it" link now always appears for DPD orders. |
+| Live DPD event auto-sync | ⬜ not built (explicit scope decision) | Would need a `DpdTrackingService` (like `GlsTrackingService`) plus a registered DPD business API account + credentials — none exist today. Deferred; revisit if the order manager wants full per-event history like GLS/DHL show. |
+| Test | ✅ | Added a DPD case to `CarrierTrackingTest::test_public_tracking_url_per_carrier` — not run locally (this suite requires MySQL, same limitation noted in every prior session); relies on CI. |
 
 ---
 

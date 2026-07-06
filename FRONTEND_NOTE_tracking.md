@@ -3,6 +3,18 @@
 **From:** Backend · **Re:** carrier-based shipment tracking (GLS / DHL / ocean
 freight incl. Maersk) · **Status:** Live, verified against real orders.
 
+## Update 2026-07-06 — DPD added to `tracking_url`
+
+`tracking_url` now also recognizes DPD (`carrier` containing "dpd") and
+returns a deep link to DPD's own public tracking page
+(`https://tracking.dpd.de/status/en_US/parcel/{trackingNumber}`). No response
+shape change and no frontend code change needed — this was already a
+"render `tracking_url` if present" button per the section below. DPD orders
+previously got `tracking_url: null` (unrecognized carrier) with no events,
+which is what prompted this fix. DPD does **not** have live event auto-sync
+(no API credentials yet) — only the public link, same as GLS/DHL/Maersk get
+in addition to their live event sync.
+
 ## ⚠️ Removed — Traccar / GPS fleet tracking
 
 The Traccar-based own-fleet GPS tracking feature (admin fleet dashboard,

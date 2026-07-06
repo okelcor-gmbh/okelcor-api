@@ -120,6 +120,10 @@ class CarrierTrackingService
             return 'https://www.dhl.com/de-en/home/tracking.html?tracking-id=' . urlencode($trackingNumber);
         }
 
+        if ($trackingNumber && stripos($carrier, 'dpd') !== false) {
+            return 'https://tracking.dpd.de/status/en_US/parcel/' . urlencode($trackingNumber);
+        }
+
         if ($container && stripos($carrier, 'maersk') !== false) {
             return 'https://www.maersk.com/tracking/' . urlencode($container);
         }

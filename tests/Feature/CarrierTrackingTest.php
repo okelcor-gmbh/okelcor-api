@@ -259,6 +259,12 @@ class CarrierTrackingTest extends TestCase
             'https://www.maersk.com/tracking/MAEU1234567',
             app(CarrierTrackingService::class)->fromPersistedEvents($maersk)['tracking_url']
         );
+
+        $dpd = $this->order(['carrier' => 'DPD', 'tracking_number' => '06265020852310']);
+        $this->assertSame(
+            'https://tracking.dpd.de/status/en_US/parcel/06265020852310',
+            app(CarrierTrackingService::class)->fromPersistedEvents($dpd)['tracking_url']
+        );
     }
 
     // ── Admin endpoint ────────────────────────────────────────────────────────
