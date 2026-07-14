@@ -466,6 +466,7 @@ Route::prefix('v1')->group(function () {
 
         // Write — orders.update (super_admin, admin, order_manager)
         Route::middleware('permission:orders.update')->group(function () {
+            Route::post('orders', [AdminOrderController::class, 'store']);
             Route::post('orders/import', [OrderImportController::class, 'import']);
             Route::put('orders/{id}', [AdminOrderController::class, 'update']);
             Route::patch('orders/{id}/status', [AdminOrderController::class, 'updateStatus']);

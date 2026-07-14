@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Mail\OrderConfirmation;
 use App\Models\Customer;
 use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\OrderLog;
 use App\Services\AdminAuditLogger;
 use App\Services\CustomerHealthService;
@@ -13,8 +14,10 @@ use App\Services\CustomerNotifier;
 use App\Services\InvoiceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 class AdminOrderController extends Controller
@@ -72,6 +75,132 @@ class AdminOrderController extends Controller
             'data'    => $this->formatOrderDetail($order),
             'message' => 'success',
         ]);
+    }
+
+    /**
+     * POST /api/v1/admin/orders
+     *
+     * Records an order that already happened outside the system — for
+     * existing Okelcor customers being onboarded with prior shipment/order
+     * history. Distinct from the public checkout flow (no payment session
+     * involved) and from CSV import (one order at a time, entered by hand).
+     *
+     * Because Order links to Customer by e-mail (not a foreign key), the
+     * moment this order's customer_email matches an onboarded customer's
+     * e-mail, it appears automatically in that customer's portal — no
+     * further linking step is needed.
+     */
+    public function store(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'customer_id'        => ['nullable', 'integer', 'exists:customers,id'],
+            'customer_name'      => ['required_without:customer_id', 'string', 'max:200'],
+            'customer_email'     => ['required_without:customer_id', 'string', 'email', 'max:255'],
+            'customer_phone'     => ['nullable', 'string', 'max:50'],
+            'address'            => ['nullable', 'string', 'max:255'],
+            'city'               => ['nullable', 'string', 'max:100'],
+            'postal_code'        => ['nullable', 'string', 'max:20'],
+            'country'            => ['nullable', 'string', 'max:100'],
+            'ref'                => ['nullable', 'string', 'max:30', 'unique:orders,ref'],
+            'order_date'         => ['nullable', 'date'],
+            'status'             => ['required', Rule::in(['pending', 'confirmed', 'awaiting_proforma', 'processing', 'shipped', 'delivered', 'cancelled'])],
+            'payment_status'     => ['required', Rule::in(['pending', 'paid', 'failed', 'refunded'])],
+            'payment_stage'      => ['nullable', Rule::in(['pending_proforma', 'deposit_requested', 'deposit_paid', 'balance_due', 'balance_paid', 'shipment_released'])],
+            'carrier'            => ['nullable', 'string', 'max:100'],
+            'carrier_type'       => ['nullable', Rule::in(['sea', 'air', 'dhl', 'road', 'truck'])],
+            'tracking_number'    => ['nullable', 'string', 'max:100'],
+            'container_number'   => ['nullable', 'string', 'max:30'],
+            'estimated_delivery' => ['nullable', 'date'],
+            'admin_notes'        => ['nullable', 'string'],
+            'items'              => ['nullable', 'array'],
+            'items.*.sku'        => ['required_with:items', 'string', 'max:100'],
+            'items.*.name'       => ['required_with:items', 'string', 'max:255'],
+            'items.*.brand'      => ['nullable', 'string', 'max:100'],
+            'items.*.size'       => ['nullable', 'string', 'max:50'],
+            'items.*.unit_price' => ['required_with:items', 'numeric', 'min:0'],
+            'items.*.quantity'   => ['required_with:items', 'integer', 'min:1'],
+            'total'              => ['required_without:items', 'numeric', 'min:0'],
+        ]);
+
+        $customerName  = $data['customer_name'] ?? null;
+        $customerEmail = $data['customer_email'] ?? null;
+
+        if (! empty($data['customer_id'])) {
+            $customer      = Customer::findOrFail($data['customer_id']);
+            $customerName  = $customerName ?? $customer->full_name;
+            $customerEmail = $customerEmail ?? $customer->email;
+        }
+
+        $items    = $data['items'] ?? [];
+        $subtotal = collect($items)->sum(fn ($i) => $i['unit_price'] * $i['quantity']);
+        $total    = $items ? $subtotal : (float) $data['total'];
+
+        // A fully-paid historical order defaults to the final payment-milestone
+        // stage so document upload / visibility (both gated on payment_stage)
+        // isn't blocked behind a milestone that no longer applies to something
+        // that already happened. Admin can override for an order still mid-flight.
+        $paymentStage = $data['payment_stage'] ?? match ($data['payment_status']) {
+            'paid'  => 'balance_paid',
+            default => 'pending_proforma',
+        };
+
+        $order = DB::transaction(function () use ($data, $customerName, $customerEmail, $items, $subtotal, $total, $paymentStage) {
+            $order = Order::create([
+                'ref'                => $data['ref'] ?? $this->generateRef(),
+                'source'             => 'admin_manual',
+                'customer_name'      => $customerName,
+                'customer_email'     => $customerEmail,
+                'customer_phone'     => $data['customer_phone'] ?? null,
+                'address'            => $data['address'] ?? null,
+                'city'               => $data['city'] ?? null,
+                'postal_code'        => $data['postal_code'] ?? null,
+                'country'            => $data['country'] ?? null,
+                'subtotal'           => $subtotal ?: $total,
+                'delivery_cost'      => 0,
+                'total'              => $total,
+                'status'             => $data['status'],
+                'payment_status'     => $data['payment_status'],
+                'payment_stage'      => $paymentStage,
+                'mode'               => 'manual',
+                'carrier'            => $data['carrier'] ?? null,
+                'carrier_type'       => $data['carrier_type'] ?? null,
+                'tracking_number'    => $data['tracking_number'] ?? null,
+                'container_number'   => $data['container_number'] ?? null,
+                'estimated_delivery' => $data['estimated_delivery'] ?? null,
+                'admin_notes'        => $data['admin_notes'] ?? null,
+            ]);
+
+            foreach ($items as $item) {
+                OrderItem::create([
+                    'order_id'   => $order->id,
+                    'product_id' => $item['product_id'] ?? null,
+                    'sku'        => $item['sku'],
+                    'brand'      => $item['brand'] ?? '',
+                    'name'       => $item['name'],
+                    'size'       => $item['size'] ?? '',
+                    'unit_price' => $item['unit_price'],
+                    'quantity'   => $item['quantity'],
+                    'line_total' => $item['unit_price'] * $item['quantity'],
+                ]);
+            }
+
+            // Backdate the record to when the order actually happened, so it
+            // sorts correctly in both the admin and customer order lists.
+            if (! empty($data['order_date'])) {
+                $order->forceFill(['created_at' => $data['order_date']])->save();
+            }
+
+            return $order;
+        });
+
+        $this->writeLog($request, $order, 'created', ['notes' => 'Historical order recorded by admin.']);
+
+        $order->load(['items', 'logs', 'euDeclaration', 'tradeDocuments']);
+
+        return response()->json([
+            'data'    => $this->formatOrderDetail($order),
+            'message' => 'Order recorded successfully.',
+        ], 201);
     }
 
     public function update(Request $request, int $id): JsonResponse
@@ -423,6 +552,18 @@ class AdminOrderController extends Controller
         $this->writeLog($request, $order, 'tracking_updated', [
             'notes' => 'Tracking fields updated.',
         ]);
+    }
+
+    /**
+     * Same format as the public OrderController's ref generator
+     * (OKL-XXXXX), kept in sync so refs look identical regardless of origin.
+     */
+    private function generateRef(): string
+    {
+        $timestamp = strtoupper(base_convert(substr((string) now()->timestamp, -5), 10, 36));
+        $rand      = strtoupper(Str::random(3));
+
+        return "OKL-{$timestamp}{$rand}";
     }
 
     private function writeLog(Request $request, Order $order, string $action, array $extra = []): void
