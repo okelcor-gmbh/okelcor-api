@@ -138,25 +138,72 @@ class AdminCustomerController extends Controller
     }
 
     // ── PATCH /admin/customers/{id} ───────────────────────────────────────────
+    //
+    // Lets an admin correct a customer's own record (typo in name/email,
+    // outdated VAT number, etc.) — distinct from the CRM-8 lifecycle actions
+    // below (tier/risk/approval), which stay on their own dedicated endpoints.
 
     public function update(Request $request, int $id): JsonResponse
     {
         $customer = Customer::findOrFail($id);
 
         $data = $request->validate([
+            'first_name'    => ['sometimes', 'string', 'max:100'],
+            'last_name'     => ['sometimes', 'string', 'max:100'],
+            'email'         => ['sometimes', 'string', 'email', 'max:255', 'unique:customers,email,' . $customer->id],
             'admin_notes'   => ['nullable', 'string'],
             'customer_type' => ['nullable', 'in:b2b,b2c'],
             'company_name'  => ['nullable', 'string', 'max:200'],
+            'vat_number'    => ['nullable', 'string', 'max:20'],
+            'vat_verified'  => ['sometimes', 'boolean'],
+            'industry'      => ['nullable', 'string', 'max:100'],
             'phone'         => ['nullable', 'string', 'max:50'],
             'country'       => ['nullable', 'string', 'max:100'],
         ]);
 
+        // A VAT number that changed without the admin explicitly confirming it
+        // (via vat_verified) can no longer be trusted as verified — avoids a
+        // stale "verified" badge surviving a manual correction.
+        if (array_key_exists('vat_number', $data)
+            && $data['vat_number'] !== $customer->vat_number
+            && ! array_key_exists('vat_verified', $data)
+        ) {
+            $data['vat_verified'] = false;
+        }
+
+        // Build a plain-language diff for the audit trail before the values change.
+        $changes = [];
+        foreach ($data as $field => $newValue) {
+            $oldValue = $customer->getAttribute($field);
+            if ($oldValue !== $newValue) {
+                $changes[$field] = ['from' => $oldValue, 'to' => $newValue];
+            }
+        }
+
+        if (empty($changes)) {
+            return response()->json(['success' => true, 'data' => $this->formatSummary($customer), 'message' => 'No changes to save.']);
+        }
+
         $customer->update($data);
+
+        $summary = 'Admin corrected: ' . implode(', ', array_map(
+            fn ($field, $c) => "{$field} ({$c['from']} \xE2\x86\x92 {$c['to']})",
+            array_keys($changes), $changes
+        ));
 
         SecurityEventService::log(
             'account_changes', $customer->id,
             $request->ip(), $request->userAgent(),
-            'Admin updated customer profile', 'info'
+            $summary, 'info'
+        );
+
+        CustomerTimelineService::record(
+            $customer->id,
+            'profile_corrected',
+            'Profile corrected by admin',
+            $summary,
+            ['changes' => $changes],
+            $request->user()?->id
         );
 
         return response()->json(['success' => true, 'data' => $this->formatSummary($customer->fresh()), 'message' => 'Customer updated successfully.']);
@@ -730,6 +777,8 @@ class AdminCustomerController extends Controller
             'country'                        => $c->country,
             'company_name'                   => $c->company_name,
             'vat_number'                     => $c->vat_number,
+            'vat_verified'                   => (bool) $c->vat_verified,
+            'industry'                       => $c->industry,
             'customer_type'                  => $c->customer_type,
             'status'                         => $c->status ?? 'active',
             'onboarding_status'              => $c->onboarding_status ?? 'active',

@@ -524,4 +524,62 @@ class Crm8BuyerLifecycleTest extends TestCase
         // customer starting at a forced 0 must move once this fires.
         $this->assertGreaterThan(0, $c->fresh()->health_score);
     }
+
+    // ── Admin profile corrections (PATCH /admin/customers/{id}) ──────────────
+
+    public function test_admin_can_correct_name_email_and_vat(): void
+    {
+        $admin = $this->admin();
+        $c     = $this->customer(['vat_number' => 'DE111111111', 'vat_verified' => true]);
+
+        $req = $this->adminRequest($admin, [
+            'first_name' => 'Acmé',
+            'email'      => 'corrected' . uniqid() . '@acme-tyres.com',
+            'vat_number' => 'DE222222222',
+        ]);
+
+        $response = app(AdminCustomerController::class)->update($req, $c->id);
+        $payload  = json_decode($response->getContent(), true);
+
+        $this->assertTrue($payload['success']);
+        $this->assertSame('Acmé', $payload['data']['first_name']);
+        $this->assertSame('DE222222222', $payload['data']['vat_number']);
+
+        // Changing the VAT number without confirming it resets the verified flag —
+        // an admin-typed correction must not keep the old "verified" badge.
+        $this->assertFalse($payload['data']['vat_verified']);
+
+        $this->assertDatabaseHas('customer_timeline_events', [
+            'customer_id' => $c->id,
+            'event_type'  => 'profile_corrected',
+        ]);
+    }
+
+    public function test_admin_can_confirm_vat_verified_explicitly(): void
+    {
+        $admin = $this->admin();
+        $c     = $this->customer(['vat_number' => 'DE111111111', 'vat_verified' => false]);
+
+        $req = $this->adminRequest($admin, [
+            'vat_number'   => 'DE222222222',
+            'vat_verified' => true,
+        ]);
+
+        $response = app(AdminCustomerController::class)->update($req, $c->id);
+        $payload  = json_decode($response->getContent(), true);
+
+        $this->assertTrue($payload['data']['vat_verified']);
+    }
+
+    public function test_admin_cannot_reuse_another_customers_email(): void
+    {
+        $admin = $this->admin();
+        $taken = $this->customer();
+        $c     = $this->customer();
+
+        $req = $this->adminRequest($admin, ['email' => $taken->email]);
+
+        $this->expectException(\Illuminate\Validation\ValidationException::class);
+        app(AdminCustomerController::class)->update($req, $c->id);
+    }
 }

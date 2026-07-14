@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-07-06 | Branch: `main` | Latest commit: `45040dd`
+Last updated: 2026-07-07 | Branch: `main` | Latest commit: `16428d8`
 
 ---
 
@@ -585,6 +585,20 @@ no events, no tracking link.
 | DPD public tracking URL (Layer 1 only, by design decision) | ✅ | `CarrierTrackingService::publicTrackingUrl()` now recognizes `carrier` containing "dpd" → `https://tracking.dpd.de/status/en_US/parcel/{trackingNumber}`. Zero-credential, same pattern as the GLS/DHL/Maersk deep links. Fixes the immediate complaint — a working "Track it" link now always appears for DPD orders. |
 | Live DPD event auto-sync | ⬜ not built (explicit scope decision) | Would need a `DpdTrackingService` (like `GlsTrackingService`) plus a registered DPD business API account + credentials — none exist today. Deferred; revisit if the order manager wants full per-event history like GLS/DHL show. |
 | Test | ✅ | Added a DPD case to `CarrierTrackingTest::test_public_tracking_url_per_carrier` — not run locally (this suite requires MySQL, same limitation noted in every prior session); relies on CI. |
+| Deployed to production | ✅ | Code-only change (no migration) — deployed via the standard Namecheap cPanel path (`/home/u978121777/domains/okelcor.com/public_html/okelcor-api`), no `artisan migrate` needed. |
+| `FRONTEND_NOTE_tracking.md` updated | ✅ | Corrected the doc's claim that only GLS/DHL/Maersk get a `tracking_url` — DPD now does too. No frontend code change needed (existing "render `tracking_url` if present" logic already covers it). |
+
+**Decision (2026-07-06):** confirmed with the user to leave DPD at Layer 1 for
+now rather than chase Layer 2 immediately. DPD's API isn't self-serve like
+GLS's sandbox was — it requires an existing DPD business shipping contract
+and a request to DPD's own account manager for tracking-API credentials
+(confirmed via DPD's public carrier-integration docs; DPD's own site blocks
+automated fetching, so exact field names weren't independently verified).
+**Next step, whenever revisited:** order manager (or whoever holds the DPD
+shipping contract) contacts DPD's account manager, asks specifically for
+**Track & Trace / tracking API access** (not shipment/label API), and passes
+along whatever credentials + docs DPD issues — then build `DpdTrackingService`
+the same way `GlsTrackingService` was built (Session 52).
 
 ---
 
