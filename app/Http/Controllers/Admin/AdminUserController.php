@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Mail\AdminWelcome;
 use App\Models\AdminUser;
 use App\Services\AdminAuditLogger;
+use App\Services\RichEmailHtmlSanitizer;
 use App\Support\AdminPermissions;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -45,6 +46,40 @@ class AdminUserController extends Controller
         return response()->json([
             'data'    => $this->formatUser($user->fresh()),
             'message' => 'Profile updated.',
+        ]);
+    }
+
+    /**
+     * PUT /admin/profile/signature
+     *
+     * The signature is pasted in exactly as it appears in Outlook (rich
+     * formatting + an inline logo image). Sanitized + inline images
+     * extracted to storage by RichEmailHtmlSanitizer before being saved —
+     * the raw pasted HTML is never persisted as-is.
+     */
+    public function updateSignature(Request $request, RichEmailHtmlSanitizer $sanitizer): JsonResponse
+    {
+        $data = $request->validate([
+            // Generous cap on the RAW paste (pre-sanitize, pre-image-extraction)
+            // — Outlook's verbose inline-style markup plus a base64 logo can run
+            // large before anything has gone wrong.
+            'signature_html' => ['nullable', 'string', 'max:204800'],
+        ]);
+
+        $user = $request->user();
+        $raw  = $data['signature_html'] ?? '';
+
+        try {
+            $clean = $raw === '' ? '' : $sanitizer->sanitize($raw, "signatures/{$user->id}");
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $user->update(['email_signature' => $clean ?: null]);
+
+        return response()->json([
+            'data'    => ['email_signature' => $user->email_signature],
+            'message' => 'Signature updated.',
         ]);
     }
 
@@ -242,6 +277,7 @@ class AdminUserController extends Controller
             'permissions'            => AdminPermissions::for($u->role),
             'last_login_at'          => $u->last_login_at?->toIso8601String(),
             'created_at'             => $u->created_at?->toIso8601String(),
+            'email_signature'        => $u->email_signature,
         ];
     }
 }

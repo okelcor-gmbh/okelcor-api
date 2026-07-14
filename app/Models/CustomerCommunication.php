@@ -14,18 +14,29 @@ class CustomerCommunication extends Model
         'admin_user_id',
         'type',
         'direction',
+        'channel',
         'subject',
         'body',
+        'cc',
+        'attachments',
+        'message_id',
+        'in_reply_to',
         'status',
         'scheduled_at',
         'completed_at',
+        'staff_read_at',
+        'customer_read_at',
         'metadata',
     ];
 
     protected $casts = [
-        'scheduled_at' => 'datetime',
-        'completed_at' => 'datetime',
-        'metadata'     => 'array',
+        'scheduled_at'     => 'datetime',
+        'completed_at'     => 'datetime',
+        'staff_read_at'    => 'datetime',
+        'customer_read_at' => 'datetime',
+        'cc'               => 'array',
+        'attachments'      => 'array',
+        'metadata'         => 'array',
     ];
 
     public function customer(): BelongsTo

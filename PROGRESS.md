@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-07-07 | Branch: `main` | Latest commit: `16428d8`
+Last updated: 2026-07-14 | Branch: `main` | Latest commit: `71fe2dc`
 
 ---
 
@@ -602,6 +602,51 @@ the same way `GlsTrackingService` was built (Session 52).
 
 ---
 
+## Admin customer editing + historical order onboarding (Session 56)
+
+Order manager needed to (1) correct a customer's own record (typo'd name/
+e-mail, outdated VAT) — the existing admin `PATCH /admin/customers/{id}`
+only allowed `admin_notes`/`customer_type`/`company_name`/`phone`/`country`;
+and (2) onboard existing Okelcor customers who already have real
+orders/shipments (some still in transit) that predate the system, with their
+actual documents (already sent via WhatsApp/e-mail) attached — not
+system-generated stand-ins.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `PATCH /admin/customers/{id}` expanded | ✅ | Now accepts `first_name`/`last_name`/`email` (uniqueness-checked) / `vat_number` / `vat_verified` / `industry`. Changing `vat_number` without confirming it resets `vat_verified` to `false`. Every save writes a plain-language diff to the security audit log **and** the CRM-8 customer timeline (`profile_corrected`). |
+| `POST /admin/orders` (new) | ✅ | Manually records an order that already happened — customer by `customer_id` or raw name+email, optional custom `ref`/`order_date` for backdating, items or a flat `total`. A paid order defaults `payment_stage` to `balance_paid` so document upload/visibility isn't blocked for something already settled; still-in-transit orders can set an earlier stage explicitly. Orders link to customers by e-mail (not FK), so the new order is visible in the customer's portal immediately, no linking step. |
+| Document upload guidance | ✅ (doc-only) | Existing `POST /admin/orders/{id}/trade-documents/upload` is the right tool — frontend note explicit that historical orders should **upload the real file**, not use the `generate…` endpoints (those build a new PDF from system data). Confirmed with the user: the existing payment-gate (documents hidden until the order is fully paid) stays as-is even for historical backfills — not overridden. |
+| Backend feature tests (11, MySQL, written not yet executed) | 🔧 | `AdminOrderCreationTest` (5) + 3 new cases in `Crm8BuyerLifecycleTest` — not run against real MySQL this session (local `.env` points at what looks like a shared/production-style database); relies on CI, same limitation noted in every prior session. |
+
+See `FRONTEND_NOTE_admin-customer-editing.md` and
+`FRONTEND_NOTE_historical-orders-onboarding.md`.
+
+---
+
+## Outlook-style compose/reply, signatures, customer messaging (Session 57)
+
+Ask: replicate "compose and reply like Outlook, inside our own system" —
+rich-formatted e-mail, a saved signature pasted in once (incl. inline logo)
+and auto-appended forever after, attachments, CC, and two-way visibility so
+a reply is never lost if the original sender is out. Extends the existing
+CRM-6 communication log rather than a new system.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `RichEmailHtmlSanitizer` (new, shared) | ✅ | Strips Word/Outlook namespace tags (`<o:p>` etc.) before parsing; extracts inline `data:image/...;base64` images to real files on public storage (rewriting `src`) **before** the HTMLPurifier allow-list pass, not after — stricter than the literal spec order, since the purifier never has to trust a `data:` URI at all. Corrupt/oversized/non-image payloads are dropped, not stored broken. Fully automated-tested (11 tests, no DB — actually executed this session, not just written): script/style/iframe stripped, `on*` handlers stripped, `javascript:` URLs stripped, CSS `expression()` stripped, unknown tags unwrapped (content kept), Word namespace tags stripped, valid/corrupt/external images handled correctly. |
+| `admin_users.email_signature` (LONGTEXT) + `PUT /admin/profile/signature` | ✅ | Own signature only, no extra permission. Sanitized + images extracted before save; response echoes the stored (sanitized) version. Appended fresh at send time from the DB, never baked into a draft. |
+| `customer_communications` extended (`cc`/`attachments`/`channel`/`message_id`/`in_reply_to`/`staff_read_at`/`customer_read_at`; `body` widened TEXT→LONGTEXT) | ✅ | Additive/guarded migration on the existing CRM-6 table — the manual "log an interaction" flow keeps working unchanged. `channel`/other new columns are plain strings, not ENUMs, deliberately (see the `admin_users.role` ENUM gap elsewhere in this doc). |
+| `POST /admin/{customers,quote-requests}/{id}/communications/send-email` (new) | ✅ | Real compose/send — subject/body(sanitized)/cc (max 5)/attachments (max 5, 10MB each, mime allow-list)/`in_reply_to_id`. Threading: resolves the parent's `message_id` for real `In-Reply-To`/`References` e-mail headers, prefixes `Re:` on the subject. Reply-To set to the sending admin's own address. Always logs the communication (sent or failed) so nothing is lost on a send failure; failed sends return 502 with the logged row attached. Customer also gets an in-app notification twin (`message_received`), matching the existing "Email = Inbox" pattern. |
+| `CustomerAdHocEmail` mailable + `GET .../communications/{id}/attachments/{index}/download` | ✅ | Attachments stored on private disk before the send attempt (survive a failed send); admin can re-download anything previously sent. |
+| Customer portal — `GET/POST /auth/customer/communications*` (new) | ✅ | Own thread only (`type=email` rows), reply (plain body, no attachments in v1 — deliberate scope line), mark-read, attachment download. A reply fans out to every `crm.view` admin immediately (CRM-3B notification), not just the original sender — the actual "nothing gets lost" mechanism. |
+| **Scope decision, not a gap** — real inbound e-mail capture | ⬜ deferred | A customer replying inside their own Outlook/Gmail does **not** land back in the system — that needs a receiving subdomain + MX + webhook, materially more infrastructure. Two-way visibility is solved via the customer's own portal instead. Documented explicitly in the frontend note so this isn't assumed to work. |
+| Backend feature tests (12, MySQL, written not yet executed) | 🔧 | `OutlookStyleEmailTest` — signature save, compose/send, threading, CC/attachment validation, permission gating, portal reply + cross-customer isolation, read receipts. Same MySQL-only limitation as every other session; confirmed to skip cleanly (not fail) under the default sqlite test env. |
+
+See `FRONTEND_NOTE_outlook-style-email.md`.
+
+---
+
 ## eBay Integration (Sessions 15–25)
 
 | Phase | Feature | Status |
@@ -821,8 +866,10 @@ composer install --no-dev
 17. `2026_07_01_000002_create_bulk_email_campaigns_table` (Session 50 — bulk email)
 18. `2026_07_01_000003_create_bulk_email_campaign_recipients_table` (Session 50 — bulk email)
 19. `2026_07_03_103842_add_proposal_signed_copy_to_quote_requests_table` (Session 53 — proposal sign-and-return)
+20. `2026_07_14_000001_add_email_signature_to_admin_users_table` (Session 57 — Outlook-style e-mail)
+21. `2026_07_14_000002_extend_customer_communications_for_composer` (Session 57 — Outlook-style e-mail)
 
-Migrations 1–18 verified to apply cleanly on MySQL via CI (`migrate:fresh`) and `LeadFunnelAnalyticsTest`'s `RefreshDatabase`; #16–18 were additionally exercised against sqlite in `BulkEmailCampaignTest`. Applied to production via `artisan migrate --force` as part of the 2026-07-01 deploy (which also shipped Session 51's code-only Media Library fix — no new migrations there). #19 is guarded/additive (`Schema::hasColumn` check) and ready to deploy via the same command — not yet confirmed run against production as of this note. See `DEPLOY_RUNBOOK.md` for the ordered deploy + rollback plan.
+Migrations 1–18 verified to apply cleanly on MySQL via CI (`migrate:fresh`) and `LeadFunnelAnalyticsTest`'s `RefreshDatabase`; #16–18 were additionally exercised against sqlite in `BulkEmailCampaignTest`. Applied to production via `artisan migrate --force` as part of the 2026-07-01 deploy (which also shipped Session 51's code-only Media Library fix — no new migrations there). #19–21 are guarded/additive (`Schema::hasColumn` checks) and ready to deploy via the same command — not yet confirmed run against production as of this note. #21 also widens `customer_communications.body` from TEXT to LONGTEXT via raw SQL (no doctrine/dbal in this project). See `DEPLOY_RUNBOOK.md` for the ordered deploy + rollback plan.
 
 ⚠️ Bulk email is deployed but **not yet safe to use for a real send**: `.env`
 still has `QUEUE_CONNECTION=sync`, so `SendBulkEmailCampaignJob` would run

@@ -49,6 +49,7 @@ use App\Http\Controllers\Admin\AdminCustomerApprovalController;
 use App\Http\Controllers\Admin\AdminCustomerVerificationController;
 use App\Http\Controllers\Admin\AdminCustomerAccessRequestController;
 use App\Http\Controllers\CustomerAccessRequestController;
+use App\Http\Controllers\CustomerCommunicationController;
 use App\Http\Controllers\CustomerNotificationController;
 use App\Http\Controllers\CustomerNotificationPreferenceController;
 use App\Http\Controllers\CustomerTrackingController;
@@ -135,6 +136,12 @@ Route::prefix('v1')->group(function () {
         // CRM-8: Customer-initiated access requests (portal)
         Route::get('customer/access-requests', [CustomerAccessRequestController::class, 'index']);
         Route::post('customer/access-requests', [CustomerAccessRequestController::class, 'store']);
+
+        // Outlook-style e-mail — customer-portal side (own thread, reply, read)
+        Route::get('customer/communications', [CustomerCommunicationController::class, 'index']);
+        Route::post('customer/communications/{id}/reply', [CustomerCommunicationController::class, 'reply']);
+        Route::post('customer/communications/{id}/read', [CustomerCommunicationController::class, 'markRead']);
+        Route::get('customer/communications/{id}/attachments/{index}/download', [CustomerCommunicationController::class, 'downloadAttachment']);
 
         // Customer portal notifications ("Email = Inbox") — scoped to self
         Route::get('customer/notifications', [CustomerNotificationController::class, 'index']);
@@ -356,6 +363,8 @@ Route::prefix('v1')->group(function () {
         Route::put('profile', [AdminUserController::class, 'updateProfile']);
         Route::put('profile/password', [AdminUserController::class, 'changePassword']);
         Route::put('change-password', [AdminUserController::class, 'changePassword']);
+        // Outlook-style e-mail signature — own signature only, no extra permission
+        Route::put('profile/signature', [AdminUserController::class, 'updateSignature']);
 
         // -----------------------------------------------------------------
         // Admin user management — admins.manage (super_admin only)
@@ -558,11 +567,17 @@ Route::prefix('v1')->group(function () {
         Route::middleware('permission:crm.view')->group(function () {
             Route::get('customers/{id}/communications', [AdminCommunicationController::class, 'indexForCustomer']);
             Route::get('quote-requests/{id}/communications', [AdminCommunicationController::class, 'indexForQuote']);
+            Route::post('communications/{id}/read', [AdminCommunicationController::class, 'markRead']);
+            Route::get('communications/{id}/attachments/{index}/download', [AdminCommunicationController::class, 'downloadAttachment']);
         });
 
         Route::middleware('permission:crm.update')->group(function () {
             Route::post('customers/{id}/communications', [AdminCommunicationController::class, 'storeForCustomer']);
             Route::post('quote-requests/{id}/communications', [AdminCommunicationController::class, 'storeForQuote']);
+            // Outlook-style compose/reply — a real e-mail send, distinct from
+            // the manual "log an interaction" entries above.
+            Route::post('customers/{id}/communications/send-email', [AdminCommunicationController::class, 'sendEmailForCustomer']);
+            Route::post('quote-requests/{id}/communications/send-email', [AdminCommunicationController::class, 'sendEmailForQuote']);
         });
 
         // -----------------------------------------------------------------
