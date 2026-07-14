@@ -84,25 +84,57 @@ both `customer_id` and `customer_name`/`customer_email` returns errors on both n
 
 ---
 
-## 2. Attach documents — already built, no changes needed
+## 2. Attach documents — upload the real files, don't auto-generate
 
-`POST /admin/orders/{id}/trade-documents/upload` (multipart form, permission
-already gated on the order's payment stage — see note above):
+**Use upload, not the "Generate…" endpoints, for historical orders.** The
+`generateProforma` / `generateCommercialInvoice` / `generatePackingList` /
+`generateDeliveryNote` endpoints build a *new* PDF from the system's own data
+— they're for orders processed through the platform going forward, not for
+recreating paperwork that was already issued to the customer by e-mail or
+WhatsApp before this system existed. For historical orders, always use the
+upload endpoint below so the customer gets the **actual original document**,
+not a regenerated stand-in.
+
+`POST /admin/orders/{id}/trade-documents/upload` (multipart form):
 
 ```
 file:        (the actual scanned/original PDF, JPG, PNG, XLS, or CSV — max 20MB)
-type_label:  "Commercial Invoice" | "Bill of Lading" | "Packing List" | anything descriptive
+type_label:  "Invoice" | "Bill of Lading" | "Packing List" | anything descriptive
 notes:       optional free text
 ```
 
-This is a generic upload — `type_label` is a free-text label you choose, so
-it works for any historical document type without needing a fixed dropdown
-list on the backend. It only works once the order's `payment_stage` is at
-`deposit_paid` or later (hence the note above) — a 409 with
-`code: "document_generation_blocked_payment_stage"` means the stage needs
-raising first via a `PUT /admin/orders/{id}` call.
+`type_label` is a free-text label you choose, so it works for any document
+type without a fixed dropdown on the backend — build the picker UI-side
+(suggested options: Invoice, Proforma, Packing List, Bill of Lading, Order
+Confirmation, Other) and send whatever the admin picks/types as `type_label`.
 
-List existing documents for an order: `GET /admin/orders/{id}/trade-documents`.
+To attach several documents to one order (e.g. invoice + packing list + BOL
+from the same e-mail thread), call this endpoint once per file — build the
+UI as a repeatable "add another document" row, not a single-file form.
+
+**Visibility rule — confirmed, not changing:** every uploaded document is
+gated behind the order actually being **fully paid**
+(`payment_status: paid`, or `payment_stage` at `balance_paid`/
+`shipment_released`) — same rule as generated documents, applied
+consistently on purpose. Concretely:
+- Order created/marked as fully paid → the uploaded document is visible to
+  the customer immediately.
+- Order still mid-flight (deposit only, balance owed, in transit) → the
+  document is accepted and stored, but **stays hidden from the customer's
+  portal** until the balance is marked paid — even though the customer
+  already has the same file in their WhatsApp/e-mail. This was confirmed as
+  intentional (matches Okelcor's stated "balance against bill of lading"
+  terms) rather than a bug — the upload will still succeed with a 201, it
+  just won't show up in `GET /orders/{ref}/trade-documents` yet. If a
+  document upload doesn't appear in the portal, this is why — no separate
+  error state to build for it.
+- A 409 with `code: "document_generation_blocked_payment_stage"` means the
+  order's `payment_stage` hasn't even reached `deposit_paid` yet — raise it
+  via `PUT /admin/orders/{id}` first (this blocks the *upload itself*, a
+  stricter/earlier check than the visibility rule above).
+
+List existing documents for an order (admin view — visible regardless of
+payment stage, so staff can always see what's attached): `GET /admin/orders/{id}/trade-documents`.
 
 ---
 
@@ -159,19 +191,30 @@ a normal order, they need zero changes here.
 2. On the new customer's detail page, add an **"Add historical order"**
    action opening a form for §1 above — keep it simple: customer is already
    selected, so just status/payment/carrier/items.
-3. On the resulting order's detail page, surface the **Documents** tab
-   (upload via §2) and **Shipment** tab (events + sync via §3) — these are
-   the same tabs a normal order's detail page should already have; historical
-   orders don't need special-cased UI, just entry via §1 to get them into the system.
+3. Immediately after creating the order (same flow, not a separate task the
+   admin has to remember later), prompt for **document upload** — one or
+   more repeatable rows of (file + type label), each calling §2. This is
+   the step that replaces re-typing/regenerating paperwork: admin drags in
+   the actual invoice/BOL/packing list PDF that was already sent to the
+   customer by e-mail or WhatsApp.
+4. On the resulting order's detail page, the **Documents** tab (§2) and
+   **Shipment** tab (§3) should be the same ones a normal order's detail
+   page already has — historical orders don't need special-cased UI beyond
+   steps 2–3 to get them into the system.
 
 ---
 
 ## Please scan / confirm on your side
 
 - Build the "Add historical order" form (§1) — this is the only genuinely new endpoint.
-- Confirm the Documents and Shipment tabs already exist on the order detail
-  page for normal orders; if so, historical orders need no extra UI work
-  beyond creation.
+- Build the document-upload step as part of that same flow (§2, step 3
+  above) — repeatable rows, not a single file input, and make sure the UI
+  never calls the "Generate…" document endpoints for a historical order.
+- If an admin uploads a document for an order that isn't fully paid yet and
+  it doesn't show up in the customer's portal — that's the confirmed,
+  intentional payment gate (§2), not a bug to chase.
+- Confirm the Shipment tab already exists on the order detail page for
+  normal orders; if so, historical orders need no extra UI work there.
 - Double-check the customer portal order/tracking/document pages are already
   pointed at the endpoints in §4 — if they already work for a live website
   order, they'll work here with no changes.
