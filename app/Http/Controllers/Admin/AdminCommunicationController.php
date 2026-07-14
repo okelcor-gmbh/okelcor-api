@@ -196,22 +196,37 @@ class AdminCommunicationController extends Controller
 
         // Store attachments before sending — a failed send below still keeps
         // the files, and the communication log stays a true record either way.
+        // Wrapped: a storage failure here must surface as a clear error, not
+        // a raw 500, and must never silently drop an attachment the admin
+        // explicitly added.
         $attachmentMeta  = [];
         $attachmentFiles = [];
-        foreach ($request->file('attachments', []) as $file) {
-            $storedPath = $file->store('communications/' . now()->format('Y/m'), 'local');
+        try {
+            foreach ($request->file('attachments', []) as $file) {
+                $storedPath = $file->store('communications/' . now()->format('Y/m'), 'local');
 
-            $attachmentMeta[] = [
-                'name' => $file->getClientOriginalName(),
-                'path' => $storedPath,
-                'mime' => $file->getClientMimeType(),
-                'size' => $file->getSize(),
-            ];
-            $attachmentFiles[] = [
-                'path' => storage_path('app/private/' . $storedPath),
-                'name' => $file->getClientOriginalName(),
-                'mime' => $file->getClientMimeType(),
-            ];
+                $attachmentMeta[] = [
+                    'name' => $file->getClientOriginalName(),
+                    'path' => $storedPath,
+                    'mime' => $file->getClientMimeType(),
+                    'size' => $file->getSize(),
+                ];
+                $attachmentFiles[] = [
+                    'path' => storage_path('app/private/' . $storedPath),
+                    'name' => $file->getClientOriginalName(),
+                    'mime' => $file->getClientMimeType(),
+                ];
+            }
+        } catch (\Throwable $e) {
+            Log::error('[communication_attachment_store_failed] Could not store attachment', [
+                'event' => 'communication_attachment_store_failed',
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => 'One of the attachments could not be saved. Please try again.',
+                'code'    => 'attachment_store_failed',
+            ], 502);
         }
 
         $messageId = Str::uuid()->toString() . '@okelcor.com';
@@ -223,12 +238,11 @@ class AdminCommunicationController extends Controller
 
         try {
             Mail::to($recipientEmail)
-                ->cc($cc)
                 ->send(new CustomerAdHocEmail(
                     sender: $sender,
                     subjectLine: $subject,
                     bodyHtml: $bodyClean,
-                    cc: $cc,
+                    ccRecipients: $cc,
                     attachmentFiles: $attachmentFiles,
                     messageId: $messageId,
                     inReplyTo: $parent?->message_id,
@@ -251,23 +265,38 @@ class AdminCommunicationController extends Controller
             ]);
         }
 
-        $comm = CustomerCommunication::create(array_merge($context, [
-            'admin_user_id' => $sender?->id,
-            'type'          => 'email',
-            'direction'     => 'outbound',
-            'channel'       => 'email',
-            'subject'       => $subject,
-            'body'          => $bodyClean,
-            'cc'            => $cc ?: null,
-            'attachments'   => $attachmentMeta ?: null,
-            'message_id'    => $messageId,
-            'in_reply_to'   => $parent?->message_id,
-            'status'        => $status,
-            'completed_at'  => $status === 'sent' ? now() : null,
-            'metadata'      => $error ? ['error' => $error] : null,
-        ]));
+        // The e-mail attempt itself (sent or failed) is already final at this
+        // point — a failure to WRITE the log entry below must never turn
+        // into a 500 that hides whether the e-mail actually went out.
+        $comm      = null;
+        $logFailed = null;
+        try {
+            $comm = CustomerCommunication::create(array_merge($context, [
+                'admin_user_id' => $sender?->id,
+                'type'          => 'email',
+                'direction'     => 'outbound',
+                'channel'       => 'email',
+                'subject'       => $subject,
+                'body'          => $bodyClean,
+                'cc'            => $cc ?: null,
+                'attachments'   => $attachmentMeta ?: null,
+                'message_id'    => $messageId,
+                'in_reply_to'   => $parent?->message_id,
+                'status'        => $status,
+                'completed_at'  => $status === 'sent' ? now() : null,
+                'metadata'      => $error ? ['error' => $error] : null,
+            ]));
+        } catch (\Throwable $e) {
+            $logFailed = $e->getMessage();
+            Log::error('[communication_log_write_failed] Could not save communication record', [
+                'event'          => 'communication_log_write_failed',
+                'error'          => $logFailed,
+                'send_status'    => $status,
+                'recipient'      => $recipientEmail,
+            ]);
+        }
 
-        if ($status === 'sent') {
+        if ($status === 'sent' && $comm) {
             // "Email = Inbox" — the customer also sees this in their portal
             // bell, same as every other transactional e-mail in this app.
             CustomerNotifier::notifyByEmail($recipientEmail, 'message_received', $subject,
@@ -283,17 +312,18 @@ class AdminCommunicationController extends Controller
         if ($status === 'failed') {
             return response()->json([
                 'success' => false,
-                'message' => 'E-mail could not be sent. The message was logged so nothing is lost.',
+                'message' => 'E-mail could not be sent.' . ($comm ? ' The message was logged so nothing is lost.' : ''),
                 'code'    => 'email_send_failed',
                 'error'   => $error,
-                'data'    => $this->format($comm),
+                'data'    => $comm ? $this->format($comm) : null,
             ], 502);
         }
 
         return response()->json([
             'success' => true,
-            'data'    => $this->format($comm),
-            'message' => "E-mail sent to {$recipientEmail}.",
+            'data'    => $comm ? $this->format($comm) : null,
+            'message' => "E-mail sent to {$recipientEmail}."
+                . (! $comm ? ' (Note: the record could not be saved to the communication log — error: ' . $logFailed . ')' : ''),
         ], 201);
     }
 

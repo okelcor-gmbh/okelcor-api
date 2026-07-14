@@ -19,18 +19,26 @@ use Illuminate\Queue\SerializesModels;
  * rich HTML, already sanitized by RichEmailHtmlSanitizer before this class
  * ever sees it — sanitize-once-at-write, trust-at-render.
  *
- * @param array<int, string> $cc
+ * @param array<int, string> $ccRecipients
  * @param array<int, array{path:string, name:string, mime:string}> $attachmentFiles
  */
 class CustomerAdHocEmail extends Mailable
 {
     use Queueable, SerializesModels;
 
+    /**
+     * Note: named $ccRecipients, not $cc — Mailable already declares a
+     * public, non-readonly $cc property of its own (used internally by the
+     * fluent ->cc() builder). Redeclaring a property inherited from the
+     * parent as readonly is a PHP fatal error at class-load time, not a
+     * catchable exception — same reasoning behind $subjectLine (not
+     * $subject) and $attachmentFiles (not $attachments) below.
+     */
     public function __construct(
         public readonly AdminUser $sender,
         public readonly string $subjectLine,
         public readonly string $bodyHtml,
-        public readonly array $cc,
+        public readonly array $ccRecipients,
         public readonly array $attachmentFiles,
         public readonly string $messageId,
         public readonly ?string $inReplyTo = null,
@@ -48,7 +56,7 @@ class CustomerAdHocEmail extends Mailable
             // Replies go straight back to the staff member who sent it, not
             // a shared inbox — matches ProposalEmail's existing convention.
             replyTo: [$this->sender->email],
-            cc: $this->cc,
+            cc: $this->ccRecipients,
             subject: $this->subjectLine,
         );
     }
