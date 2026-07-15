@@ -230,7 +230,7 @@ class AdminCommunicationController extends Controller
             ], 502);
         }
 
-        $messageId = Str::uuid()->toString() . '@okelcor.com';
+        $messageId = Str::uuid()->toString() . '@' . config('services.mail_inbound.message_id_domain', 'okelcor.com');
         $sender    = $request->user();
         $cc        = array_values(array_unique($data['cc'] ?? []));
 

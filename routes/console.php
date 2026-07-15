@@ -43,3 +43,9 @@ Schedule::command('tracking:sync-carriers')
     ->withoutOverlapping()
     ->onOneServer()
     ->appendOutputTo(storage_path('logs/carrier-tracking-sync.log'));
+
+Schedule::command('email:fetch-inbound')
+    ->everyFiveMinutes()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/inbound-email-fetch.log'));

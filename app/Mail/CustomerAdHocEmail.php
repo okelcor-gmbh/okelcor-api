@@ -53,9 +53,7 @@ class CustomerAdHocEmail extends Mailable
                 config('mail.from.address', 'support@okelcor.com'),
                 $senderName . ' (Okelcor)',
             ),
-            // Replies go straight back to the staff member who sent it, not
-            // a shared inbox — matches ProposalEmail's existing convention.
-            replyTo: [$this->sender->email],
+            replyTo: [$this->buildReplyToAddress()],
             cc: $this->ccRecipients,
             subject: $this->subjectLine,
         );
@@ -98,6 +96,27 @@ class CustomerAdHocEmail extends Mailable
         return collect($this->attachmentFiles)
             ->map(fn (array $a) => Attachment::fromPath($a['path'])->as($a['name'])->withMime($a['mime']))
             ->all();
+    }
+
+    /**
+     * Plus-addressed reply-to (e.g. support+{uuid}@okelcor.com) so an
+     * inbound reply can be matched back to this exact message directly —
+     * see FetchInboundEmails. Falls back to the sending admin's own address
+     * (the previous, only behaviour) when inbound capture isn't configured
+     * yet, so this is safe to ship ahead of that setup being finished.
+     */
+    private function buildReplyToAddress(): string
+    {
+        $inboundAddress = config('services.mail_inbound.address');
+
+        if (! config('services.mail_inbound.enabled') || ! $inboundAddress || ! str_contains($inboundAddress, '@')) {
+            return $this->sender->email;
+        }
+
+        [$local, $domain] = explode('@', $inboundAddress, 2);
+        $tag = explode('@', $this->messageId)[0];
+
+        return "{$local}+{$tag}@{$domain}";
     }
 
     private function toPlainText(string $html): string
