@@ -58,17 +58,21 @@ class CustomerNotifier
     /**
      * Default preferences. email_marketing is opt-in (GDPR); everything else
      * defaults on. email_orders stays effectively forced via wantsEmail().
+     * whatsapp_enabled defaults OFF, unlike email — WhatsApp Business Policy
+     * requires opt-in consent for business-initiated messages; there is no
+     * "everyone gets it unless they opt out" default here.
      */
     public static function defaultPreferences(): array
     {
         return [
-            'inapp_enabled'   => true,
-            'email_enabled'   => true,
-            'email_orders'    => true,
-            'email_documents' => true,
-            'email_quotes'    => true,
-            'email_account'   => true,
-            'email_marketing' => false,
+            'inapp_enabled'    => true,
+            'email_enabled'    => true,
+            'email_orders'     => true,
+            'email_documents'  => true,
+            'email_quotes'     => true,
+            'email_account'    => true,
+            'email_marketing'  => false,
+            'whatsapp_enabled' => false,
         ];
     }
 
@@ -102,6 +106,21 @@ class CustomerNotifier
         }
 
         return (bool) ($prefs['email_' . $group] ?? true);
+    }
+
+    /**
+     * Whether this customer has opted in to WhatsApp messages at all, and
+     * has a phone number on file to send them to. No per-group granularity
+     * yet (single on/off) — deliberate v1 scope, same as email's groups
+     * would need if this ever needs "orders yes, marketing no" nuance.
+     */
+    public static function wantsWhatsApp(Customer $customer): bool
+    {
+        if (empty($customer->phone)) {
+            return false;
+        }
+
+        return (bool) (self::preferencesFor($customer)['whatsapp_enabled'] ?? false);
     }
 
     /**

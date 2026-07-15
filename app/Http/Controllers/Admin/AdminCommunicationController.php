@@ -9,6 +9,7 @@ use App\Models\CustomerCommunication;
 use App\Models\QuoteRequest;
 use App\Services\CustomerNotifier;
 use App\Services\RichEmailHtmlSanitizer;
+use App\Services\WhatsAppService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -327,6 +328,101 @@ class AdminCommunicationController extends Controller
         ], 201);
     }
 
+    // ── WhatsApp compose/reply ────────────────────────────────────────────────
+
+    // POST /admin/customers/{id}/communications/send-whatsapp
+    public function sendWhatsAppForCustomer(Request $request, WhatsAppService $whatsapp, int $id): JsonResponse
+    {
+        $customer = Customer::findOrFail($id);
+
+        if (empty($customer->phone)) {
+            return response()->json([
+                'message' => 'This customer has no phone number on file.',
+                'code'    => 'missing_recipient_phone',
+            ], 422);
+        }
+
+        return $this->composeAndSendWhatsApp(
+            $request, $whatsapp,
+            ['customer_id' => $customer->id, 'quote_request_id' => null],
+            $customer->phone
+        );
+    }
+
+    // POST /admin/quote-requests/{id}/communications/send-whatsapp
+    public function sendWhatsAppForQuote(Request $request, WhatsAppService $whatsapp, int $id): JsonResponse
+    {
+        $quote = QuoteRequest::findOrFail($id);
+
+        if (empty($quote->phone)) {
+            return response()->json([
+                'message' => 'This inquiry has no phone number on file.',
+                'code'    => 'missing_recipient_phone',
+            ], 422);
+        }
+
+        return $this->composeAndSendWhatsApp(
+            $request, $whatsapp,
+            ['customer_id' => $quote->customer_id, 'quote_request_id' => $quote->id],
+            $quote->phone
+        );
+    }
+
+    /**
+     * Free-form text only — WhatsApp only allows this within the 24h
+     * customer-service window (the customer must have messaged in the last
+     * 24h). Outside that window, Meta rejects the send; the error is
+     * surfaced as-is so the UI can suggest a template message instead
+     * (there is no general-purpose "send any text as a template" — see
+     * WHATSAPP_SETUP.md for how templates get created).
+     */
+    private function composeAndSendWhatsApp(Request $request, WhatsAppService $whatsapp, array $context, string $phone): JsonResponse
+    {
+        $data = $request->validate([
+            'body' => ['required', 'string', 'max:4096'], // WhatsApp's own text message cap
+        ]);
+
+        $result = $whatsapp->sendText($phone, $data['body']);
+        $sent   = ! isset($result['error']);
+
+        $comm = null;
+        try {
+            $comm = CustomerCommunication::create(array_merge($context, [
+                'admin_user_id'       => $request->user()?->id,
+                'phone_number'        => $phone,
+                'type'                => 'whatsapp',
+                'direction'           => 'outbound',
+                'channel'             => 'whatsapp',
+                'body'                => $data['body'],
+                'whatsapp_message_id' => $result['message_id'] ?? null,
+                'whatsapp_status'     => $sent ? 'sent' : 'failed',
+                'status'              => $sent ? 'sent' : 'failed',
+                'completed_at'        => $sent ? now() : null,
+                'metadata'            => $sent ? null : ['error' => $result['error']],
+            ]));
+        } catch (\Throwable $e) {
+            Log::error('[whatsapp_log_write_failed] Could not save WhatsApp communication record', [
+                'error' => $e->getMessage(),
+                'phone' => $phone,
+            ]);
+        }
+
+        if (! $sent) {
+            return response()->json([
+                'success' => false,
+                'message' => 'WhatsApp message could not be sent: ' . $result['error'],
+                'code'    => 'whatsapp_send_failed',
+                'data'    => $comm ? $this->format($comm) : null,
+            ], 502);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data'    => $comm ? $this->format($comm) : null,
+            'message' => "WhatsApp message sent to {$phone}.",
+        ], 201);
+    }
+
     // POST /admin/communications/{id}/read
     public function markRead(int $id): JsonResponse
     {
@@ -383,6 +479,10 @@ class AdminCommunicationController extends Controller
             ])->values(),
             'message_id'       => $c->message_id,
             'in_reply_to'      => $c->in_reply_to,
+            'phone_number'     => $c->phone_number,
+            'whatsapp_message_id'    => $c->whatsapp_message_id,
+            'whatsapp_status'        => $c->whatsapp_status,
+            'whatsapp_template_name' => $c->whatsapp_template_name,
             'status'           => $c->status,
             'admin_user_id'    => $c->admin_user_id,
             'customer_id'      => $c->customer_id,

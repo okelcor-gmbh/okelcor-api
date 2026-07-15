@@ -104,4 +104,19 @@ return [
         'merchant_location_key'  => env('EBAY_MERCHANT_LOCATION_KEY', 'OKELCOR-MAIN'),
     ],
 
+    // WhatsApp Business Cloud API (Meta). Requires a WhatsApp Business
+    // Account (WABA) + a registered phone number in Meta Business Manager —
+    // see WHATSAPP_SETUP.md for the full one-time setup this account owner
+    // needs to do before any of this works. Degrades cleanly (['error' =>
+    // ...]) when unconfigured, same pattern as gls/dhl above.
+    'whatsapp' => [
+        'phone_number_id'    => env('WHATSAPP_PHONE_NUMBER_ID'),
+        'business_account_id' => env('WHATSAPP_BUSINESS_ACCOUNT_ID'),
+        'access_token'       => env('WHATSAPP_ACCESS_TOKEN'),
+        'app_secret'         => env('WHATSAPP_APP_SECRET'),
+        'verify_token'       => env('WHATSAPP_VERIFY_TOKEN'),
+        'api_version'        => env('WHATSAPP_API_VERSION', 'v20.0'),
+        'base_url'           => env('WHATSAPP_API_BASE_URL', 'https://graph.facebook.com'),
+    ],
+
 ];

@@ -28,13 +28,14 @@ class CustomerNotificationPreferenceController extends Controller
     public function update(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'inapp_enabled'   => ['sometimes', 'boolean'],
-            'email_enabled'   => ['sometimes', 'boolean'],
-            'email_orders'    => ['sometimes', 'boolean'],
-            'email_documents' => ['sometimes', 'boolean'],
-            'email_quotes'    => ['sometimes', 'boolean'],
-            'email_account'   => ['sometimes', 'boolean'],
-            'email_marketing' => ['sometimes', 'boolean'],
+            'inapp_enabled'    => ['sometimes', 'boolean'],
+            'email_enabled'    => ['sometimes', 'boolean'],
+            'email_orders'     => ['sometimes', 'boolean'],
+            'email_documents'  => ['sometimes', 'boolean'],
+            'email_quotes'     => ['sometimes', 'boolean'],
+            'email_account'    => ['sometimes', 'boolean'],
+            'email_marketing'  => ['sometimes', 'boolean'],
+            'whatsapp_enabled' => ['sometimes', 'boolean'],
         ]);
 
         $customer = $request->user();

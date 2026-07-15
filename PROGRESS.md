@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-07-14 | Branch: `main` | Latest commit: `71fe2dc`
+Last updated: 2026-07-15 | Branch: `main` | Latest commit: `b646a3b`
 
 ---
 
@@ -647,6 +647,43 @@ See `FRONTEND_NOTE_outlook-style-email.md`.
 
 ---
 
+## WhatsApp Business API integration (Session 58)
+
+Ask: integrate WhatsApp Business (Meta Cloud API) across sales,
+communication, and data insights. Deliberately reuses the exact
+infrastructure just built for Outlook-style e-mail rather than a parallel
+system — `customer_communications` already had `type: 'whatsapp'` as a
+valid (unused) enum value since CRM-6, and already had `channel`/
+`attachments`/`staff_read_at`/`customer_read_at` from the e-mail work, so
+only WhatsApp-specific columns were new.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `WhatsAppService` (new) | ✅ | Meta Graph API client — `sendText` (24h customer-service-window only), `sendTemplate` (business-initiated, needs a Meta-approved template), `sendDocument`. Degrades cleanly (`['error' => ...]`) same as GlsTrackingService/DhlTrackingService; never throws. Fully automated-tested (9 tests, `Http::fake()`, no DB — actually run, not just written): payload shape, auth header, phone normalization, error handling, 24h-window helper. |
+| `WhatsAppWebhookController` (new) — `GET/POST /webhooks/whatsapp` | ✅ | Verification handshake + inbound message/status events. POST protected by verifying Meta's `X-Hub-Signature-256` HMAC against the App Secret — same security boundary already applied to the Stripe webhook. De-dupes on Meta's own message id (webhook retries). |
+| WhatsApp → lead capture (new) | ✅ | A first-time inbound message with no matching customer/quote auto-creates a `QuoteRequest` (`lead_source: 'whatsapp'`) through the same CRM-2 quality-scoring + CRM-3B notification path the website/landing forms use — not a separate silo. `quote_requests.email` is NOT NULL and WhatsApp gives no e-mail ever, so a deterministic synthetic placeholder (`whatsapp+{phone}@no-email.okelcor.internal`) is used rather than loosening that constraint app-wide. |
+| Admin compose/send — `POST /admin/{customers,quote-requests}/{id}/communications/send-whatsapp` (new) | ✅ | Free-form text only, mirrors the e-mail compose endpoint's structure/permission/audit-log conventions exactly. Surfaces the 24h-window rejection from Meta as-is rather than a generic error. |
+| `WhatsAppNotifier` (new) — template-based automated notifications | ✅ | Opt-in gated (`CustomerNotifier::wantsWhatsApp()`, default **off** — Meta requires explicit consent for business-initiated messages, unlike e-mail). Small hardcoded template registry (`order_shipped`, `order_delivered`, `payment_reminder`, `proposal_ready`, `quote_ready`) — only `order_shipped`/`order_delivered` actually wired into a live trigger (`AdminOrderController::notifyShipmentStatus`) as a concrete working example; the rest are no-ops until their Meta template is approved (see `WHATSAPP_SETUP.md`) and wired the same one-line way. Not wired into all ~15 `CustomerNotifier` trigger points on purpose — no value calling a template that doesn't exist yet. |
+| `customer_communications` extended (`phone_number`, `whatsapp_message_id` unique, `whatsapp_status`, `whatsapp_template_name`) | ✅ | Additive/guarded migration on the same table extended for e-mail. Plain strings, not ENUMs, deliberately. |
+| `Customer.notification_preferences` gains `whatsapp_enabled` | ✅ | Defaults `false` (opt-in required, unlike `email_*` keys which default on). `PUT /auth/customer/notification-preferences` accepts it. |
+| Data insights — Lead Funnel Analytics | ✅ (no code change) | `AdminLeadFunnelController` already groups by `lead_source` generically — confirmed WhatsApp leads break down automatically, zero extra backend work. |
+| **Scope decision, not a gap** — no template CRUD, no catalog/commerce, no interactive buttons/flows, no per-category WhatsApp preference granularity, no document-send admin endpoint (service method exists, unwired) | ⬜ deferred | All explicitly out of v1 scope — documented in `FRONTEND_NOTE_whatsapp-integration.md` and `WHATSAPP_SETUP.md` rather than half-built. |
+| Backend feature tests (13, MySQL, written not yet executed) | 🔧 | `WhatsAppIntegrationTest` — webhook signature verification, verification handshake, lead capture, existing-contact logging, duplicate-webhook de-dupe, status updates, admin send, opt-in gating. Confirmed to skip cleanly under the default sqlite env; same MySQL-only limitation as every other session. |
+
+**Found and fixed while building the phone-matching logic:** the initial
+`LIKE` match against stored `phone`/`quote_requests.phone` values only
+stripped punctuation from the *inbound* WhatsApp number, not the *stored*
+one — a customer phone saved as `"+233 24 123 4567"` would never match
+`"233241234567"` from the webhook, since the embedded spaces break a plain
+substring search. Fixed by stripping the same characters from the stored
+column inside the query too. Caught while writing the test for this exact
+case, before it shipped.
+
+See `WHATSAPP_SETUP.md` (account-side Meta setup — required before anything
+sends/receives for real) and `FRONTEND_NOTE_whatsapp-integration.md`.
+
+---
+
 ## eBay Integration (Sessions 15–25)
 
 | Phase | Feature | Status |
@@ -823,6 +860,13 @@ EBAY_SELLER_LOCATION=Germany
 SHIPSGO_API_KEY=
 DHL_API_KEY=
 
+# WhatsApp Business (Meta Cloud API) — see WHATSAPP_SETUP.md for how to get these
+WHATSAPP_PHONE_NUMBER_ID=
+WHATSAPP_BUSINESS_ACCOUNT_ID=
+WHATSAPP_ACCESS_TOKEN=
+WHATSAPP_APP_SECRET=
+WHATSAPP_VERIFY_TOKEN=
+
 # Admin session
 ADMIN_SESSION_TTL_MINUTES=300
 
@@ -868,8 +912,10 @@ composer install --no-dev
 19. `2026_07_03_103842_add_proposal_signed_copy_to_quote_requests_table` (Session 53 — proposal sign-and-return)
 20. `2026_07_14_000001_add_email_signature_to_admin_users_table` (Session 57 — Outlook-style e-mail)
 21. `2026_07_14_000002_extend_customer_communications_for_composer` (Session 57 — Outlook-style e-mail)
+22. `2026_07_15_000001_extend_order_logs_action_enum` (order item editing — widens the ENUM to include several action values already used in shipped code, plus the new item-correction actions)
+23. `2026_07_15_000002_add_whatsapp_fields_to_customer_communications_table` (Session 58 — WhatsApp)
 
-Migrations 1–18 verified to apply cleanly on MySQL via CI (`migrate:fresh`) and `LeadFunnelAnalyticsTest`'s `RefreshDatabase`; #16–18 were additionally exercised against sqlite in `BulkEmailCampaignTest`. Applied to production via `artisan migrate --force` as part of the 2026-07-01 deploy (which also shipped Session 51's code-only Media Library fix — no new migrations there). #19–21 are guarded/additive (`Schema::hasColumn` checks) and ready to deploy via the same command — not yet confirmed run against production as of this note. #21 also widens `customer_communications.body` from TEXT to LONGTEXT via raw SQL (no doctrine/dbal in this project). See `DEPLOY_RUNBOOK.md` for the ordered deploy + rollback plan.
+Migrations 1–18 verified to apply cleanly on MySQL via CI (`migrate:fresh`) and `LeadFunnelAnalyticsTest`'s `RefreshDatabase`; #16–18 were additionally exercised against sqlite in `BulkEmailCampaignTest`. Applied to production via `artisan migrate --force` as part of the 2026-07-01 deploy (which also shipped Session 51's code-only Media Library fix — no new migrations there). #19–23 are guarded/additive (`Schema::hasColumn` checks) and ready to deploy via the same command — not yet confirmed run against production as of this note. #21 also widens `customer_communications.body` from TEXT to LONGTEXT via raw SQL (no doctrine/dbal in this project). See `DEPLOY_RUNBOOK.md` for the ordered deploy + rollback plan.
 
 ⚠️ Bulk email is deployed but **not yet safe to use for a real send**: `.env`
 still has `QUEUE_CONNECTION=sync`, so `SendBulkEmailCampaignJob` would run

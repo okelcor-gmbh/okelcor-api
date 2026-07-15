@@ -12,6 +12,7 @@ use App\Services\AdminAuditLogger;
 use App\Services\CustomerHealthService;
 use App\Services\CustomerNotifier;
 use App\Services\InvoiceService;
+use App\Services\WhatsAppNotifier;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -541,6 +542,22 @@ class AdminOrderController extends Controller
                 ],
             ]
         );
+
+        // WhatsApp twin — opt-in gated (CustomerNotifier::wantsWhatsApp) and a
+        // no-op until the matching template is approved in Meta Business
+        // Manager (see WHATSAPP_SETUP.md). Guest/manual orders with no
+        // matching customer account are skipped, same as the e-mail path
+        // above would be if there were no address at all.
+        $customer = Customer::where('email', $order->customer_email)->first();
+        if ($customer) {
+            WhatsAppNotifier::notifyTemplate(
+                $customer,
+                $type,
+                [$order->ref, $order->tracking_number ?: 'N/A'],
+                null,
+                $order->id
+            );
+        }
     }
 
     private function logTrackingChange(Request $request, Order $order): void

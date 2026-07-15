@@ -7,6 +7,7 @@ use App\Http\Controllers\InvoiceDownloadController;
 use App\Http\Controllers\ArticleController;
 use App\Http\Controllers\ContainerTrackingController;
 use App\Http\Controllers\PaymentController;
+use App\Http\Controllers\WhatsAppWebhookController;
 use App\Http\Controllers\VatController;
 use App\Http\Controllers\BrandController;
 use App\Http\Controllers\CategoryController;
@@ -264,6 +265,16 @@ Route::prefix('v1')->group(function () {
 
     // Stripe webhook — no rate limit, excluded from ForceJsonResponse
     Route::post('payments/webhook', [PaymentController::class, 'webhook'])
+        ->withoutMiddleware([\App\Http\Middleware\ForceJsonResponse::class]);
+
+    // WhatsApp webhook (Meta) — verification handshake (GET) + message/status
+    // events (POST). No rate limit, excluded from ForceJsonResponse (the GET
+    // handshake must return Meta's challenge as plain text, not wrapped JSON)
+    // — same treatment as the Stripe webhook above. Protected by its own
+    // signature verification (X-Hub-Signature-256), not by auth middleware.
+    Route::get('webhooks/whatsapp', [WhatsAppWebhookController::class, 'verify'])
+        ->withoutMiddleware([\App\Http\Middleware\ForceJsonResponse::class]);
+    Route::post('webhooks/whatsapp', [WhatsAppWebhookController::class, 'handle'])
         ->withoutMiddleware([\App\Http\Middleware\ForceJsonResponse::class]);
 
     // Mollie is legacy/inactive until business account/API credentials are approved.
@@ -584,6 +595,10 @@ Route::prefix('v1')->group(function () {
             // the manual "log an interaction" entries above.
             Route::post('customers/{id}/communications/send-email', [AdminCommunicationController::class, 'sendEmailForCustomer']);
             Route::post('quote-requests/{id}/communications/send-email', [AdminCommunicationController::class, 'sendEmailForQuote']);
+            // WhatsApp compose/reply — free-form text, only within the 24h
+            // customer-service window (see WhatsAppService).
+            Route::post('customers/{id}/communications/send-whatsapp', [AdminCommunicationController::class, 'sendWhatsAppForCustomer']);
+            Route::post('quote-requests/{id}/communications/send-whatsapp', [AdminCommunicationController::class, 'sendWhatsAppForQuote']);
         });
 
         // -----------------------------------------------------------------
