@@ -29,6 +29,7 @@ use App\Http\Controllers\Admin\AdminHeroSlideController;
 use App\Http\Controllers\Admin\AdminMarketingContactController;
 use App\Http\Controllers\Admin\AdminNewsletterController;
 use App\Http\Controllers\Admin\AdminOrderController;
+use App\Http\Controllers\Admin\AdminOrderItemController;
 use App\Http\Controllers\Admin\AdminOrderShipmentEventController;
 use App\Http\Controllers\Admin\OrderImportController;
 use App\Http\Controllers\Admin\AdminNotificationController;
@@ -481,6 +482,11 @@ Route::prefix('v1')->group(function () {
             Route::patch('orders/{id}/status', [AdminOrderController::class, 'updateStatus']);
             Route::patch('orders/{id}/financials', [AdminOrderController::class, 'patchFinancials']);
             Route::post('orders/{id}/financials/revision-request', [AdminOrderFinancialsController::class, 'requestRevision']);
+            // Order item corrections — non-eBay orders only, direct-edit when
+            // financials aren't locked (see AdminOrderItemController).
+            Route::post('orders/{orderId}/items', [AdminOrderItemController::class, 'store']);
+            Route::patch('orders/{orderId}/items/{itemId}', [AdminOrderItemController::class, 'update']);
+            Route::delete('orders/{orderId}/items/{itemId}', [AdminOrderItemController::class, 'destroy']);
             Route::post('orders/{id}/shipment-events', [AdminOrderShipmentEventController::class, 'store']);
             Route::put('orders/{id}/shipment-events/{event}', [AdminOrderShipmentEventController::class, 'update']);
             Route::delete('orders/{id}/shipment-events/{event}', [AdminOrderShipmentEventController::class, 'destroy']);

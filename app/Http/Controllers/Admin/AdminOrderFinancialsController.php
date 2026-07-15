@@ -4,11 +4,13 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\OrderLog;
 use App\Models\TradeDocument;
 use App\Services\TradeDocumentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class AdminOrderFinancialsController extends Controller
@@ -40,10 +42,41 @@ class AdminOrderFinancialsController extends Controller
         }
 
         $request->validate([
-            'reason'               => ['required', 'string', 'min:5', 'max:1000'],
-            'changes'              => ['required', 'array', 'min:1'],
-            'changes.delivery_fee' => ['sometimes', 'numeric', 'min:0', 'max:999999.99'],
+            'reason'                        => ['required', 'string', 'min:5', 'max:1000'],
+            'changes'                       => ['required', 'array', 'min:1'],
+            'changes.delivery_fee'          => ['sometimes', 'numeric', 'min:0', 'max:999999.99'],
+            // Item-level corrections — same fields as the direct-edit
+            // endpoints (AdminOrderItemController), just deferred to approval
+            // because this order's financials are locked.
+            'changes.items'                 => ['sometimes', 'array'],
+            'changes.items.*.id'            => ['required', 'integer'],
+            'changes.items.*.sku'           => ['sometimes', 'nullable', 'string', 'max:100'],
+            'changes.items.*.name'          => ['sometimes', 'string', 'max:255'],
+            'changes.items.*.brand'         => ['sometimes', 'nullable', 'string', 'max:100'],
+            'changes.items.*.size'          => ['sometimes', 'nullable', 'string', 'max:50'],
+            'changes.items.*.unit_price'    => ['sometimes', 'numeric', 'min:0', 'max:999999.99'],
+            'changes.items.*.quantity'      => ['sometimes', 'integer', 'min:1', 'max:100000'],
+            'changes.new_items'             => ['sometimes', 'array'],
+            'changes.new_items.*.name'       => ['required', 'string', 'max:255'],
+            'changes.new_items.*.unit_price' => ['required', 'numeric', 'min:0', 'max:999999.99'],
+            'changes.new_items.*.quantity'   => ['required', 'integer', 'min:1', 'max:100000'],
+            'changes.new_items.*.sku'        => ['sometimes', 'nullable', 'string', 'max:100'],
+            'changes.new_items.*.brand'      => ['sometimes', 'nullable', 'string', 'max:100'],
+            'changes.new_items.*.size'       => ['sometimes', 'nullable', 'string', 'max:50'],
+            'changes.remove_item_ids'       => ['sometimes', 'array'],
+            'changes.remove_item_ids.*'     => ['integer'],
         ]);
+
+        $hasItemChanges = $request->filled('changes.items')
+            || $request->filled('changes.new_items')
+            || $request->filled('changes.remove_item_ids');
+
+        if ($hasItemChanges && $order->source === 'ebay') {
+            return response()->json([
+                'message' => 'This order is synced from eBay — item quantities and prices are managed there and will be overwritten on the next sync. Correct the listing/order in eBay instead.',
+                'code'    => 'ebay_order_not_editable',
+            ], 403);
+        }
 
         $order->update([
             'financials_revision_required'     => true,
@@ -53,9 +86,12 @@ class AdminOrderFinancialsController extends Controller
             'financials_revision_changes'      => $request->input('changes'),
         ]);
 
+        // new_value is VARCHAR(100) — a short summary, not the full payload
+        // (which is already persisted in financials_revision_changes above
+        // and quoted in full in `notes`, an unbounded TEXT column).
         $this->writeLog($request, $order, 'financial_revision_requested', [
-            'notes'     => 'Revision requested: ' . $request->input('reason'),
-            'new_value' => json_encode($request->input('changes')),
+            'new_value' => substr('changes: ' . implode(',', array_keys($request->input('changes'))), 0, 100),
+            'notes'     => 'Revision requested: ' . $request->input('reason') . ' — ' . json_encode($request->input('changes')),
         ]);
 
         return response()->json([
@@ -89,50 +125,123 @@ class AdminOrderFinancialsController extends Controller
 
         $changes = $order->financials_revision_changes ?? [];
 
-        // Supersede affected issued/sent documents
-        $supersedable = ['order_confirmation', 'proforma', 'commercial_invoice'];
-        $affected = TradeDocument::where('order_id', $order->id)
-            ->whereIn('status', ['issued', 'sent'])
-            ->whereIn('type', $supersedable)
-            ->get();
+        try {
+            [$affected, $appliedChanges] = DB::transaction(function () use ($order, $admin, $changes) {
+                // Supersede affected issued/sent documents
+                $supersedable = ['order_confirmation', 'proforma', 'commercial_invoice'];
+                $affected = TradeDocument::where('order_id', $order->id)
+                    ->whereIn('status', ['issued', 'sent'])
+                    ->whereIn('type', $supersedable)
+                    ->get();
 
-        foreach ($affected as $doc) {
-            $doc->update([
-                'status'           => 'superseded',
-                'superseded_at'    => now(),
-                'superseded_by_id' => $admin?->id,
-                'supersede_reason' => 'Financial revision approved — ' . $order->financials_revision_reason,
-            ]);
+                foreach ($affected as $doc) {
+                    $doc->update([
+                        'status'           => 'superseded',
+                        'superseded_at'    => now(),
+                        'superseded_by_id' => $admin?->id,
+                        'supersede_reason' => 'Financial revision approved — ' . $order->financials_revision_reason,
+                    ]);
+                }
+
+                $appliedChanges = [];
+
+                if (isset($changes['delivery_fee'])) {
+                    $oldDeliveryCost      = (float) $order->delivery_cost;
+                    $oldTotal             = (float) $order->total;
+                    $newDeliveryCost      = (float) $changes['delivery_fee'];
+                    $newTotal             = round($oldTotal - $oldDeliveryCost + $newDeliveryCost, 2);
+                    $order->delivery_cost = $newDeliveryCost;
+                    $order->total         = $newTotal;
+                    $appliedChanges['delivery_cost'] = ['from' => $oldDeliveryCost, 'to' => $newDeliveryCost];
+                    $appliedChanges['total']         = ['from' => $oldTotal,        'to' => $newTotal];
+                }
+
+                // Existing item corrections — same surgical delta approach as
+                // the direct-edit path (AdminOrderItemController) for
+                // unlocked orders.
+                foreach ($changes['items'] ?? [] as $itemChange) {
+                    $item = OrderItem::where('order_id', $order->id)->find($itemChange['id'] ?? null);
+                    if (! $item) {
+                        continue;
+                    }
+
+                    $oldLineTotal = (float) $item->line_total;
+                    $item->fill(collect($itemChange)->except('id')->all());
+                    $item->line_total = round((float) $item->unit_price * (int) $item->quantity, 2);
+                    $item->save();
+
+                    $delta            = round((float) $item->line_total - $oldLineTotal, 2);
+                    $order->subtotal  = round((float) $order->subtotal + $delta, 2);
+                    $order->total     = round((float) $order->total + $delta, 2);
+                    $appliedChanges['items'][] = ['id' => $item->id, 'line_total_delta' => $delta];
+                }
+
+                // New items added as part of the revision.
+                foreach ($changes['new_items'] ?? [] as $newItemData) {
+                    $lineTotal = round((float) $newItemData['unit_price'] * (int) $newItemData['quantity'], 2);
+                    $newItem   = OrderItem::create([
+                        'order_id'   => $order->id,
+                        'product_id' => null,
+                        'sku'        => $newItemData['sku'] ?? null,
+                        'brand'      => $newItemData['brand'] ?? '',
+                        'name'       => $newItemData['name'],
+                        'size'       => $newItemData['size'] ?? '',
+                        'unit_price' => $newItemData['unit_price'],
+                        'quantity'   => $newItemData['quantity'],
+                        'line_total' => $lineTotal,
+                    ]);
+
+                    $order->subtotal = round((float) $order->subtotal + $lineTotal, 2);
+                    $order->total    = round((float) $order->total + $lineTotal, 2);
+                    $appliedChanges['new_items'][] = ['id' => $newItem->id, 'line_total' => $lineTotal];
+                }
+
+                // Items removed as part of the revision — guarded so an
+                // order can never end up with zero items via an approved
+                // revision. Throwing rolls back everything else in this
+                // transaction too (superseded docs, item edits/adds above).
+                $removeIds = array_values(array_filter($changes['remove_item_ids'] ?? []));
+                if ($removeIds) {
+                    $remaining = OrderItem::where('order_id', $order->id)->whereNotIn('id', $removeIds)->count();
+                    if ($remaining < 1) {
+                        throw new \RuntimeException('revision_would_empty_order');
+                    }
+
+                    foreach (OrderItem::where('order_id', $order->id)->whereIn('id', $removeIds)->get() as $item) {
+                        $lineTotal = (float) $item->line_total;
+                        $item->delete();
+                        $order->subtotal = round((float) $order->subtotal - $lineTotal, 2);
+                        $order->total    = round((float) $order->total - $lineTotal, 2);
+                        $appliedChanges['removed_items'][] = ['id' => $item->id, 'line_total' => $lineTotal];
+                    }
+                }
+
+                // Clear revision flags, relock with updated reason
+                $order->financials_revision_required     = false;
+                $order->financials_revision_reason       = null;
+                $order->financials_revision_requested_by = null;
+                $order->financials_revision_requested_at = null;
+                $order->financials_revision_changes      = null;
+                $order->financials_locked_at             = now();
+                $order->financials_locked_by             = $admin?->id;
+                $order->financials_lock_reason           = 'Revised financials approved';
+                $order->save();
+
+                return [$affected, $appliedChanges];
+            });
+        } catch (\RuntimeException $e) {
+            if ($e->getMessage() === 'revision_would_empty_order') {
+                return response()->json([
+                    'message' => 'This revision would remove every item on the order — add a replacement item to the revision first.',
+                    'code'    => 'revision_would_empty_order',
+                ], 422);
+            }
+            throw $e;
         }
-
-        // Apply the approved changes
-        $appliedChanges = [];
-
-        if (isset($changes['delivery_fee'])) {
-            $oldDeliveryCost      = (float) $order->delivery_cost;
-            $oldTotal             = (float) $order->total;
-            $newDeliveryCost      = (float) $changes['delivery_fee'];
-            $newTotal             = round($oldTotal - $oldDeliveryCost + $newDeliveryCost, 2);
-            $order->delivery_cost = $newDeliveryCost;
-            $order->total         = $newTotal;
-            $appliedChanges['delivery_cost'] = ['from' => $oldDeliveryCost, 'to' => $newDeliveryCost];
-            $appliedChanges['total']         = ['from' => $oldTotal,        'to' => $newTotal];
-        }
-
-        // Clear revision flags, relock with updated reason
-        $order->financials_revision_required     = false;
-        $order->financials_revision_reason       = null;
-        $order->financials_revision_requested_by = null;
-        $order->financials_revision_requested_at = null;
-        $order->financials_revision_changes      = null;
-        $order->financials_locked_at             = now();
-        $order->financials_locked_by             = $admin?->id;
-        $order->financials_lock_reason           = 'Revised financials approved';
-        $order->save();
 
         $this->writeLog($request, $order, 'financial_revision_approved', [
-            'notes'     => 'Revision approved. ' . count($affected) . ' document(s) superseded. Please regenerate.',
-            'new_value' => json_encode($appliedChanges),
+            'notes'     => 'Revision approved. ' . count($affected) . ' document(s) superseded. Please regenerate. Changes: ' . json_encode($appliedChanges),
+            'new_value' => substr('changes: ' . implode(',', array_keys($appliedChanges)), 0, 100),
         ]);
 
         return response()->json([
