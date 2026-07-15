@@ -696,36 +696,45 @@ subdomain/MX record. Per the order manager's preference, this polls the
 existing `support@okelcor.com` mailbox rather than a new dedicated one —
 see the own-domain guard below for why that's safe.
 
-**Pivot mid-session:** the first pass assumed a cPanel-hosted mailbox
-reachable over plain IMAP (`webklex/php-imap`) — then it turned out
-`support@okelcor.com` is actually a **Microsoft 365** mailbox. Microsoft has
-fully retired Basic Authentication (username/password) for IMAP/POP/SMTP on
-Exchange Online, so that approach would never have connected at all,
-regardless of how correct the credentials were. Rebuilt on **Microsoft
-Graph** instead (OAuth2 client-credentials via an Azure AD app registration)
-— removed the IMAP dependency entirely rather than leave unused code
-around. Turned out to be a net improvement: Graph returns clean JSON
-instead of an opaque IMAP object model, which made the message-parsing
-logic (plus-address extraction, In-Reply-To header lookup) directly
-testable where the IMAP version could only be reviewed, not tested.
+**Two pivots in this session, both worth knowing about:**
+
+1. The first pass assumed a cPanel-hosted mailbox reachable over plain IMAP
+   (`webklex/php-imap`) — then it turned out `support@okelcor.com` is
+   actually a **Microsoft 365** mailbox. Microsoft has fully retired Basic
+   Authentication (username/password) for IMAP/POP/SMTP on Exchange
+   Online, so that approach would never have connected, regardless of how
+   correct the credentials were. Rebuilt on **Microsoft Graph** (OAuth2
+   client-credentials via an Azure AD app registration).
+2. The user then asked for an alternative that avoided Azure entirely —
+   chose an **Exchange inbox rule that redirects a copy of
+   `support@okelcor.com`'s mail to a separate, non-Microsoft mailbox**,
+   read over plain IMAP (Basic Auth retirement is Exchange-Online-specific,
+   not IMAP in general — a non-Microsoft mailbox has no such restriction).
+   Rebuilt on `webklex/php-imap` a second time — removed and re-added the
+   composer dependency in the same session rather than run two transports
+   side by side.
+
+Both pivots only ever touched the *transport* layer (how messages get
+fetched). The matching/lead-capture/notification logic was written against
+a plain-array message shape from the start, so it survived both pivots
+completely unchanged and fully tested throughout — see `ImapInboundMailService::normalize()`,
+which converts a raw IMAP `Message` into that same shape.
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| `MicrosoftGraphMailService` (new) | ✅ | OAuth2 client-credentials against `login.microsoftonline.com`, then Graph REST (`GET /users/{mailbox}/mailFolders/inbox/messages?$filter=isRead eq false`, `PATCH .../messages/{id}` to mark read). Access token cached (Laravel Cache, ~1h TTL minus a safety margin) so a 5-minute poll doesn't re-authenticate every run. Degrades cleanly (`['error' => ...]`), same pattern as every other external API integration in this app. |
-| `email:fetch-inbound` command (rewritten) | ✅ | Polls `support@okelcor.com` via the Graph service above. Scheduled every 5 minutes (`routes/console.php`), same `Schedule::command()` pattern as the existing hourly jobs. No-ops cleanly when `MAIL_INBOUND_ENABLED` is unset — safe to ship ahead of the Azure app registration being finished. |
-| Plus-addressed Reply-To (`CustomerAdHocEmail`) | ✅ | Outgoing e-mails now set Reply-To to `support+{message-uuid}@okelcor.com` (when inbound capture is enabled) instead of the sending admin's own address — this is what actually redirects replies somewhere the system can read. **Falls back to the exact previous behaviour** (reply-to = sending admin) when inbound capture isn't enabled, so this shipped with zero behavior change until the setup is done. Transport-agnostic — unaffected by the IMAP→Graph pivot. |
-| Reply matching, in order of reliability | ✅ | (1) Plus-address in the reply's own `To:` — reconstructs the original message_id directly, immune to header stripping some corporate mail gateways do. (2) `In-Reply-To` header (standard fallback, read from Graph's `internetMessageHeaders`). (3) Sender e-mail address (last resort — matches a known Customer/QuoteRequest with no thread context at all). |
-| **Own-domain guard** (`isOwnDomainSender`) | ✅ | `support@okelcor.com` is shared with `ORDER_EMAIL`/`QUOTE_EMAIL`/`CRM_DIGEST_EMAIL` — without this, the system's own automated notifications landing in that same inbox would be mistaken for customer replies and spawn bogus leads. Skips (silently) any message whose sender is on Okelcor's own domain (derived from `MAIL_FROM_ADDRESS`, overridable via `MAIL_INBOUND_OWN_DOMAIN`). Made `public` (not `private`) specifically so this safety-critical check could be tested directly — caught and fixed a real case-sensitivity bug this way (the method compared a lowercased configured domain against a not-yet-lowercased sender address) before it shipped. Unaffected by the IMAP→Graph pivot. |
+| `ImapInboundMailService` (new) | ✅ | Connects via `webklex/php-imap` (pure-PHP IMAP client, deliberately not the `ext-imap` extension, which isn't guaranteed present on this shared-hosting PHP build) to a plain, non-Microsoft mailbox — the destination of an Exchange redirect rule on `support@okelcor.com`, not Microsoft 365 itself. `normalize()` converts the fetched `Message` into a plain array (same shape as Microsoft Graph's JSON would have been), so the parsing logic below never needed to know or care which transport is in use. |
+| `email:fetch-inbound` command | ✅ | Polls the mailbox above, normalizes each message, and runs it through the same `processMessage()` regardless of transport. Scheduled every 5 minutes (`routes/console.php`), same `Schedule::command()` pattern as the existing hourly jobs. No-ops cleanly when `MAIL_INBOUND_ENABLED` is unset — safe to ship ahead of the mailbox/redirect-rule setup being finished. |
+| Plus-addressed Reply-To (`CustomerAdHocEmail`) | ✅ | Outgoing e-mails set Reply-To to `support+{message-uuid}@okelcor.com` (when inbound capture is enabled) instead of the sending admin's own address — this is what actually gets replies somewhere the system can read (Exchange's Redirect preserves the original To: header, so this plus-address survives the redirect hop intact). **Falls back to the exact previous behaviour** (reply-to = sending admin) when inbound capture isn't enabled, so this shipped with zero behavior change until the setup is done. Unaffected by either pivot. |
+| Reply matching, in order of reliability | ✅ | (1) Plus-address in the reply's own `To:` — reconstructs the original message_id directly, immune to header stripping some corporate mail gateways do. (2) `In-Reply-To` header (standard fallback). (3) Sender e-mail address (last resort — matches a known Customer/QuoteRequest with no thread context at all). Unaffected by either pivot — operates on the normalized array shape. |
+| **Own-domain guard** (`isOwnDomainSender`) | ✅ | `support@okelcor.com` (and everything redirected from it) is shared with `ORDER_EMAIL`/`QUOTE_EMAIL`/`CRM_DIGEST_EMAIL` — without this, the system's own automated notifications would be mistaken for customer replies and spawn bogus leads. Skips (silently) any message whose sender is on Okelcor's own domain (derived from `MAIL_FROM_ADDRESS`, overridable via `MAIL_INBOUND_OWN_DOMAIN`). Made `public` (not `private`) specifically so this safety-critical check could be tested directly — caught and fixed a real case-sensitivity bug this way before it shipped. Unaffected by either pivot. |
 | Inbound → lead capture for unknown senders | ✅ | Reuses the same CRM-2 quality-scoring + CRM-3B notification pattern just built for the WhatsApp webhook — a genuinely new correspondent becomes a `QuoteRequest` (`lead_source: 'inbound_email'`). Simpler than the WhatsApp case: a real e-mail address is available, no synthetic placeholder needed. |
 | Admin notification on reply (`email_reply_received`) | ✅ | Targets the specific admin who sent the original message when resolvable (`AdminNotificationService::notifyUser`); falls back to a `crm.view` fan-out otherwise. No new endpoint — surfaces through `GET /admin/customers/{id}/communications`, the same thread endpoint the e-mail composer already uses. |
-| `webklex/php-imap` | ⬜ removed | Added, then removed in the same session once the Microsoft 365 pivot made it dead weight — not left in `composer.json` unused. |
-| Backend tests (22, automated, no DB — actually run) | ✅ | `CustomerAdHocEmailReplyToTest` (5), `FetchInboundEmailsGuardTest` (4), `FetchInboundEmailsParsingTest` (5) — plus-address/In-Reply-To extraction directly testable now that Graph gives plain arrays instead of an opaque IMAP object. `MicrosoftGraphMailServiceTest` (8) — token acquisition + caching, message fetch, mark-as-read, error handling, all via `Http::fake()`. Genuinely more coverage than the IMAP version could have had. |
+| Backend tests (34, automated, no DB — actually run) | ✅ | `CustomerAdHocEmailReplyToTest` (5), `FetchInboundEmailsGuardTest` (4), `FetchInboundEmailsParsingTest` (5) — all still pass unchanged after both pivots, since they exercise the transport-agnostic parsing logic via plain arrays. The IMAP connection/fetch layer itself (`ImapInboundMailService::fetchUnseenMessages`/`normalize`) has no automated test — constructing a real `webklex` `Message` object requires a live IMAP session (its constructor takes a real `Client`), so this relies on careful review + the manual end-to-end test in the setup doc instead. |
 | **Known limitation, documented not hidden** — one-way plain-text degradation | 🔲 flagged | Rich HTML replies are sanitized the same way outbound composer bodies are (same `RichEmailHtmlSanitizer`); plain-text-only replies get a simple `nl2br(e(...))` treatment. No attempt to strip quoted "On [date] ... wrote:" history from long reply chains. Acceptable for now; revisit if the volume makes this noisy. |
 
-**Depends on account-side setup** — an Azure AD app registration
-(client ID/secret + `Mail.ReadWrite` application permission, admin-consented)
-against Okelcor's Microsoft 365 tenant, and confirming plus-addressing is
-enabled on the tenant (Exchange Online PowerShell). See
+**Depends on account-side setup** — a destination mailbox with IMAP access,
+an Exchange inbox rule on `support@okelcor.com` that **redirects** (not
+forwards) to it, and confirming plus-addressing survives the redirect. See
 `EMAIL_INBOUND_SETUP.md`. Code is live and inert until
 `MAIL_INBOUND_ENABLED=true` is set.
 
@@ -919,12 +928,16 @@ WHATSAPP_ACCESS_TOKEN=
 WHATSAPP_APP_SECRET=
 WHATSAPP_VERIFY_TOKEN=
 
-# Inbound e-mail capture (Microsoft Graph) — see EMAIL_INBOUND_SETUP.md
+# Inbound e-mail capture (Exchange redirect -> IMAP) — see EMAIL_INBOUND_SETUP.md
+# NOTE: ADDRESS is the customer-facing support@ address; HOST/USERNAME/
+# PASSWORD point at the SEPARATE redirect-destination mailbox, not Microsoft 365.
 MAIL_INBOUND_ENABLED=false
 MAIL_INBOUND_ADDRESS=support@okelcor.com
-MAIL_INBOUND_MS_TENANT_ID=
-MAIL_INBOUND_MS_CLIENT_ID=
-MAIL_INBOUND_MS_CLIENT_SECRET=
+MAIL_INBOUND_HOST=
+MAIL_INBOUND_PORT=993
+MAIL_INBOUND_ENCRYPTION=ssl
+MAIL_INBOUND_USERNAME=
+MAIL_INBOUND_PASSWORD=
 MAIL_INBOUND_MESSAGE_ID_DOMAIN=okelcor.com
 
 # Admin session

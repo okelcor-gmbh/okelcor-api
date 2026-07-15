@@ -104,34 +104,43 @@ return [
         'merchant_location_key'  => env('EBAY_MERCHANT_LOCATION_KEY', 'OKELCOR-MAIN'),
     ],
 
-    // Inbound e-mail capture — polls a shared mailbox via Microsoft Graph
-    // (NOT IMAP — Microsoft has fully retired Basic Auth for IMAP/POP/SMTP
-    // on Exchange Online, so a username+password IMAP connection to a
-    // Microsoft 365 mailbox will always be rejected regardless of how
-    // correct the credentials are) so a customer's reply to a system-sent
-    // e-mail lands back in the admin panel, not only in the sending admin's
-    // personal inbox. See EMAIL_INBOUND_SETUP.md for the one-time Azure AD
-    // app registration this requires. `address` is both the mailbox Graph
-    // reads from AND the base Reply-To address — outgoing mail sets
-    // Reply-To to a plus-addressed variant of it (support+{id}@okelcor.com)
-    // so an incoming reply can be matched back to its exact original message
-    // directly, with In-Reply-To header parsing and sender-email matching
-    // as fallbacks. Degrades cleanly: `enabled=false` (the default) leaves
-    // Reply-To exactly as it was before this feature existed (replies go to
-    // the sending admin).
+    // Inbound e-mail capture — polls a plain IMAP mailbox so a customer's
+    // reply to a system-sent e-mail lands back in the admin panel, not only
+    // in the sending admin's personal inbox. See EMAIL_INBOUND_SETUP.md for
+    // the one-time setup this requires.
     //
-    // IMPORTANT: this mailbox is shared with other automated system mail —
-    // ORDER_EMAIL/QUOTE_EMAIL/CRM_DIGEST_EMAIL all already point at
-    // support@okelcor.com too. `own_domain` (defaults to the domain in
-    // mail.from.address) is used to skip any message sent BY this app's own
-    // domain, so an order-received/quote-received/digest notification never
-    // gets mistaken for a customer reply and spawns a bogus lead.
+    // Deliberately NOT Microsoft Graph/Azure — support@okelcor.com is a
+    // Microsoft 365 mailbox, and Microsoft has fully retired Basic Auth for
+    // IMAP/POP/SMTP on Exchange Online (a username+password IMAP connection
+    // to it is rejected outright). Instead, an Exchange inbox rule
+    // REDIRECTS a copy of everything sent to support@okelcor.com to a
+    // separate, non-Microsoft mailbox — `host`/`username`/`password` below
+    // point at THAT mailbox, not at Microsoft 365 directly.
+    //
+    // `address` stays support@okelcor.com regardless — it's the customer-
+    // facing address (Reply-To on outgoing mail is a plus-addressed variant
+    // of it, e.g. support+{id}@okelcor.com) and Exchange's Redirect (unlike
+    // Forward) preserves the original To: header, so plus-address matching
+    // on the redirected copy still works against this same value.
+    //
+    // IMPORTANT: the redirected mailbox also passes through other automated
+    // system mail — ORDER_EMAIL/QUOTE_EMAIL/CRM_DIGEST_EMAIL all send to
+    // support@okelcor.com too, and get redirected along with everything
+    // else. `own_domain` (defaults to the domain in mail.from.address) is
+    // used to skip any message sent BY this app's own domain, so those
+    // never get mistaken for a customer reply and spawn a bogus lead.
+    //
+    // Degrades cleanly: `enabled=false` (the default) leaves Reply-To
+    // exactly as it was before this feature existed (replies go to the
+    // sending admin).
     'mail_inbound' => [
         'enabled'           => (bool) env('MAIL_INBOUND_ENABLED', false),
         'address'           => env('MAIL_INBOUND_ADDRESS', 'support@okelcor.com'),
-        'tenant_id'         => env('MAIL_INBOUND_MS_TENANT_ID'),
-        'client_id'         => env('MAIL_INBOUND_MS_CLIENT_ID'),
-        'client_secret'     => env('MAIL_INBOUND_MS_CLIENT_SECRET'),
+        'host'              => env('MAIL_INBOUND_HOST'),
+        'port'              => env('MAIL_INBOUND_PORT', 993),
+        'encryption'        => env('MAIL_INBOUND_ENCRYPTION', 'ssl'),
+        'username'          => env('MAIL_INBOUND_USERNAME'),
+        'password'          => env('MAIL_INBOUND_PASSWORD'),
         'message_id_domain' => env('MAIL_INBOUND_MESSAGE_ID_DOMAIN', 'okelcor.com'),
         'own_domain'        => env('MAIL_INBOUND_OWN_DOMAIN'),
     ],

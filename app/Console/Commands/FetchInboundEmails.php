@@ -8,18 +8,19 @@ use App\Models\CustomerCommunication;
 use App\Models\QuoteRequest;
 use App\Services\AdminNotificationService;
 use App\Services\InquiryQualityService;
-use App\Services\MicrosoftGraphMailService;
+use App\Services\ImapInboundMailService;
 use App\Services\RichEmailHtmlSanitizer;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 /**
- * Polls the shared mailbox (support@okelcor.com, a Microsoft 365/Exchange
- * Online mailbox — see MicrosoftGraphMailService and EMAIL_INBOUND_SETUP.md)
- * via Microsoft Graph for customer replies to system-sent e-mails, so they
- * land in the admin panel — not only in the sending admin's personal
- * Outlook, which was the actual gap this closes.
+ * Polls the shared mailbox (a plain, non-Microsoft mailbox that
+ * support@okelcor.com is redirected to via an Exchange inbox rule — see
+ * ImapInboundMailService and EMAIL_INBOUND_SETUP.md) via IMAP for customer
+ * replies to system-sent e-mails, so they land in the admin panel — not
+ * only in the sending admin's personal Outlook, which was the actual gap
+ * this closes.
  *
  * Matching a reply to its original message, in order of reliability:
  *   1. Plus-addressing — the reply's own To: is support+{uuid}@..., which
@@ -39,10 +40,10 @@ class FetchInboundEmails extends Command
 {
     protected $signature = 'email:fetch-inbound';
 
-    protected $description = 'Poll the shared mailbox (via Microsoft Graph) for customer e-mail replies and log them into the system.';
+    protected $description = 'Poll the shared mailbox (via IMAP) for customer e-mail replies and log them into the system.';
 
     public function __construct(
-        private readonly MicrosoftGraphMailService $graph,
+        private readonly ImapInboundMailService $imap,
         private readonly RichEmailHtmlSanitizer $sanitizer,
         private readonly InquiryQualityService $qualityService,
     ) {
@@ -56,7 +57,7 @@ class FetchInboundEmails extends Command
             return self::SUCCESS;
         }
 
-        $result = $this->graph->fetchUnreadMessages();
+        $result = $this->imap->fetchUnseenMessages();
         if (isset($result['error'])) {
             $this->error('Could not fetch inbound messages: ' . $result['error']);
             Log::error('[inbound_email_fetch_failed]', ['error' => $result['error']]);
@@ -68,14 +69,14 @@ class FetchInboundEmails extends Command
 
         foreach ($messages as $message) {
             try {
-                $this->processMessage($message);
+                $this->processMessage($this->imap->normalize($message));
             } catch (\Throwable $e) {
                 Log::error('[inbound_email_processing_failed]', ['error' => $e->getMessage()]);
             }
 
-            $marked = $this->graph->markAsRead($message['id']);
+            $marked = $this->imap->markAsSeen($message);
             if (isset($marked['error'])) {
-                Log::warning('[inbound_email_mark_read_failed]', ['error' => $marked['error']]);
+                Log::warning('[inbound_email_mark_seen_failed]', ['error' => $marked['error']]);
             }
         }
 
