@@ -3,8 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Services\InboundEmailProcessor;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -38,11 +38,11 @@ class EmailInboundWebhookController extends Controller
 {
     public function __construct(private readonly InboundEmailProcessor $processor) {}
 
-    public function handle(Request $request): Response
+    public function handle(Request $request): JsonResponse
     {
         if (! $this->verifySignature($request)) {
             Log::warning('Inbound e-mail webhook rejected: invalid or missing signature');
-            return response('invalid signature', 403);
+            return response()->json(['status' => 'invalid signature'], 403);
         }
 
         if (! config('services.mail_inbound.enabled')) {
