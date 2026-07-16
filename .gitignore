@@ -26,3 +26,5 @@ login.json
 session_handoff.md
 database/database.sqlite
 .claude/
+cloudflare-worker/node_modules
+cloudflare-worker/.wrangler

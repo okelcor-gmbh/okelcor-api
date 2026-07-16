@@ -44,8 +44,6 @@ Schedule::command('tracking:sync-carriers')
     ->onOneServer()
     ->appendOutputTo(storage_path('logs/carrier-tracking-sync.log'));
 
-Schedule::command('email:fetch-inbound')
-    ->everyFiveMinutes()
-    ->withoutOverlapping()
-    ->onOneServer()
-    ->appendOutputTo(storage_path('logs/inbound-email-fetch.log'));
+// Inbound e-mail capture is push-based (a Cloudflare Email Worker calls
+// POST /webhooks/email-inbound directly) — no polling job needed here,
+// unlike the IMAP-based approach this replaced.

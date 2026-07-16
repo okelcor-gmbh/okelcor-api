@@ -104,43 +104,40 @@ return [
         'merchant_location_key'  => env('EBAY_MERCHANT_LOCATION_KEY', 'OKELCOR-MAIN'),
     ],
 
-    // Inbound e-mail capture — polls a plain IMAP mailbox so a customer's
-    // reply to a system-sent e-mail lands back in the admin panel, not only
-    // in the sending admin's personal inbox. See EMAIL_INBOUND_SETUP.md for
-    // the one-time setup this requires.
+    // Inbound e-mail capture — a Cloudflare Email Worker POSTs parsed
+    // customer replies here (see EmailInboundWebhookController and
+    // cloudflare-worker/), so a customer's reply to a system-sent e-mail
+    // lands back in the admin panel, not only in the sending admin's
+    // personal inbox. See EMAIL_INBOUND_SETUP.md for the one-time setup.
     //
-    // Deliberately NOT Microsoft Graph/Azure — support@okelcor.com is a
-    // Microsoft 365 mailbox, and Microsoft has fully retired Basic Auth for
-    // IMAP/POP/SMTP on Exchange Online (a username+password IMAP connection
-    // to it is rejected outright). Instead, an Exchange inbox rule
-    // REDIRECTS a copy of everything sent to support@okelcor.com to a
-    // separate, non-Microsoft mailbox — `host`/`username`/`password` below
-    // point at THAT mailbox, not at Microsoft 365 directly.
+    // Third design tried for this feature: direct Microsoft Graph/Azure was
+    // avoided by choice; an Exchange redirect-to-IMAP-mailbox approach was
+    // tried next but couldn't be gotten working end to end (authentication
+    // kept failing against the destination mailbox); this uses a dedicated
+    // subdomain (reply.okelcor.com) with Cloudflare Email Routing instead —
+    // no Microsoft involvement, no IMAP, DNS-only (and DNS is already on
+    // Cloudflare for this domain).
     //
-    // `address` stays support@okelcor.com regardless — it's the customer-
-    // facing address (Reply-To on outgoing mail is a plus-addressed variant
-    // of it, e.g. support+{id}@okelcor.com) and Exchange's Redirect (unlike
-    // Forward) preserves the original To: header, so plus-address matching
-    // on the redirected copy still works against this same value.
+    // `address` is the customer-facing Reply-To base
+    // (reply@reply.okelcor.com) — Reply-To on outgoing mail is a
+    // plus-addressed variant of it (reply+{id}@reply.okelcor.com), which
+    // Cloudflare Email Routing delivers to the same Worker regardless of
+    // the tag, so plus-address matching works the same as every prior
+    // design here.
     //
-    // IMPORTANT: the redirected mailbox also passes through other automated
-    // system mail — ORDER_EMAIL/QUOTE_EMAIL/CRM_DIGEST_EMAIL all send to
-    // support@okelcor.com too, and get redirected along with everything
-    // else. `own_domain` (defaults to the domain in mail.from.address) is
-    // used to skip any message sent BY this app's own domain, so those
-    // never get mistaken for a customer reply and spawn a bogus lead.
+    // `own_domain` (defaults to the domain in mail.from.address, i.e.
+    // okelcor.com, NOT reply.okelcor.com) skips any message sent BY this
+    // app's own domain — relevant if this subdomain is ever also used for
+    // anything else, though as set up it only ever receives customer
+    // replies.
     //
     // Degrades cleanly: `enabled=false` (the default) leaves Reply-To
     // exactly as it was before this feature existed (replies go to the
     // sending admin).
     'mail_inbound' => [
         'enabled'           => (bool) env('MAIL_INBOUND_ENABLED', false),
-        'address'           => env('MAIL_INBOUND_ADDRESS', 'support@okelcor.com'),
-        'host'              => env('MAIL_INBOUND_HOST'),
-        'port'              => env('MAIL_INBOUND_PORT', 993),
-        'encryption'        => env('MAIL_INBOUND_ENCRYPTION', 'ssl'),
-        'username'          => env('MAIL_INBOUND_USERNAME'),
-        'password'          => env('MAIL_INBOUND_PASSWORD'),
+        'address'           => env('MAIL_INBOUND_ADDRESS', 'reply@reply.okelcor.com'),
+        'webhook_secret'    => env('MAIL_INBOUND_WEBHOOK_SECRET'),
         'message_id_domain' => env('MAIL_INBOUND_MESSAGE_ID_DOMAIN', 'okelcor.com'),
         'own_domain'        => env('MAIL_INBOUND_OWN_DOMAIN'),
     ],

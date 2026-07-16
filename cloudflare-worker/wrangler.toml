@@ -1,0 +1,12 @@
+name = "okelcor-inbound-email"
+main = "src/worker.js"
+compatibility_date = "2026-01-01"
+
+# Non-secret configuration — the webhook URL this Worker posts parsed
+# e-mails to. Safe to commit; it's just an endpoint address.
+[vars]
+API_URL = "https://api.okelcor.com/api/v1/webhooks/email-inbound"
+
+# WEBHOOK_SECRET is NOT set here — it's a secret, set once via:
+#   wrangler secret put WEBHOOK_SECRET
+# (Cloudflare stores it encrypted; it never touches this file or git.)

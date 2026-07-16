@@ -690,51 +690,53 @@ Order manager: after the Outlook-style composer shipped, customer replies
 were only landing in the individual sending admin's personal Outlook — never
 reflected in the system. This was the deliberately-deferred piece from that
 feature (documented at the time as "not built — needs a receiving subdomain
-+ MX + webhook, a materially bigger phase"); built now via a simpler,
-equally-real path: polling a shared mailbox on a schedule, not a new
-subdomain/MX record. Per the order manager's preference, this polls the
-existing `support@okelcor.com` mailbox rather than a new dedicated one —
-see the own-domain guard below for why that's safe.
++ MX + webhook, a materially bigger phase") — which, after two other designs
+didn't pan out, is exactly what got built in the end.
 
-**Two pivots in this session, both worth knowing about:**
+**Three designs tried in this session, in order:**
 
-1. The first pass assumed a cPanel-hosted mailbox reachable over plain IMAP
-   (`webklex/php-imap`) — then it turned out `support@okelcor.com` is
-   actually a **Microsoft 365** mailbox. Microsoft has fully retired Basic
-   Authentication (username/password) for IMAP/POP/SMTP on Exchange
-   Online, so that approach would never have connected, regardless of how
-   correct the credentials were. Rebuilt on **Microsoft Graph** (OAuth2
-   client-credentials via an Azure AD app registration).
-2. The user then asked for an alternative that avoided Azure entirely —
-   chose an **Exchange inbox rule that redirects a copy of
-   `support@okelcor.com`'s mail to a separate, non-Microsoft mailbox**,
-   read over plain IMAP (Basic Auth retirement is Exchange-Online-specific,
-   not IMAP in general — a non-Microsoft mailbox has no such restriction).
-   Rebuilt on `webklex/php-imap` a second time — removed and re-added the
-   composer dependency in the same session rather than run two transports
-   side by side.
+1. **Plain IMAP directly against `support@okelcor.com`** (`webklex/php-imap`)
+   — then it turned out `support@okelcor.com` is a **Microsoft 365**
+   mailbox, and Microsoft has fully retired Basic Authentication for
+   IMAP/POP/SMTP on Exchange Online, so this would never have connected.
+2. **Microsoft Graph** (OAuth2 client-credentials via an Azure AD app
+   registration) — technically correct, but the user asked to avoid the
+   Azure app-registration approach entirely.
+3. **Exchange inbox rule redirecting `support@okelcor.com`'s mail to a
+   second, non-Microsoft mailbox, read over plain IMAP** — no Azure needed,
+   but authentication against the redirect-destination mailbox couldn't be
+   gotten working end to end despite troubleshooting (wrong/quoting issues
+   in `.env` were ruled out; root cause not conclusively identified).
+4. **What actually shipped: a dedicated subdomain (`reply.okelcor.com`)
+   with Cloudflare Email Routing pointed at a Cloudflare Email Worker**,
+   which parses the mail and POSTs it to a new webhook on this API. No
+   Microsoft involvement at all, no polling (event-driven — Cloudflare
+   hands off the instant mail arrives), and DNS was already on Cloudflare
+   for this domain.
 
-Both pivots only ever touched the *transport* layer (how messages get
-fetched). The matching/lead-capture/notification logic was written against
-a plain-array message shape from the start, so it survived both pivots
-completely unchanged and fully tested throughout — see `ImapInboundMailService::normalize()`,
-which converts a raw IMAP `Message` into that same shape.
+Every pivot only ever touched the *transport* layer (how a message physically
+arrives). The matching/lead-capture/notification logic was written from the
+start against a plain-array message shape, so it was extracted into a
+transport-agnostic `InboundEmailProcessor` service partway through and
+survived every subsequent pivot completely unchanged and fully tested.
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| `ImapInboundMailService` (new) | ✅ | Connects via `webklex/php-imap` (pure-PHP IMAP client, deliberately not the `ext-imap` extension, which isn't guaranteed present on this shared-hosting PHP build) to a plain, non-Microsoft mailbox — the destination of an Exchange redirect rule on `support@okelcor.com`, not Microsoft 365 itself. `normalize()` converts the fetched `Message` into a plain array (same shape as Microsoft Graph's JSON would have been), so the parsing logic below never needed to know or care which transport is in use. |
-| `email:fetch-inbound` command | ✅ | Polls the mailbox above, normalizes each message, and runs it through the same `processMessage()` regardless of transport. Scheduled every 5 minutes (`routes/console.php`), same `Schedule::command()` pattern as the existing hourly jobs. No-ops cleanly when `MAIL_INBOUND_ENABLED` is unset — safe to ship ahead of the mailbox/redirect-rule setup being finished. |
-| Plus-addressed Reply-To (`CustomerAdHocEmail`) | ✅ | Outgoing e-mails set Reply-To to `support+{message-uuid}@okelcor.com` (when inbound capture is enabled) instead of the sending admin's own address — this is what actually gets replies somewhere the system can read (Exchange's Redirect preserves the original To: header, so this plus-address survives the redirect hop intact). **Falls back to the exact previous behaviour** (reply-to = sending admin) when inbound capture isn't enabled, so this shipped with zero behavior change until the setup is done. Unaffected by either pivot. |
-| Reply matching, in order of reliability | ✅ | (1) Plus-address in the reply's own `To:` — reconstructs the original message_id directly, immune to header stripping some corporate mail gateways do. (2) `In-Reply-To` header (standard fallback). (3) Sender e-mail address (last resort — matches a known Customer/QuoteRequest with no thread context at all). Unaffected by either pivot — operates on the normalized array shape. |
-| **Own-domain guard** (`isOwnDomainSender`) | ✅ | `support@okelcor.com` (and everything redirected from it) is shared with `ORDER_EMAIL`/`QUOTE_EMAIL`/`CRM_DIGEST_EMAIL` — without this, the system's own automated notifications would be mistaken for customer replies and spawn bogus leads. Skips (silently) any message whose sender is on Okelcor's own domain (derived from `MAIL_FROM_ADDRESS`, overridable via `MAIL_INBOUND_OWN_DOMAIN`). Made `public` (not `private`) specifically so this safety-critical check could be tested directly — caught and fixed a real case-sensitivity bug this way before it shipped. Unaffected by either pivot. |
-| Inbound → lead capture for unknown senders | ✅ | Reuses the same CRM-2 quality-scoring + CRM-3B notification pattern just built for the WhatsApp webhook — a genuinely new correspondent becomes a `QuoteRequest` (`lead_source: 'inbound_email'`). Simpler than the WhatsApp case: a real e-mail address is available, no synthetic placeholder needed. |
-| Admin notification on reply (`email_reply_received`) | ✅ | Targets the specific admin who sent the original message when resolvable (`AdminNotificationService::notifyUser`); falls back to a `crm.view` fan-out otherwise. No new endpoint — surfaces through `GET /admin/customers/{id}/communications`, the same thread endpoint the e-mail composer already uses. |
-| Backend tests (34, automated, no DB — actually run) | ✅ | `CustomerAdHocEmailReplyToTest` (5), `FetchInboundEmailsGuardTest` (4), `FetchInboundEmailsParsingTest` (5) — all still pass unchanged after both pivots, since they exercise the transport-agnostic parsing logic via plain arrays. The IMAP connection/fetch layer itself (`ImapInboundMailService::fetchUnseenMessages`/`normalize`) has no automated test — constructing a real `webklex` `Message` object requires a live IMAP session (its constructor takes a real `Client`), so this relies on careful review + the manual end-to-end test in the setup doc instead. |
-| **Known limitation, documented not hidden** — one-way plain-text degradation | 🔲 flagged | Rich HTML replies are sanitized the same way outbound composer bodies are (same `RichEmailHtmlSanitizer`); plain-text-only replies get a simple `nl2br(e(...))` treatment. No attempt to strip quoted "On [date] ... wrote:" history from long reply chains. Acceptable for now; revisit if the volume makes this noisy. |
+| `cloudflare-worker/` (new, separate deployable) | ✅ | A small Cloudflare Email Worker (`postal-mime` for MIME parsing) that POSTs parsed inbound e-mail to `POST /webhooks/email-inbound`, HMAC-signed with a shared secret. Deployed independently via `wrangler deploy` from a developer's own machine — not part of the Laravel app's own deploy pipeline. |
+| `EmailInboundWebhookController` (new) | ✅ | Verifies the Worker's HMAC-SHA256 signature (`X-Webhook-Signature`) before trusting any payload — same security boundary as the Stripe/WhatsApp webhooks. Normalizes the Worker's JSON into the same plain-array shape `InboundEmailProcessor` always expected. |
+| `InboundEmailProcessor` (new — extracted from the now-removed `FetchInboundEmails` command) | ✅ | All the actual logic: own-domain guard, plus-address/In-Reply-To matching, lead capture, admin notification. Transport-agnostic by design — this is the piece that survived all three prior transport attempts unchanged. |
+| Plus-addressed Reply-To (`CustomerAdHocEmail`) | ✅ | Outgoing e-mails set Reply-To to `reply+{message-uuid}@reply.okelcor.com` (when inbound capture is enabled) instead of the sending admin's own address. **Falls back to the exact previous behaviour** when disabled — shipped with zero behavior change ahead of setup, unaffected by any of the four design attempts. |
+| Reply matching, in order of reliability | ✅ | (1) Plus-address in the reply's own `To:` — reconstructs the original message_id directly. (2) `In-Reply-To` header (standard fallback). (3) Sender e-mail address (last resort). Unchanged since design #1. |
+| **Own-domain guard** (`isOwnDomainSender`) | ✅ | Skips (silently) any message sent from Okelcor's own domain (derived from `MAIL_FROM_ADDRESS`, overridable via `MAIL_INBOUND_OWN_DOMAIN`) — relevant if this subdomain is ever also used for anything system-generated. Made `public` specifically so this safety-critical check could be tested directly — caught and fixed a real case-sensitivity bug this way, still holding across every pivot since. |
+| Inbound → lead capture for unknown senders | ✅ | Reuses the same CRM-2 quality-scoring + CRM-3B notification pattern built for the WhatsApp webhook — a genuinely new correspondent becomes a `QuoteRequest` (`lead_source: 'inbound_email'`), real e-mail address available (no placeholder needed, unlike WhatsApp). |
+| Admin notification on reply (`email_reply_received`) | ✅ | Targets the specific admin who sent the original message when resolvable; falls back to a `crm.view` fan-out otherwise. No new admin-facing endpoint — surfaces through the existing `GET /admin/customers/{id}/communications` thread. |
+| `webklex/php-imap` + `ImapInboundMailService` + `MicrosoftGraphMailService` + `FetchInboundEmails` command | ⬜ removed | All added then removed across this session's pivots — none left in `composer.json`/the codebase as dead weight. |
+| Backend tests (40, automated, no DB — actually run) | ✅ | `CustomerAdHocEmailReplyToTest` (5), `InboundEmailProcessorGuardTest` (4), `InboundEmailProcessorParsingTest` (5) — all pass unchanged across every pivot, since they exercise the transport-agnostic logic via plain arrays. `EmailInboundWebhookTest` (6, MySQL-gated) — signature verification, known-customer matching, lead capture, own-domain guard, HTML sanitization, all via real HTTP calls to the webhook route. |
+| **Known limitation, documented not hidden** — one-way plain-text degradation | 🔲 flagged | Rich HTML replies are sanitized the same way outbound composer bodies are; plain-text-only replies get a simple `nl2br(e(...))` treatment. No attempt to strip quoted "On [date] ... wrote:" history from long reply chains. Acceptable for now; revisit if volume makes this noisy. |
 
-**Depends on account-side setup** — a destination mailbox with IMAP access,
-an Exchange inbox rule on `support@okelcor.com` that **redirects** (not
-forwards) to it, and confirming plus-addressing survives the redirect. See
+**Depends on account-side setup** — a Cloudflare Email Routing subdomain +
+a deployed Cloudflare Worker (needs Node.js + `wrangler` on a developer's
+own machine, one time) + a shared webhook secret. See
 `EMAIL_INBOUND_SETUP.md`. Code is live and inert until
 `MAIL_INBOUND_ENABLED=true` is set.
 
@@ -928,16 +930,10 @@ WHATSAPP_ACCESS_TOKEN=
 WHATSAPP_APP_SECRET=
 WHATSAPP_VERIFY_TOKEN=
 
-# Inbound e-mail capture (Exchange redirect -> IMAP) — see EMAIL_INBOUND_SETUP.md
-# NOTE: ADDRESS is the customer-facing support@ address; HOST/USERNAME/
-# PASSWORD point at the SEPARATE redirect-destination mailbox, not Microsoft 365.
+# Inbound e-mail capture (Cloudflare Email Worker) — see EMAIL_INBOUND_SETUP.md
 MAIL_INBOUND_ENABLED=false
-MAIL_INBOUND_ADDRESS=support@okelcor.com
-MAIL_INBOUND_HOST=
-MAIL_INBOUND_PORT=993
-MAIL_INBOUND_ENCRYPTION=ssl
-MAIL_INBOUND_USERNAME=
-MAIL_INBOUND_PASSWORD=
+MAIL_INBOUND_ADDRESS=reply@reply.okelcor.com
+MAIL_INBOUND_WEBHOOK_SECRET=
 MAIL_INBOUND_MESSAGE_ID_DOMAIN=okelcor.com
 
 # Admin session

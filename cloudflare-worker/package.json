@@ -1,0 +1,16 @@
+{
+  "name": "okelcor-inbound-email-worker",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Cloudflare Email Worker that parses inbound mail for reply.okelcor.com and forwards it to the Okelcor API webhook. See ../EMAIL_INBOUND_SETUP.md.",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "dependencies": {
+    "postal-mime": "^2.2.0"
+  },
+  "devDependencies": {
+    "wrangler": "^3.78.0"
+  }
+}

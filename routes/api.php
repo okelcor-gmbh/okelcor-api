@@ -7,6 +7,7 @@ use App\Http\Controllers\InvoiceDownloadController;
 use App\Http\Controllers\ArticleController;
 use App\Http\Controllers\ContainerTrackingController;
 use App\Http\Controllers\PaymentController;
+use App\Http\Controllers\EmailInboundWebhookController;
 use App\Http\Controllers\WhatsAppWebhookController;
 use App\Http\Controllers\VatController;
 use App\Http\Controllers\BrandController;
@@ -276,6 +277,11 @@ Route::prefix('v1')->group(function () {
         ->withoutMiddleware([\App\Http\Middleware\ForceJsonResponse::class]);
     Route::post('webhooks/whatsapp', [WhatsAppWebhookController::class, 'handle'])
         ->withoutMiddleware([\App\Http\Middleware\ForceJsonResponse::class]);
+
+    // Inbound e-mail (Cloudflare Email Worker) — pushed here the instant a
+    // customer reply arrives at reply.okelcor.com. Protected by its own
+    // HMAC signature (X-Webhook-Signature), not by auth middleware.
+    Route::post('webhooks/email-inbound', [EmailInboundWebhookController::class, 'handle']);
 
     // Mollie is legacy/inactive until business account/API credentials are approved.
     Route::post('orders/mollie-webhook', fn () => response()->json([

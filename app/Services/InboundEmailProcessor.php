@@ -1,29 +1,37 @@
 <?php
 
-namespace App\Console\Commands;
+namespace App\Services;
 
 use App\Models\AdminUser;
 use App\Models\Customer;
 use App\Models\CustomerCommunication;
 use App\Models\QuoteRequest;
-use App\Services\AdminNotificationService;
-use App\Services\InquiryQualityService;
-use App\Services\ImapInboundMailService;
-use App\Services\RichEmailHtmlSanitizer;
-use Illuminate\Console\Command;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 /**
- * Polls the shared mailbox (a plain, non-Microsoft mailbox that
- * support@okelcor.com is redirected to via an Exchange inbox rule — see
- * ImapInboundMailService and EMAIL_INBOUND_SETUP.md) via IMAP for customer
- * replies to system-sent e-mails, so they land in the admin panel — not
- * only in the sending admin's personal Outlook, which was the actual gap
- * this closes.
+ * Processes one inbound e-mail message (already normalized into a plain
+ * array — see the shape below) so a customer's reply to a system-sent
+ * e-mail lands in the admin panel, not only in the sending admin's
+ * personal Outlook.
+ *
+ * Deliberately transport-agnostic: this class doesn't know or care whether
+ * the message arrived via IMAP polling or a Cloudflare Email Worker
+ * webhook — both of this app's inbound-capture attempts (IMAP, then
+ * Cloudflare) normalize into the same shape and call process() unchanged,
+ * which is why this logic survived every pivot fully tested.
+ *
+ * Expected `$message` shape:
+ *   [
+ *     'from' => ['emailAddress' => ['address' => '...', 'name' => '...']],
+ *     'toRecipients' => [['emailAddress' => ['address' => '...']], ...],
+ *     'subject' => '...',
+ *     'internetMessageId' => '...',              // may include <angle brackets>
+ *     'internetMessageHeaders' => [['name' => 'In-Reply-To', 'value' => '...'], ...],
+ *     'body' => ['contentType' => 'html'|'text', 'content' => '...'],
+ *   ]
  *
  * Matching a reply to its original message, in order of reliability:
- *   1. Plus-addressing — the reply's own To: is support+{uuid}@..., which
+ *   1. Plus-addressing — the reply's own To: is {base}+{uuid}@..., which
  *      directly names the original outbound message_id. Most reliable;
  *      survives header stripping some corporate mail gateways do.
  *   2. In-Reply-To header — standard, but occasionally stripped/mangled.
@@ -36,54 +44,14 @@ use Illuminate\Support\Str;
  * fed into the same lead pipeline as the website form / the WhatsApp
  * webhook (CRM-2 quality gate + CRM-3B notification), not a separate silo.
  */
-class FetchInboundEmails extends Command
+class InboundEmailProcessor
 {
-    protected $signature = 'email:fetch-inbound';
-
-    protected $description = 'Poll the shared mailbox (via IMAP) for customer e-mail replies and log them into the system.';
-
     public function __construct(
-        private readonly ImapInboundMailService $imap,
         private readonly RichEmailHtmlSanitizer $sanitizer,
         private readonly InquiryQualityService $qualityService,
-    ) {
-        parent::__construct();
-    }
+    ) {}
 
-    public function handle(): int
-    {
-        if (! config('services.mail_inbound.enabled')) {
-            $this->comment('Inbound e-mail capture is not enabled (MAIL_INBOUND_ENABLED). Skipping.');
-            return self::SUCCESS;
-        }
-
-        $result = $this->imap->fetchUnseenMessages();
-        if (isset($result['error'])) {
-            $this->error('Could not fetch inbound messages: ' . $result['error']);
-            Log::error('[inbound_email_fetch_failed]', ['error' => $result['error']]);
-            return self::FAILURE;
-        }
-
-        $messages = $result['messages'];
-        $this->info('Found ' . count($messages) . ' unread message(s).');
-
-        foreach ($messages as $message) {
-            try {
-                $this->processMessage($this->imap->normalize($message));
-            } catch (\Throwable $e) {
-                Log::error('[inbound_email_processing_failed]', ['error' => $e->getMessage()]);
-            }
-
-            $marked = $this->imap->markAsSeen($message);
-            if (isset($marked['error'])) {
-                Log::warning('[inbound_email_mark_seen_failed]', ['error' => $marked['error']]);
-            }
-        }
-
-        return self::SUCCESS;
-    }
-
-    private function processMessage(array $message): void
+    public function process(array $message): void
     {
         $fromEmail = isset($message['from']['emailAddress']['address'])
             ? strtolower($message['from']['emailAddress']['address'])
@@ -105,8 +73,7 @@ class FetchInboundEmails extends Command
 
         $incomingMessageId = $this->stripAngleBrackets($message['internetMessageId'] ?? null);
 
-        // De-dupe on the real Message-ID in case a mark-as-read call failed
-        // on a previous run and the same message gets fetched again.
+        // De-dupe in case the same message is ever delivered twice.
         if ($incomingMessageId && CustomerCommunication::where('message_id', $incomingMessageId)->exists()) {
             return;
         }
@@ -229,8 +196,7 @@ class FetchInboundEmails extends Command
      * from mail.from.address, e.g. "okelcor.com") — i.e. this app's own
      * automated notifications, or a staff member's internal address,
      * neither of which is ever a customer reply. Public (not private) so
-     * this safety-critical check can be tested directly, without needing
-     * to fake a full Graph API session just to exercise it.
+     * this safety-critical check can be tested directly.
      */
     public function isOwnDomainSender(string $email): bool
     {
@@ -248,8 +214,8 @@ class FetchInboundEmails extends Command
 
     /**
      * If this reply's To: address is a plus-addressed variant of the
-     * configured inbound base address (support+{uuid}@okelcor.com),
-     * reconstructs the original outbound message_id ({uuid}@okelcor.com)
+     * configured inbound base address ({base}+{uuid}@{domain}),
+     * reconstructs the original outbound message_id ({uuid}@{domain})
      * directly — no header parsing needed, and immune to headers a mail
      * gateway may have stripped.
      */
