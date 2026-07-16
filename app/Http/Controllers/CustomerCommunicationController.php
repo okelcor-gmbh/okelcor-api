@@ -7,6 +7,7 @@ use App\Services\AdminNotificationService;
 use App\Services\RichEmailHtmlSanitizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -58,13 +59,42 @@ class CustomerCommunicationController extends Controller
             ->findOrFail($id);
 
         $data = $request->validate([
-            'body' => ['required', 'string', 'max:51200'],
+            'body'          => ['required', 'string', 'max:51200'],
+            'attachments'   => ['sometimes', 'array', 'max:5'],
+            'attachments.*' => ['file', 'max:10240', 'mimes:pdf,jpg,jpeg,png,doc,docx,xls,xlsx,csv'],
         ]);
 
         try {
             $bodyClean = $sanitizer->sanitize($data['body'], 'communications/' . Str::uuid());
         } catch (\RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        // Stored before the row is written, same as the admin-side composer
+        // — a failure here must surface as a clear error, never silently
+        // drop a file the customer explicitly attached.
+        $attachmentMeta = [];
+        try {
+            foreach ($request->file('attachments', []) as $file) {
+                $storedPath = $file->store('communications/' . now()->format('Y/m'), 'local');
+
+                $attachmentMeta[] = [
+                    'name' => $file->getClientOriginalName(),
+                    'path' => $storedPath,
+                    'mime' => $file->getClientMimeType(),
+                    'size' => $file->getSize(),
+                ];
+            }
+        } catch (\Throwable $e) {
+            Log::error('[portal_communication_attachment_store_failed] Could not store attachment', [
+                'event' => 'portal_communication_attachment_store_failed',
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => 'One of the attachments could not be saved. Please try again.',
+                'code'    => 'attachment_store_failed',
+            ], 502);
         }
 
         $subject = $parent->subject ?: 'Message from ' . $customer->full_name;
@@ -81,6 +111,7 @@ class CustomerCommunicationController extends Controller
             'channel'          => 'portal',
             'subject'          => $subject,
             'body'             => $bodyClean,
+            'attachments'      => $attachmentMeta ?: null,
             'message_id'       => Str::uuid()->toString() . '@okelcor.com',
             'in_reply_to'      => $parent->message_id,
             'status'           => 'completed',

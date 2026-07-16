@@ -119,7 +119,8 @@ class InboundEmailProcessor
             // Genuinely new correspondent — feed into the same lead
             // pipeline as the website form / WhatsApp, not a silo. Unlike
             // WhatsApp, a real e-mail address is available here.
-            $this->createLeadFromEmail($fromEmail, $fromName, $subject, strip_tags($bodyClean));
+            $lead = $this->createLeadFromEmail($fromEmail, $fromName, $subject, strip_tags($bodyClean));
+            $comm->update(['quote_request_id' => $lead->id]);
             return;
         }
 
@@ -156,7 +157,7 @@ class InboundEmailProcessor
         }
     }
 
-    private function createLeadFromEmail(string $email, string $name, string $subject, string $message): void
+    private function createLeadFromEmail(string $email, string $name, string $subject, string $message): QuoteRequest
     {
         $quality = $this->qualityService->score(['notes' => $message, 'email' => $email]);
 
@@ -189,6 +190,8 @@ class InboundEmailProcessor
             metadata:    ['ref_number' => $quote->ref_number, 'quality_score' => $quality['quality_score']],
             dedupeKey:   "inbound_email_lead_received:quote_request:{$quote->id}",
         );
+
+        return $quote;
     }
 
     /**

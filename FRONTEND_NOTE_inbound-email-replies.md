@@ -3,11 +3,10 @@
 **From:** Backend · **Re:** the gap flagged after shipping the Outlook-style
 e-mail composer — customer replies were only reaching the sending admin's
 own Outlook, not the system.
-**Status:** Backend built. **No new endpoints** — this uses the exact same
-communications thread you already built for the e-mail composer feature;
-inbound replies just start appearing in it. Depends on one thing on the
-account side (a mailbox setup, `EMAIL_INBOUND_SETUP.md`) before real replies
-start flowing in — code is live either way.
+**Status:** Live in production. Replies arrive in real time (Cloudflare
+routes the e-mail to a webhook the instant it arrives — not a poll, no
+delay), and now surface through **one new endpoint** in addition to the
+existing per-customer thread — see "New: unified inbox" below.
 
 ---
 
@@ -40,19 +39,62 @@ Two things worth double-checking rather than building:
 
 ---
 
-## If you want to polish the experience further (optional)
+## New: unified inbox (so admins don't have to open every customer to check)
 
-Not required, but worth considering now that replies are genuinely
-real-time-ish (checked every 5 minutes):
+Admins asked for a way to see every new customer reply in one place, rather
+than clicking into each customer's profile to check. New endpoint:
 
-- A subtle "new reply" indicator on the customer list/detail page using the
-  existing `staff_read_at` field on communication rows (already returned,
-  already used for the e-mail feature's unread tracking) — an inbound row
-  with `staff_read_at: null` is unseen.
-- Since replies can now arrive without any admin action, consider whether
-  the customer detail page should auto-refresh or show a toast when a
-  `email_reply_received` notification comes in while that page is open,
-  rather than requiring a manual refresh to see it.
+```
+GET /admin/communications/inbox
+```
+
+Query params (both optional): `unread=1` (only unread rows), `per_page`
+(default 20, max 100). Requires `crm.view`, same permission as the existing
+per-customer thread endpoints.
+
+```json
+{
+  "data": [
+    {
+      "id": 481,
+      "customer_id": 12,
+      "quote_request_id": null,
+      "customer_name": "Acme Tyres GmbH",
+      "channel": "email",
+      "subject": "Re: your quote",
+      "preview": "Thanks, sounds good! Can we...",
+      "unread": true,
+      "action_url": "/admin/customers/12?tab=communications",
+      "created_at": "2026-07-16T14:02:00Z"
+    }
+  ],
+  "meta": {
+    "current_page": 1, "per_page": 20, "total": 7, "last_page": 1,
+    "unread_count": 7
+  }
+}
+```
+
+- `customer_id` is `null` for a brand-new inquiry that hasn't been matched
+  to an existing customer — in that case `quote_request_id` points at the
+  lead created for it instead, and `action_url` points at `/admin/quotes/{id}`.
+- `unread` is backed by the same `staff_read_at` field the per-customer
+  thread already uses — marking a conversation read there (`POST
+  /admin/communications/{id}/read`) is what clears it here too, same row.
+- A sensible UI: a top-level "Inbox" nav item showing `meta.unread_count` as
+  a badge, listing rows newest-first, each row linking to `action_url`.
+
+---
+
+## New: customer portal replies now accept attachments
+
+`POST /api/v1/auth/customer/communications/{id}/reply` accepts file
+uploads now, same limits as the admin composer: up to 5 files, 10MB each,
+`pdf,jpg,jpeg,png,doc,docx,xls,xlsx,csv`. Send as `multipart/form-data`
+with `body` plus an `attachments[]` field (not JSON, same as any other
+file-upload endpoint in this API). The response's `data.attachments` array
+(already in the existing response shape — was just always empty before)
+now returns `{ name, mime, size, download_url }` per file.
 
 ---
 
@@ -63,4 +105,5 @@ real-time-ish (checked every 5 minutes):
   hardcoded to only ever display admin-sent messages).
 - Confirm `email_reply_received` notifications render correctly wherever
   notifications are shown — same shape as every other type, nothing special.
-- No new screens, forms, or endpoints needed for this specific fix.
+- Build the new "Inbox" list screen against `GET /admin/communications/inbox`.
+- Add a file picker to the portal's reply box (`attachments[]`, multipart).

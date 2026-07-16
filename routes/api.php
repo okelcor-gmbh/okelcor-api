@@ -588,6 +588,7 @@ Route::prefix('v1')->group(function () {
 
         // Communication log — per customer (crm.view / crm.update)
         Route::middleware('permission:crm.view')->group(function () {
+            Route::get('communications/inbox', [AdminCommunicationController::class, 'indexInbox']);
             Route::get('customers/{id}/communications', [AdminCommunicationController::class, 'indexForCustomer']);
             Route::get('quote-requests/{id}/communications', [AdminCommunicationController::class, 'indexForQuote']);
             Route::post('communications/{id}/read', [AdminCommunicationController::class, 'markRead']);

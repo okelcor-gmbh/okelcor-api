@@ -35,6 +35,51 @@ class AdminCommunicationController extends Controller
         ]);
     }
 
+    // ── GET /admin/communications/inbox ───────────────────────────────────────
+    // Unified feed of every inbound e-mail (Cloudflare webhook or portal
+    // reply) across all customers/leads, ordered most-recent-first, so
+    // admins can triage new replies without opening each customer's profile
+    // individually. staff_read_at (already used per-conversation by
+    // markRead()) doubles as the unread flag here.
+
+    public function indexInbox(Request $request): JsonResponse
+    {
+        $request->validate([
+            'unread'   => ['sometimes'],
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
+        ]);
+
+        $query = CustomerCommunication::query()
+            ->where('type', 'email')
+            ->where('direction', 'inbound')
+            ->with([
+                'customer:id,first_name,last_name,company_name,customer_type',
+                'quoteRequest:id,full_name,email',
+            ])
+            ->orderByDesc('created_at');
+
+        if ($request->boolean('unread')) {
+            $query->whereNull('staff_read_at');
+        }
+
+        $paginated = $query->paginate($request->integer('per_page', 20));
+
+        return response()->json([
+            'data' => collect($paginated->items())->map(fn ($c) => $this->formatInboxRow($c))->values(),
+            'meta' => [
+                'current_page' => $paginated->currentPage(),
+                'per_page'     => $paginated->perPage(),
+                'total'        => $paginated->total(),
+                'last_page'    => $paginated->lastPage(),
+                'unread_count' => CustomerCommunication::where('type', 'email')
+                    ->where('direction', 'inbound')
+                    ->whereNull('staff_read_at')
+                    ->count(),
+            ],
+            'message' => 'success',
+        ]);
+    }
+
     // ── GET /admin/quote-requests/{id}/communications ────────────────────────
 
     public function indexForQuote(int $id): JsonResponse
@@ -459,6 +504,28 @@ class AdminCommunicationController extends Controller
             'body'         => ['nullable', 'string', 'max:10000'],
             'scheduled_at' => ['nullable', 'date'],
         ]);
+    }
+
+    private function formatInboxRow(CustomerCommunication $c): array
+    {
+        $customerName = $c->customer
+            ? ($c->customer->company_name ?: trim($c->customer->first_name . ' ' . $c->customer->last_name))
+            : ($c->quoteRequest->full_name ?? null);
+
+        return [
+            'id'               => $c->id,
+            'customer_id'      => $c->customer_id,
+            'quote_request_id' => $c->quote_request_id,
+            'customer_name'    => $customerName,
+            'channel'          => $c->channel,
+            'subject'          => $c->subject,
+            'preview'          => Str::limit(strip_tags((string) $c->body), 140),
+            'unread'           => $c->staff_read_at === null,
+            'action_url'       => $c->customer_id
+                ? "/admin/customers/{$c->customer_id}?tab=communications"
+                : ($c->quote_request_id ? "/admin/quotes/{$c->quote_request_id}" : null),
+            'created_at'       => $c->created_at?->toIso8601String(),
+        ];
     }
 
     private function format(CustomerCommunication $c): array
