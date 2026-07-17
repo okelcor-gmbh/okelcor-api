@@ -3,6 +3,7 @@
 use App\Http\Controllers\CustomerAuthController;
 use App\Http\Controllers\CustomerAddressController;
 use App\Http\Controllers\CustomerOrderController;
+use App\Http\Controllers\CustomerSavedFitmentController;
 use App\Http\Controllers\InvoiceDownloadController;
 use App\Http\Controllers\ArticleController;
 use App\Http\Controllers\ContainerTrackingController;
@@ -161,8 +162,14 @@ Route::prefix('v1')->group(function () {
         Route::put('addresses/{id}', [CustomerAddressController::class, 'update']);
         Route::delete('addresses/{id}', [CustomerAddressController::class, 'destroy']);
 
+        // Saved fitments ("My Garage") — reusable saved size/brand profiles
+        Route::get('customer/saved-fitments', [CustomerSavedFitmentController::class, 'index']);
+        Route::post('customer/saved-fitments', [CustomerSavedFitmentController::class, 'store']);
+        Route::delete('customer/saved-fitments/{id}', [CustomerSavedFitmentController::class, 'destroy']);
+
         // Orders — customer pay-now + EU entry certificate + trade documents
         Route::post('orders/{ref}/checkout', [CustomerOrderController::class, 'checkout'])->middleware('throttle:checkout');
+        Route::post('orders/{ref}/reorder', [CustomerOrderController::class, 'reorder']);
         Route::post('orders/{ref}/declaration', [EuDeclarationController::class, 'sign']);
         Route::get('orders/{ref}/declaration/download', [EuDeclarationController::class, 'download']);
         Route::get('orders/{ref}/trade-documents', [TradeDocumentController::class, 'index']);

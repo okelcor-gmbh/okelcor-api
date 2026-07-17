@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Order;
+use App\Models\Product;
 use App\Services\StripeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -84,5 +85,73 @@ class CustomerOrderController extends Controller
                 'message' => 'Payment gateway error. Please try again.',
             ], 502);
         }
+    }
+
+    /**
+     * POST /api/v1/auth/orders/{ref}/reorder
+     *
+     * Re-prices a past order's line items against live product data — never
+     * replays the old order's prices verbatim, and never creates a new
+     * order itself. Returns a pre-fill payload the frontend drops into its
+     * existing cart/checkout flow (the same one POST /orders already
+     * expects), same as any other cart contents the customer built by hand.
+     * Items whose product no longer exists, or is no longer active, are
+     * returned separately so the customer can be told rather than silently
+     * dropped or resold at a stale price.
+     */
+    public function reorder(Request $request, string $ref): JsonResponse
+    {
+        $customer = $request->user();
+
+        $order = Order::where('ref', $ref)
+            ->where('customer_email', $customer->email)
+            ->with('items')
+            ->first();
+
+        if (! $order) {
+            return response()->json(['message' => 'Order not found.'], 404);
+        }
+
+        $items       = [];
+        $unavailable = [];
+
+        foreach ($order->items as $orderItem) {
+            $product = $orderItem->product_id
+                ? Product::find($orderItem->product_id)
+                : Product::where('sku', $orderItem->sku)->first();
+
+            if (! $product || ! $product->is_active) {
+                $unavailable[] = [
+                    'sku'    => $orderItem->sku,
+                    'name'   => $orderItem->name,
+                    'reason' => $product ? 'no_longer_available' : 'no_longer_sold',
+                ];
+                continue;
+            }
+
+            $items[] = [
+                'product_id'          => $product->id,
+                'sku'                 => $product->sku,
+                'name'                => $product->name,
+                'brand'               => $product->brand,
+                'size'                => $product->size,
+                'quantity'            => $orderItem->quantity,
+                'price'               => (float) $product->price,
+                'price_b2b'           => $product->price_b2b !== null ? (float) $product->price_b2b : null,
+                'price_b2c'           => $product->price_b2c !== null ? (float) $product->price_b2c : null,
+                'original_unit_price' => (float) $orderItem->unit_price,
+                'in_stock'            => (bool) $product->in_stock,
+                'stock'               => (int) $product->stock,
+            ];
+        }
+
+        return response()->json([
+            'data' => [
+                'order_ref'         => $order->ref,
+                'items'             => $items,
+                'unavailable_items' => $unavailable,
+            ],
+            'message' => 'success',
+        ]);
     }
 }
