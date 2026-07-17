@@ -215,6 +215,7 @@ class AdminOrderController extends Controller
             'estimated_delivery' => ['sometimes', 'nullable', 'date'],
             'eta'                => ['sometimes', 'nullable', 'date'],
             'admin_notes'        => ['sometimes', 'nullable', 'string'],
+            'currency'           => ['sometimes', Rule::in(['EUR', 'USD'])],
         ]);
 
         $order          = Order::findOrFail($id);
@@ -226,7 +227,7 @@ class AdminOrderController extends Controller
             ], 409);
         }
 
-        $order->update($request->only(['status', 'carrier', 'carrier_type', 'tracking_number', 'container_number', 'estimated_delivery', 'eta', 'admin_notes']));
+        $order->update($request->only(['status', 'carrier', 'carrier_type', 'tracking_number', 'container_number', 'estimated_delivery', 'eta', 'admin_notes', 'currency']));
         $order->load(['items', 'logs', 'euDeclaration', 'tradeDocuments']);
 
         $this->logStatusChange($request, $order, $previousStatus);
@@ -285,6 +286,7 @@ class AdminOrderController extends Controller
             'container_number'   => ['sometimes', 'nullable', 'string', 'max:30'],
             'estimated_delivery' => ['sometimes', 'nullable', 'date'],
             'eta'                => ['sometimes', 'nullable', 'date'],
+            'currency'           => ['sometimes', Rule::in(['EUR', 'USD'])],
         ]);
 
         $order          = Order::findOrFail($id);
@@ -296,7 +298,7 @@ class AdminOrderController extends Controller
             ], 409);
         }
 
-        $order->update($request->only(['status', 'carrier', 'carrier_type', 'tracking_number', 'container_number', 'estimated_delivery', 'eta']));
+        $order->update($request->only(['status', 'carrier', 'carrier_type', 'tracking_number', 'container_number', 'estimated_delivery', 'eta', 'currency']));
 
         $this->logStatusChange($request, $order, $previousStatus);
         $this->logTrackingChange($request, $order);
@@ -313,6 +315,7 @@ class AdminOrderController extends Controller
                 'container_number'   => $order->container_number,
                 'estimated_delivery' => $order->estimated_delivery,
                 'eta'                => $order->eta,
+                'currency'           => $order->currency ?? 'EUR',
             ],
             'meta'    => [],
             'message' => 'Status updated successfully.',
@@ -621,6 +624,7 @@ class AdminOrderController extends Controller
             'customer_name'  => $o->customer_name,
             'customer_email' => $o->customer_email,
             'total'          => (float) $o->total,
+            'currency'       => $o->currency ?? 'EUR',
             'status'         => $o->status,
             'payment_status' => $o->payment_status,
             'payment_method' => $o->payment_method,
@@ -640,6 +644,7 @@ class AdminOrderController extends Controller
             'address'            => trim(implode(', ', array_filter([$o->address, $o->city, $o->postal_code]))),
             'country'            => $o->country,
             'total'              => (float) $o->total,
+            'currency'           => $o->currency ?? 'EUR',
             'status'             => $o->status,
             'payment_method'     => $o->payment_method,
             'notes'              => $o->admin_notes,

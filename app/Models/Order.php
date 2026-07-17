@@ -30,6 +30,7 @@ class Order extends Model
         'subtotal',
         'delivery_cost',
         'total',
+        'currency',
         'status',
         'payment_status',
         'mode',
