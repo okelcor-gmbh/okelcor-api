@@ -715,7 +715,9 @@ Route::prefix('v1')->group(function () {
         // -----------------------------------------------------------------
         Route::middleware('permission:supplier.view')->group(function () {
             Route::get('supplier/search', [SupplierController::class, 'search']);
+            Route::get('supplier/for-product/{id}', [SupplierController::class, 'forProduct']);
             Route::get('supplier/alibaba-link', [SupplierController::class, 'alibabaLink']);
+            Route::get('supplier/made-in-china-link', [SupplierController::class, 'madeInChinaLink']);
         });
 
         // -----------------------------------------------------------------

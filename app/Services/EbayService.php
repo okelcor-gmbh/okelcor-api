@@ -49,12 +49,12 @@ class EbayService
         });
     }
 
-    public function searchTyres(string $query, int $limit = 20): array
+    public function searchTyres(string $query, int $limit = 20, ?string $tyreType = null): array
     {
         $token = $this->getAccessToken();
 
         // Strip overly specific tyre spec suffixes — keep brand + size only
-        $searchQuery = $this->simplifyTyreQuery($query);
+        $searchQuery = $this->simplifyTyreQuery($query, $tyreType);
 
         $response = Http::withToken($token)
             ->withHeaders(['X-EBAY-C-MARKETPLACE-ID' => 'EBAY_DE'])
@@ -83,16 +83,20 @@ class EbayService
         ], $items);
     }
 
-    // Extract "BRAND SIZE" from a full product name like
-    // "YOKOHAMA 225/45R 18 95Y Tl Ad.Sp.V-105 Mo Summer"
-    private function simplifyTyreQuery(string $query): string
+    /**
+     * Extract "BRAND SIZE" from a full product name for use as an eBay
+     * search query. Okelcor sells four tyre types (see Product::type —
+     * pcr/tbr/used/otr) whose sizes are written in genuinely different
+     * notations, so a single regex tuned for passenger-car tyres silently
+     * failed to extract a size for TBR (truck/bus, e.g. "295/80R22.5" —
+     * note the decimal rim) and OTR (off-the-road, e.g. "23.5R25" or
+     * "20.5-25" — no three-digit width segment at all). Examples:
+     *   PCR/TBR: "YOKOHAMA 225/45R 18 95Y Tl Ad.Sp.V-105 Mo Summer"
+     *   OTR:      "BRIDGESTONE 23.5R25 VSDL Loader Tyre"
+     */
+    private function simplifyTyreQuery(string $query, ?string $tyreType = null): string
     {
-        // Normalise size: collapse "225/45R 18" → "225/45R18"
-        $query = preg_replace('/(\d{3}\/\d{2,3}R)\s+(\d{2})/', '$1$2', $query);
-
-        // Extract size
-        preg_match('/\d{3}\/\d{2,3}R\d{2}/', $query, $sizeMatch);
-        $size = $sizeMatch[0] ?? '';
+        $size = $this->extractSize($query, $tyreType);
 
         // Extract brand — first ALL-CAPS word (2+ chars) in the string
         preg_match('/\b([A-Z]{2,}[A-Z0-9\-]*)\b/', $query, $brandMatch);
@@ -103,5 +107,36 @@ class EbayService
         }
 
         return mb_substr($query, 0, 60);
+    }
+
+    /**
+     * Tries the passenger/truck size pattern first (the large majority of
+     * Okelcor's catalogue — PCR, TBR, and Used are all sized this way),
+     * then falls back to the OTR pattern. When $tyreType is known to be
+     * 'otr', the order is reversed so an OTR size isn't misread by the
+     * PCR/TBR pattern first (e.g. "20.5R25" could otherwise partially
+     * match as width "205").
+     */
+    private function extractSize(string $query, ?string $tyreType): ?string
+    {
+        // Normalise: collapse "225/45R 18" → "225/45R18"
+        $normalized = preg_replace('/(\d{3}\/\d{2,3}R)\s*(\d{2}(?:\.\d)?)/', '$1$2', $query);
+        // Normalise: collapse "23.5 R 25" / "23.5 - 25" → "23.5R25"
+        $normalized = preg_replace('/(\d{1,2}\.\d)\s*[R\-]\s*(\d{2})/', '$1R$2', $normalized);
+
+        $pcrTbrPattern = '/\d{3}\/\d{2,3}R\d{2}(?:\.\d)?/';
+        $otrPattern    = '/\d{1,2}\.\dR\d{2}/';
+
+        $patterns = $tyreType === 'otr'
+            ? [$otrPattern, $pcrTbrPattern]
+            : [$pcrTbrPattern, $otrPattern];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $normalized, $match)) {
+                return $match[0];
+            }
+        }
+
+        return null;
     }
 }
