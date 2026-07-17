@@ -52,7 +52,7 @@ class AdminNotificationService
 
             $metadata['dedupe_key'] = $dedupeKey;
 
-            return AdminNotification::create([
+            $notification = AdminNotification::create([
                 'admin_user_id' => $adminUserId,
                 'type'          => $type,
                 'severity'      => $severity,
@@ -65,6 +65,13 @@ class AdminNotificationService
                 'related_id'    => $relatedId,
                 'metadata'      => $metadata,
             ]);
+
+            // Mobile push (companion app) — same event, one more channel.
+            // No-op for an admin with no registered device; any Expo
+            // failure is caught and logged inside the service itself.
+            app(ExpoPushService::class)->sendToAdmin($adminUserId, $title, $body, $actionUrl);
+
+            return $notification;
         } catch (\Throwable $e) {
             Log::warning('AdminNotification write failed', [
                 'admin_user_id' => $adminUserId,

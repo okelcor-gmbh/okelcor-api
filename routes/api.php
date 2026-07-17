@@ -70,6 +70,7 @@ use App\Http\Controllers\Admin\AdminFetEngineController;
 use App\Http\Controllers\Admin\AdminPromotionController;
 use App\Http\Controllers\Admin\AdminDashboardController;
 use App\Http\Controllers\Admin\AdminInsightController;
+use App\Http\Controllers\Admin\AdminPushTokenController;
 use App\Http\Controllers\Admin\AdminEuDeclarationController;
 use App\Http\Controllers\Admin\AdminOrderFinancialsController;
 use App\Http\Controllers\Admin\AdminOrderPaymentMilestoneController;
@@ -374,6 +375,10 @@ Route::prefix('v1')->group(function () {
         Route::post('notifications/read-all', [AdminNotificationController::class, 'readAll']);
         Route::post('notifications/{id}/read', [AdminNotificationController::class, 'markRead']);
         Route::post('notifications/{id}/dismiss', [AdminNotificationController::class, 'dismiss']);
+
+        // Mobile app push-token registration — all authenticated admin users
+        Route::post('push-tokens', [AdminPushTokenController::class, 'store']);
+        Route::delete('push-tokens', [AdminPushTokenController::class, 'destroy']);
 
         // Work queue (CRM-3B) — actionable work for the logged-in admin
         Route::get('my-work', [AdminWorkQueueController::class, 'index']);
