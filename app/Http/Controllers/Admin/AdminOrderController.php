@@ -9,6 +9,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\OrderLog;
 use App\Services\AdminAuditLogger;
+use App\Services\CurrencyConversionService;
 use App\Services\CustomerHealthService;
 use App\Services\CustomerNotifier;
 use App\Services\InvoiceService;
@@ -204,7 +205,7 @@ class AdminOrderController extends Controller
         ], 201);
     }
 
-    public function update(Request $request, int $id): JsonResponse
+    public function update(Request $request, int $id, CurrencyConversionService $fx): JsonResponse
     {
         $request->validate([
             'status'             => ['required', Rule::in(['pending', 'confirmed', 'awaiting_proforma', 'processing', 'shipped', 'delivered', 'cancelled'])],
@@ -225,6 +226,10 @@ class AdminOrderController extends Controller
             return response()->json([
                 'message' => 'Order cannot be cancelled in its current state.',
             ], 409);
+        }
+
+        if ($request->filled('currency') && ($error = $this->convertOrderCurrency($request, $order, $request->input('currency'), $fx))) {
+            return $error;
         }
 
         $order->update($request->only(['status', 'carrier', 'carrier_type', 'tracking_number', 'container_number', 'estimated_delivery', 'eta', 'admin_notes', 'currency']));
@@ -276,7 +281,7 @@ class AdminOrderController extends Controller
      * Lightweight status + shipment update used by the admin panel.
      * All shipment fields are optional — only provided fields are updated.
      */
-    public function updateStatus(Request $request, int $id): JsonResponse
+    public function updateStatus(Request $request, int $id, CurrencyConversionService $fx): JsonResponse
     {
         $request->validate([
             'status'             => ['required', Rule::in(['pending', 'confirmed', 'awaiting_proforma', 'processing', 'shipped', 'delivered', 'cancelled'])],
@@ -296,6 +301,10 @@ class AdminOrderController extends Controller
             return response()->json([
                 'message' => 'Order cannot be cancelled in its current state.',
             ], 409);
+        }
+
+        if ($request->filled('currency') && ($error = $this->convertOrderCurrency($request, $order, $request->input('currency'), $fx))) {
+            return $error;
         }
 
         $order->update($request->only(['status', 'carrier', 'carrier_type', 'tracking_number', 'container_number', 'estimated_delivery', 'eta', 'currency']));
@@ -584,6 +593,96 @@ class AdminOrderController extends Controller
         $rand      = strtoupper(Str::random(3));
 
         return "OKL-{$timestamp}{$rand}";
+    }
+
+    /**
+     * Converts every money figure on the order (and its line items) to
+     * $newCurrency at today's real exchange rate — this is a genuine
+     * conversion, not a display relabel, at the customer's explicit
+     * request. Returns null on success (order + items already saved with
+     * converted figures); returns a JsonResponse to send back immediately
+     * if the conversion is blocked or the rate lookup fails. Does nothing
+     * (returns null) if $newCurrency matches the order's current currency.
+     *
+     * tax_rate and deposit_percent are ratios, not money — never converted.
+     */
+    private function convertOrderCurrency(Request $request, Order $order, string $newCurrency, CurrencyConversionService $fx): ?JsonResponse
+    {
+        $fromCurrency = $order->currency ?? 'EUR';
+        if (strtoupper($newCurrency) === strtoupper($fromCurrency)) {
+            return null;
+        }
+
+        if ($order->source === 'ebay') {
+            return response()->json([
+                'message' => 'This order is synced from eBay — currency is managed there. Correct it in eBay instead.',
+                'code'    => 'ebay_order_not_editable',
+            ], 403);
+        }
+
+        if ($order->isFinancialsLocked()) {
+            return response()->json([
+                'message'            => 'Order financials are locked because a commercial document has been issued. Use the revision request workflow.',
+                'code'               => 'financials_locked',
+                'requires_supersede' => true,
+            ], 423);
+        }
+
+        try {
+            $rateInfo = $fx->getRate($fromCurrency, $newCurrency);
+        } catch (\Throwable $e) {
+            Log::error('[order_currency_conversion_rate_failed] Could not fetch exchange rate', [
+                'order_ref'     => $order->ref,
+                'from_currency' => $fromCurrency,
+                'to_currency'   => $newCurrency,
+                'error'         => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => "Could not fetch today's {$fromCurrency}/{$newCurrency} exchange rate. Please try again shortly.",
+                'code'    => 'exchange_rate_unavailable',
+            ], 502);
+        }
+
+        $rate        = $rateInfo['rate'];
+        $moneyFields = ['subtotal', 'delivery_cost', 'discount_amount', 'total', 'tax_amount', 'deposit_amount', 'balance_amount'];
+        $before      = ['order' => [], 'items' => []];
+        $after       = ['order' => [], 'items' => []];
+
+        DB::transaction(function () use ($order, $moneyFields, $rate, $newCurrency, &$before, &$after) {
+            foreach ($moneyFields as $field) {
+                if ($order->{$field} === null) {
+                    continue;
+                }
+                $before['order'][$field] = (float) $order->{$field};
+                $order->{$field}         = round(((float) $order->{$field}) * $rate, 2);
+                $after['order'][$field]  = (float) $order->{$field};
+            }
+            $order->currency = $newCurrency;
+            $order->save();
+
+            foreach (OrderItem::where('order_id', $order->id)->get() as $item) {
+                $before['items'][] = ['id' => $item->id, 'unit_price' => (float) $item->unit_price, 'line_total' => (float) $item->line_total];
+                $item->unit_price  = round(((float) $item->unit_price) * $rate, 2);
+                $item->line_total  = round(((float) $item->line_total) * $rate, 2);
+                $item->save();
+                $after['items'][] = ['id' => $item->id, 'unit_price' => (float) $item->unit_price, 'line_total' => (float) $item->line_total];
+            }
+        });
+
+        $this->writeLog($request, $order, 'currency_converted', [
+            'old_value' => $fromCurrency,
+            'new_value' => $newCurrency,
+            'notes'     => json_encode([
+                'rate'      => $rate,
+                'rate_date' => $rateInfo['date'],
+                'source'    => 'frankfurter.app (ECB)',
+                'before'    => $before,
+                'after'     => $after,
+            ]),
+        ]);
+
+        return null;
     }
 
     private function writeLog(Request $request, Order $order, string $action, array $extra = []): void

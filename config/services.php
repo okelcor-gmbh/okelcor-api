@@ -170,4 +170,13 @@ return [
         'base_url' => env('GEMINI_API_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta'),
     ],
 
+    // Frankfurter — free, no-API-key, ECB-sourced exchange rates. Used only
+    // for the admin order-currency conversion feature
+    // (CurrencyConversionService) — a real conversion at today's rate, not
+    // a display relabel, so this must never silently fall back to a stale
+    // or guessed rate; a failed lookup fails the conversion request itself.
+    'frankfurter' => [
+        'base_url' => env('FRANKFURTER_API_BASE_URL', 'https://api.frankfurter.app'),
+    ],
+
 ];
