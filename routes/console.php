@@ -47,3 +47,14 @@ Schedule::command('tracking:sync-carriers')
 // Inbound e-mail capture is push-based (a Cloudflare Email Worker calls
 // POST /webhooks/email-inbound directly) — no polling job needed here,
 // unlike the IMAP-based approach this replaced.
+
+// AI-generated admin dashboard insights — runs regardless of whether
+// GEMINI_API_KEY is set (AdminInsightsService no-ops silently if it isn't).
+// Every 15 minutes keeps well within Gemini's free-tier daily rate limit
+// even with several admins viewing the dashboard, since generation is
+// decoupled from page views entirely (see FRONTEND_NOTE_admin-insights.md).
+Schedule::command('insights:generate')
+    ->everyFifteenMinutes()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/admin-insights.log'));

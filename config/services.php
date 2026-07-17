@@ -157,4 +157,17 @@ return [
         'base_url'           => env('WHATSAPP_API_BASE_URL', 'https://graph.facebook.com'),
     ],
 
+    // Google Gemini — powers the admin-dashboard "insights" summarization
+    // job (AdminInsightsService). Free tier via Google AI Studio
+    // (aistudio.google.com/apikey), no card required. Degrades cleanly:
+    // an unset key means the scheduled job silently skips its cycle and
+    // GET /admin/insights keeps serving whatever was last generated (or an
+    // empty list if nothing ever has been) — same pattern as gls/whatsapp
+    // above, never a 500 for the admin panel.
+    'gemini' => [
+        'api_key'  => env('GEMINI_API_KEY'),
+        'model'    => env('GEMINI_MODEL', 'gemini-2.0-flash'),
+        'base_url' => env('GEMINI_API_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta'),
+    ],
+
 ];

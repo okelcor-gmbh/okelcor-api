@@ -69,6 +69,7 @@ use App\Http\Controllers\PromotionController;
 use App\Http\Controllers\Admin\AdminFetEngineController;
 use App\Http\Controllers\Admin\AdminPromotionController;
 use App\Http\Controllers\Admin\AdminDashboardController;
+use App\Http\Controllers\Admin\AdminInsightController;
 use App\Http\Controllers\Admin\AdminEuDeclarationController;
 use App\Http\Controllers\Admin\AdminOrderFinancialsController;
 use App\Http\Controllers\Admin\AdminOrderPaymentMilestoneController;
@@ -359,6 +360,9 @@ Route::prefix('v1')->group(function () {
 
         // Dashboard — all authenticated admin roles
         Route::get('dashboard', [AdminDashboardController::class, 'stats']);
+
+        // AI-generated dashboard insights — all authenticated admin roles
+        Route::get('insights', [AdminInsightController::class, 'index']);
 
         // Auth — all authenticated admin users
         Route::post('logout', [AuthController::class, 'logout']);

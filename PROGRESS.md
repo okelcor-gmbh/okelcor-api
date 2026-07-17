@@ -936,6 +936,11 @@ MAIL_INBOUND_ADDRESS=reply@reply.okelcor.com
 MAIL_INBOUND_WEBHOOK_SECRET=
 MAIL_INBOUND_MESSAGE_ID_DOMAIN=okelcor.com
 
+# AI-generated admin dashboard insights (Gemini, free tier — aistudio.google.com/apikey)
+# Blank = feature silently disabled; insights:generate no-ops, GET /admin/insights returns empty.
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-2.0-flash
+
 # Admin session
 ADMIN_SESSION_TTL_MINUTES=300
 
