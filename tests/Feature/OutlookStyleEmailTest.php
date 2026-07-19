@@ -117,6 +117,33 @@ class OutlookStyleEmailTest extends TestCase
         $this->assertNotNull($comm->message_id);
     }
 
+    /**
+     * Regression test — the signature used to only ever be appended inside
+     * the e-mail's own Blade template at send time, never saved into the
+     * CustomerCommunication record, so a sent message displayed
+     * signature-less inside the admin panel even though the real e-mail
+     * had it. Both the sent e-mail and the stored record must now agree.
+     */
+    public function test_signature_appears_in_both_the_sent_email_and_the_stored_record(): void
+    {
+        Mail::fake();
+        $admin = $this->admin();
+        $admin->update(['email_signature' => '<p>Best regards,<br>Jane Ops</p>']);
+        $customer = $this->customer();
+
+        $this->actingAs($admin, 'sanctum')
+            ->postJson("/api/v1/admin/customers/{$customer->id}/communications/send-email", [
+                'subject' => 'Following up',
+                'body'    => '<p>Here is the update you asked for.</p>',
+            ])->assertCreated();
+
+        Mail::assertSent(CustomerAdHocEmail::class, fn ($mail) => str_contains($mail->bodyHtml, 'Jane Ops'));
+
+        $comm = CustomerCommunication::where('customer_id', $customer->id)->firstOrFail();
+        $this->assertStringContainsString('Jane Ops', $comm->body);
+        $this->assertStringContainsString('Here is the update you asked for.', $comm->body);
+    }
+
     public function test_reply_prefixes_subject_and_sets_in_reply_to(): void
     {
         Mail::fake();

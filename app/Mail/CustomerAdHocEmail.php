@@ -61,20 +61,20 @@ class CustomerAdHocEmail extends Mailable
 
     public function content(): Content
     {
-        // Read fresh at render time — never bake a copy of the signature
-        // into the draft, so a signature update takes effect on the very
-        // next e-mail without anyone having to do anything.
-        $signatureHtml = $this->sender->fresh()?->email_signature;
-
+        // $bodyHtml already has the sender's signature appended (see
+        // AdminCommunicationController::appendSignature) — the same value
+        // is also what's stored on the CustomerCommunication record, so
+        // the admin panel's own thread view always matches what was
+        // actually e-mailed. Plain-text derives from the same single
+        // source rather than a separately-rendered signature block, so
+        // the two can never drift apart.
         return new Content(
             view: 'emails.customer-adhoc',
             text: 'emails.customer-adhoc-text',
             with: [
-                'bodyHtml'      => $this->bodyHtml,
-                'bodyText'      => $this->toPlainText($this->bodyHtml),
-                'signatureHtml' => $signatureHtml,
-                'signatureText' => $signatureHtml ? $this->toPlainText($signatureHtml) : null,
-                'senderName'    => trim($this->sender->display_name ?: $this->sender->name),
+                'bodyHtml'   => $this->bodyHtml,
+                'bodyText'   => $this->toPlainText($this->bodyHtml),
+                'senderName' => trim($this->sender->display_name ?: $this->sender->name),
             ],
         );
     }

@@ -240,6 +240,16 @@ class AdminCommunicationController extends Controller
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
+        // Appended once, here — both the actual e-mail (via the Mailable)
+        // and the CustomerCommunication record below render from this same
+        // value, so the admin panel's own thread view always shows exactly
+        // what the customer received, signature included. Previously the
+        // signature was only ever appended inside the e-mail's Blade
+        // template at send time and never made it into the stored `body`,
+        // so a sent message displayed signature-less inside the system
+        // even though the real e-mail had it.
+        $bodyWithSignature = $this->appendSignature($bodyClean, $request->user()->email_signature);
+
         // Store attachments before sending — a failed send below still keeps
         // the files, and the communication log stays a true record either way.
         // Wrapped: a storage failure here must surface as a clear error, not
@@ -287,7 +297,7 @@ class AdminCommunicationController extends Controller
                 ->send(new CustomerAdHocEmail(
                     sender: $sender,
                     subjectLine: $subject,
-                    bodyHtml: $bodyClean,
+                    bodyHtml: $bodyWithSignature,
                     ccRecipients: $cc,
                     attachmentFiles: $attachmentFiles,
                     messageId: $messageId,
@@ -323,7 +333,7 @@ class AdminCommunicationController extends Controller
                 'direction'     => 'outbound',
                 'channel'       => 'email',
                 'subject'       => $subject,
-                'body'          => $bodyClean,
+                'body'          => $bodyWithSignature,
                 'cc'            => $cc ?: null,
                 'attachments'   => $attachmentMeta ?: null,
                 'message_id'    => $messageId,
@@ -494,6 +504,20 @@ class AdminCommunicationController extends Controller
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
+
+    /**
+     * Same markup CustomerAdHocEmail's Blade view used to render inline —
+     * moved here so it's built exactly once and shared by both the actual
+     * e-mail and the stored CustomerCommunication row (see composeAndSend).
+     */
+    private function appendSignature(string $bodyHtml, ?string $signatureHtml): string
+    {
+        if (! $signatureHtml) {
+            return $bodyHtml;
+        }
+
+        return $bodyHtml . '<div style="margin-top:24px;padding-top:16px;border-top:1px solid #eeeeee;">' . $signatureHtml . '</div>';
+    }
 
     private function validateCommunicationInput(Request $request): array
     {

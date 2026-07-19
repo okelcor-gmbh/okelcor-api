@@ -25,14 +25,8 @@
 
     <tr>
         <td style="padding:32px 36px;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#171a20;line-height:1.6;">
-            {{-- Already sanitized (RichEmailHtmlSanitizer) before this Mailable was ever constructed. --}}
+            {{-- Already sanitized (RichEmailHtmlSanitizer) before this Mailable was ever constructed. Signature (if any) is already appended. --}}
             {!! $bodyHtml !!}
-
-            @if($signatureHtml)
-                <div style="margin-top:24px;padding-top:16px;border-top:1px solid #eeeeee;">
-                    {!! $signatureHtml !!}
-                </div>
-            @endif
         </td>
     </tr>
 
