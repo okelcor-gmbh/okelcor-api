@@ -54,11 +54,13 @@ use App\Http\Controllers\Admin\AdminCustomerVerificationController;
 use App\Http\Controllers\Admin\AdminCustomerAccessRequestController;
 use App\Http\Controllers\CustomerAccessRequestController;
 use App\Http\Controllers\CustomerCommunicationController;
+use App\Http\Controllers\CustomerChatController;
 use App\Http\Controllers\CustomerNotificationController;
 use App\Http\Controllers\CustomerNotificationPreferenceController;
 use App\Http\Controllers\CustomerTrackingController;
 use App\Http\Controllers\Admin\AdminCrmFollowUpController;
 use App\Http\Controllers\Admin\AdminCommunicationController;
+use App\Http\Controllers\Admin\AdminChatController;
 use App\Http\Controllers\Admin\AdminCrmEmailController;
 use App\Http\Controllers\Admin\CustomerImportController;
 use App\Http\Controllers\Admin\EbayListingController;
@@ -168,6 +170,12 @@ Route::prefix('v1')->group(function () {
         Route::get('customer/saved-fitments', [CustomerSavedFitmentController::class, 'index']);
         Route::post('customer/saved-fitments', [CustomerSavedFitmentController::class, 'store']);
         Route::delete('customer/saved-fitments/{id}', [CustomerSavedFitmentController::class, 'destroy']);
+
+        // Live chat — website widget / customer portal side
+        Route::post('chat/sessions', [CustomerChatController::class, 'store']);
+        Route::get('chat/sessions/{id}', [CustomerChatController::class, 'show']);
+        Route::post('chat/sessions/{id}/messages', [CustomerChatController::class, 'sendMessage']);
+        Route::post('chat/sessions/{id}/close', [CustomerChatController::class, 'close']);
 
         // Orders — customer pay-now + EU entry certificate + trade documents
         Route::post('orders/{ref}/checkout', [CustomerOrderController::class, 'checkout'])->middleware('throttle:checkout');
@@ -623,6 +631,16 @@ Route::prefix('v1')->group(function () {
             // customer-service window (see WhatsAppService).
             Route::post('customers/{id}/communications/send-whatsapp', [AdminCommunicationController::class, 'sendWhatsAppForCustomer']);
             Route::post('quote-requests/{id}/communications/send-whatsapp', [AdminCommunicationController::class, 'sendWhatsAppForQuote']);
+        });
+
+        // Live chat — admin/mobile-app side (crm.view / crm.update)
+        Route::middleware('permission:crm.view')->group(function () {
+            Route::get('chat-sessions', [AdminChatController::class, 'index']);
+        });
+        Route::middleware('permission:crm.update')->group(function () {
+            Route::post('chat-sessions/{id}/accept', [AdminChatController::class, 'accept']);
+            Route::post('chat-sessions/{id}/messages', [AdminChatController::class, 'sendMessage']);
+            Route::post('chat-sessions/{id}/close', [AdminChatController::class, 'close']);
         });
 
         // -----------------------------------------------------------------

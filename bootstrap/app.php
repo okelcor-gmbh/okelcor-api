@@ -13,6 +13,15 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
+    // Live chat (Pusher) — auth'd the same way every other API route is
+    // (Sanctum bearer token, not session/web), and placed under the same
+    // api/v1 prefix rather than the framework's default /broadcasting/auth
+    // at web root. Works for BOTH guards (AdminUser and Customer both use
+    // Sanctum) since routes/channels.php type-checks $user itself.
+    ->withBroadcasting(
+        __DIR__.'/../routes/channels.php',
+        ['middleware' => ['auth:sanctum'], 'prefix' => 'api/v1'],
+    )
     ->withMiddleware(function (Middleware $middleware): void {
         // Trust all proxies — required on Hostinger (nginx reverse proxy)
         // so Laravel sees HTTPS, correct client IPs, and correct APP_URL

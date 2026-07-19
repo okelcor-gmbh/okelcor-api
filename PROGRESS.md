@@ -941,6 +941,16 @@ MAIL_INBOUND_MESSAGE_ID_DOMAIN=okelcor.com
 GEMINI_API_KEY=
 GEMINI_MODEL=gemini-2.0-flash
 
+# Live chat real-time transport (Pusher, free tier — dashboard.pusher.com,
+# create a "Channels" app). BROADCAST_CONNECTION=null (the default here)
+# means live chat sessions/messages still work over plain HTTP, they just
+# won't push in real time until this is set to "pusher" with real keys.
+BROADCAST_CONNECTION=null
+PUSHER_APP_ID=
+PUSHER_APP_KEY=
+PUSHER_APP_SECRET=
+PUSHER_APP_CLUSTER=mt1
+
 # Admin session
 ADMIN_SESSION_TTL_MINUTES=300
 
