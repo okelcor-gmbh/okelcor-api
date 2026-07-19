@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\AdminNotification;
 use App\Models\AdminUser;
 use App\Support\AdminPermissions;
+use App\Support\AdminPushCategories;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -69,7 +70,14 @@ class AdminNotificationService
             // Mobile push (companion app) — same event, one more channel.
             // No-op for an admin with no registered device; any Expo
             // failure is caught and logged inside the service itself.
-            app(ExpoPushService::class)->sendToAdmin($adminUserId, $title, $body, $actionUrl);
+            // category tags which action buttons (if any) the push renders
+            // (see AdminPushCategories); related_type/related_id let a
+            // tapped action call the right endpoint without opening the app.
+            app(ExpoPushService::class)->sendToAdmin(
+                $adminUserId, $title, $body, $actionUrl,
+                category: AdminPushCategories::forType($type),
+                data: array_filter(['related_type' => $relatedType, 'related_id' => $relatedId, 'type' => $type]),
+            );
 
             return $notification;
         } catch (\Throwable $e) {

@@ -114,6 +114,40 @@ class AdminPushNotificationTest extends TestCase
             && $request[0]['title'] === 'Something happened');
     }
 
+    public function test_notification_with_a_mapped_type_carries_category_and_related_data(): void
+    {
+        $admin = $this->admin();
+        AdminPushToken::create(['admin_id' => $admin->id, 'token' => 'ExponentPushToken[xyz]', 'platform' => 'ios', 'last_seen_at' => now()]);
+
+        Http::fake(['exp.host/*' => Http::response(['data' => [['status' => 'ok']]], 200)]);
+
+        AdminNotificationService::notifyUser(
+            adminUserId: $admin->id,
+            type: 'financial_revision_requested',
+            title: 'Financial revision requested',
+            body: 'Order OKL-123: price correction.',
+            relatedType: 'order',
+            relatedId: 184,
+        );
+
+        Http::assertSent(fn ($request) => $request[0]['categoryId'] === 'financial_revision_request'
+            && $request[0]['data']['related_type'] === 'order'
+            && $request[0]['data']['related_id'] === 184
+            && $request[0]['data']['type'] === 'financial_revision_requested');
+    }
+
+    public function test_notification_with_an_unmapped_type_omits_category(): void
+    {
+        $admin = $this->admin();
+        AdminPushToken::create(['admin_id' => $admin->id, 'token' => 'ExponentPushToken[xyz]', 'platform' => 'ios', 'last_seen_at' => now()]);
+
+        Http::fake(['exp.host/*' => Http::response(['data' => [['status' => 'ok']]], 200)]);
+
+        AdminNotificationService::notifyUser(adminUserId: $admin->id, type: 'some_unmapped_type', title: 'Hi');
+
+        Http::assertSent(fn ($request) => ! array_key_exists('categoryId', $request[0]));
+    }
+
     public function test_dead_token_is_pruned_after_device_not_registered_response(): void
     {
         $admin = $this->admin();

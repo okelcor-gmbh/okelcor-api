@@ -7,6 +7,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\OrderLog;
 use App\Models\TradeDocument;
+use App\Services\AdminNotificationService;
 use App\Services\TradeDocumentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -94,6 +95,22 @@ class AdminOrderFinancialsController extends Controller
             'notes'     => 'Revision requested: ' . $request->input('reason') . ' — ' . json_encode($request->input('changes')),
         ]);
 
+        // Previously silent — a revision request generated a log entry but
+        // no notification of any kind, so nothing prompted anyone to
+        // actually approve it. Fanned out (not just to whoever's online)
+        // since this blocks re-issuing a document until resolved.
+        AdminNotificationService::notifyPermission(
+            permission:  'orders.approve_financial_revision',
+            type:        'financial_revision_requested',
+            title:       'Financial revision requested',
+            body:        "Order {$order->ref}: " . $request->input('reason'),
+            actionUrl:   "/admin/orders/{$order->id}",
+            severity:    'warning',
+            relatedType: 'order',
+            relatedId:   $order->id,
+            dedupeKey:   "financial_revision_requested:order:{$order->id}",
+        );
+
         return response()->json([
             'data' => [
                 'financials_revision_required' => true,
@@ -123,7 +140,8 @@ class AdminOrderFinancialsController extends Controller
             ], 422);
         }
 
-        $changes = $order->financials_revision_changes ?? [];
+        $changes     = $order->financials_revision_changes ?? [];
+        $requestedBy = $order->financials_revision_requested_by;
 
         try {
             [$affected, $appliedChanges] = DB::transaction(function () use ($order, $admin, $changes) {
@@ -244,6 +262,19 @@ class AdminOrderFinancialsController extends Controller
             'new_value' => substr('changes: ' . implode(',', array_keys($appliedChanges)), 0, 100),
         ]);
 
+        if ($requestedBy) {
+            AdminNotificationService::notifyUser(
+                adminUserId: $requestedBy,
+                type:        'financial_revision_approved',
+                title:       'Your revision request was approved',
+                body:        "Order {$order->ref} — {$affected->count()} document(s) superseded and will need to be regenerated.",
+                actionUrl:   "/admin/orders/{$order->id}",
+                severity:    'success',
+                relatedType: 'order',
+                relatedId:   $order->id,
+            );
+        }
+
         return response()->json([
             'data' => [
                 'superseded_documents' => $affected->pluck('number')->filter()->values(),
@@ -274,6 +305,7 @@ class AdminOrderFinancialsController extends Controller
         ]);
 
         $originalReason = $order->financials_revision_reason;
+        $requestedBy    = $order->financials_revision_requested_by;
 
         $order->update([
             'financials_revision_required'     => false,
@@ -287,6 +319,19 @@ class AdminOrderFinancialsController extends Controller
             'old_value' => $originalReason,
             'notes'     => 'Revision rejected: ' . ($request->input('reason') ?? 'No reason provided'),
         ]);
+
+        if ($requestedBy) {
+            AdminNotificationService::notifyUser(
+                adminUserId: $requestedBy,
+                type:        'financial_revision_rejected',
+                title:       'Your revision request was rejected',
+                body:        "Order {$order->ref}" . ($request->input('reason') ? ' — ' . $request->input('reason') : ''),
+                actionUrl:   "/admin/orders/{$order->id}",
+                severity:    'warning',
+                relatedType: 'order',
+                relatedId:   $order->id,
+            );
+        }
 
         return response()->json([
             'message' => 'Financial revision request rejected. Order financials remain locked.',

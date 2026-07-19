@@ -25,6 +25,7 @@ class AdminUser extends Authenticatable
         'two_factor_recovery_codes',
         'two_factor_confirmed_at',
         'email_signature',
+        'available_for_chat',
     ];
 
     protected $hidden = [
@@ -39,6 +40,7 @@ class AdminUser extends Authenticatable
         'password'                 => 'hashed',
         'must_change_password'     => 'boolean',
         'is_active'                => 'boolean',
+        'available_for_chat'       => 'boolean',
     ];
 
     public function hasTwoFactorEnabled(): bool

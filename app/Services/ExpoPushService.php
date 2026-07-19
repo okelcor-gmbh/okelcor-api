@@ -29,16 +29,41 @@ class ExpoPushService
     private const API_URL = 'https://exp.host/--/api/v2/push/send';
     private const CHUNK_SIZE = 100; // Expo's documented max per request
 
-    public function sendToAdmin(int $adminUserId, string $title, ?string $body, ?string $actionUrl = null): void
-    {
-        $this->sendToAdmins([$adminUserId], $title, $body, $actionUrl);
+    /**
+     * @param  ?string  $category  Expo/native notification category identifier
+     *                             (e.g. 'financial_revision_request') — the
+     *                             mobile app registers what action buttons
+     *                             each category renders; this just tags
+     *                             which one applies. Null = plain
+     *                             notification, no action buttons.
+     * @param  array  $data  Extra fields merged into the push payload's
+     *                       `data` object (alongside `action_url`) — e.g.
+     *                       related_type/related_id, so a tapped action
+     *                       button can call the right endpoint without the
+     *                       app needing to open and re-fetch anything.
+     */
+    public function sendToAdmin(
+        int $adminUserId,
+        string $title,
+        ?string $body,
+        ?string $actionUrl = null,
+        ?string $category = null,
+        array $data = []
+    ): void {
+        $this->sendToAdmins([$adminUserId], $title, $body, $actionUrl, $category, $data);
     }
 
     /**
      * @param  int[]  $adminUserIds
      */
-    public function sendToAdmins(array $adminUserIds, string $title, ?string $body, ?string $actionUrl = null): void
-    {
+    public function sendToAdmins(
+        array $adminUserIds,
+        string $title,
+        ?string $body,
+        ?string $actionUrl = null,
+        ?string $category = null,
+        array $data = []
+    ): void {
         if (! $adminUserIds) {
             return;
         }
@@ -49,19 +74,22 @@ class ExpoPushService
         }
 
         foreach ($tokens->chunk(self::CHUNK_SIZE) as $chunk) {
-            $this->send($chunk, $title, $body, $actionUrl);
+            $this->send($chunk, $title, $body, $actionUrl, $category, $data);
         }
     }
 
-    private function send(Collection $tokens, string $title, ?string $body, ?string $actionUrl): void
+    private function send(Collection $tokens, string $title, ?string $body, ?string $actionUrl, ?string $category, array $data): void
     {
-        $messages = $tokens->map(fn ($token) => [
-            'to'    => $token,
-            'title' => $title,
-            'body'  => $body ?? '',
-            'data'  => ['action_url' => $actionUrl],
-            'sound' => 'default',
-        ])->values()->all();
+        $payloadData = array_merge($data, ['action_url' => $actionUrl]);
+
+        $messages = $tokens->map(fn ($token) => array_filter([
+            'to'         => $token,
+            'title'      => $title,
+            'body'       => $body ?? '',
+            'data'       => $payloadData,
+            'sound'      => 'default',
+            'categoryId' => $category,
+        ], fn ($v) => $v !== null))->values()->all();
 
         try {
             $response = Http::timeout(10)

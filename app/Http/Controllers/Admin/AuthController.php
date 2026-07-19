@@ -114,6 +114,28 @@ class AuthController extends Controller
         ]);
     }
 
+    /**
+     * PUT /api/v1/admin/presence
+     *
+     * Mobile app's live-chat availability toggle — an admin's phone only
+     * gets routed a new chat request while this is true. Defaults false;
+     * nobody is "available" until they explicitly opt in.
+     */
+    public function updatePresence(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'available_for_chat' => ['required', 'boolean'],
+        ]);
+
+        $admin = $request->user();
+        $admin->update(['available_for_chat' => $data['available_for_chat']]);
+
+        return response()->json([
+            'data'    => ['available_for_chat' => $admin->available_for_chat],
+            'message' => 'success',
+        ]);
+    }
+
     private function formatUser(AdminUser $u): array
     {
         return [
@@ -130,6 +152,7 @@ class AuthController extends Controller
             'two_factor_enabled'     => $u->hasTwoFactorEnabled(),
             'two_factor_enabled_at'  => $u->two_factor_confirmed_at?->toIso8601String(),
             'permissions'            => AdminPermissions::for($u->role),
+            'available_for_chat'     => (bool) $u->available_for_chat,
         ];
     }
 

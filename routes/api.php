@@ -368,6 +368,7 @@ Route::prefix('v1')->group(function () {
         // Auth — all authenticated admin users
         Route::post('logout', [AuthController::class, 'logout']);
         Route::get('me', [AuthController::class, 'me']);
+        Route::put('presence', [AuthController::class, 'updatePresence']);
 
         // Notifications (CRM-3 / CRM-3B) — all authenticated admin users, scoped to self
         Route::get('notifications', [AdminNotificationController::class, 'index']);
