@@ -188,4 +188,23 @@ return [
         'base_url' => env('FRANKFURTER_API_BASE_URL', 'https://api.frankfurter.app'),
     ],
 
+    // Crisp — the actual live chat product (widget on every customer page,
+    // full inbox already in the desktop admin panel via a Next.js proxy to
+    // Crisp's own REST API). This backend proxies the same four operations
+    // for the mobile app, since Crisp credentials can't ship inside a
+    // mobile app bundle (extractable from a decompiled APK/IPA) the way
+    // they can live server-side in a Next.js route. `identifier`/`key` come
+    // from a Crisp "plugin" (Settings → Plugins → private plugin, or
+    // whatever already backs the existing Next.js proxy — reuse the same
+    // one rather than minting a second). Degrades cleanly: unset
+    // credentials mean CrispService::isConfigured() is false and every
+    // endpoint returns a clear 503, never a raw crash.
+    'crisp' => [
+        'website_id'     => env('CRISP_WEBSITE_ID'),
+        'identifier'     => env('CRISP_API_IDENTIFIER'),
+        'key'            => env('CRISP_API_KEY'),
+        'base_url'       => env('CRISP_API_BASE_URL', 'https://api.crisp.chat/v1'),
+        'webhook_secret' => env('CRISP_WEBHOOK_SECRET'),
+    ],
+
 ];

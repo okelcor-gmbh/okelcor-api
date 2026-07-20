@@ -948,11 +948,24 @@ GEMINI_MODEL=gemini-flash-latest
 # create a "Channels" app). BROADCAST_CONNECTION=null (the default here)
 # means live chat sessions/messages still work over plain HTTP, they just
 # won't push in real time until this is set to "pusher" with real keys.
+# NOTE (2026-07-20): this is for the custom live_chat_sessions system,
+# which turned out to have no real traffic — Crisp (below) is the actual
+# live chat product. Left configured/dormant rather than removed.
 BROADCAST_CONNECTION=null
 PUSHER_APP_ID=
 PUSHER_APP_KEY=
 PUSHER_APP_SECRET=
 PUSHER_APP_CLUSTER=mt1
+
+# Crisp — the real live chat product. website_id/identifier/key: reuse
+# whatever the existing Next.js admin-panel proxy already has configured
+# (same Crisp private plugin), don't mint a second plugin. webhook_secret
+# is generated when you add the webhook URL in Crisp's dashboard
+# (Settings → Integrations → Webhooks → subscribe to message:send).
+CRISP_WEBSITE_ID=
+CRISP_API_IDENTIFIER=
+CRISP_API_KEY=
+CRISP_WEBHOOK_SECRET=
 
 # Admin session
 ADMIN_SESSION_TTL_MINUTES=300

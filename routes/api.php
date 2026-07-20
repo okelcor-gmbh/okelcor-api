@@ -9,6 +9,7 @@ use App\Http\Controllers\ArticleController;
 use App\Http\Controllers\ContainerTrackingController;
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\EmailInboundWebhookController;
+use App\Http\Controllers\CrispWebhookController;
 use App\Http\Controllers\WhatsAppWebhookController;
 use App\Http\Controllers\VatController;
 use App\Http\Controllers\BrandController;
@@ -61,6 +62,7 @@ use App\Http\Controllers\CustomerTrackingController;
 use App\Http\Controllers\Admin\AdminCrmFollowUpController;
 use App\Http\Controllers\Admin\AdminCommunicationController;
 use App\Http\Controllers\Admin\AdminChatController;
+use App\Http\Controllers\Admin\AdminCrispController;
 use App\Http\Controllers\Admin\AdminCrmEmailController;
 use App\Http\Controllers\Admin\CustomerImportController;
 use App\Http\Controllers\Admin\EbayListingController;
@@ -299,6 +301,11 @@ Route::prefix('v1')->group(function () {
     // customer reply arrives at reply.okelcor.com. Protected by its own
     // HMAC signature (X-Webhook-Signature), not by auth middleware.
     Route::post('webhooks/email-inbound', [EmailInboundWebhookController::class, 'handle']);
+
+    // Crisp — configure under Crisp dashboard → Settings → Integrations →
+    // Webhooks, subscribed to message:send. Protected by its own HMAC
+    // signature (X-Crisp-Signature), not by auth middleware.
+    Route::post('webhooks/crisp', [CrispWebhookController::class, 'handle']);
 
     // Mollie is legacy/inactive until business account/API credentials are approved.
     Route::post('orders/mollie-webhook', fn () => response()->json([
@@ -634,6 +641,10 @@ Route::prefix('v1')->group(function () {
         });
 
         // Live chat — admin/mobile-app side (crm.view / crm.update)
+        // Dormant: built against a custom live_chat_sessions system that
+        // never got real traffic — Crisp (below) is the actual live chat
+        // product. Left in place, not removed, in case Crisp doesn't pan
+        // out; nothing new should be built against this.
         Route::middleware('permission:crm.view')->group(function () {
             Route::get('chat-sessions', [AdminChatController::class, 'index']);
         });
@@ -641,6 +652,18 @@ Route::prefix('v1')->group(function () {
             Route::post('chat-sessions/{id}/accept', [AdminChatController::class, 'accept']);
             Route::post('chat-sessions/{id}/messages', [AdminChatController::class, 'sendMessage']);
             Route::post('chat-sessions/{id}/close', [AdminChatController::class, 'close']);
+        });
+
+        // Crisp — the actual live chat product. Mobile-app proxy only; the
+        // desktop admin panel already talks to Crisp directly via its own
+        // Next.js route.
+        Route::middleware('permission:crm.view')->group(function () {
+            Route::get('crisp/conversations', [AdminCrispController::class, 'index']);
+            Route::get('crisp/conversations/{sessionId}/messages', [AdminCrispController::class, 'messages']);
+        });
+        Route::middleware('permission:crm.update')->group(function () {
+            Route::post('crisp/conversations/{sessionId}/reply', [AdminCrispController::class, 'reply']);
+            Route::post('crisp/conversations/{sessionId}/resolve', [AdminCrispController::class, 'resolve']);
         });
 
         // -----------------------------------------------------------------

@@ -24,6 +24,7 @@ class AdminPushCategories
         'customer_message_reply'       => 'inbox_reply',
         'inbound_email_lead_received'  => 'new_lead',
         'follow_up_due'                => 'follow_up_due',
+        'crisp_message_received'       => 'crisp_reply',
     ];
 
     public static function forType(string $type): ?string
