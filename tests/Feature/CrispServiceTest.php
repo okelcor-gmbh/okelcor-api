@@ -34,6 +34,22 @@ class CrispServiceTest extends TestCase
         $this->assertTrue((new CrispService())->isConfigured());
     }
 
+    /**
+     * Regression test — Crisp genuinely returns 206 (Partial Content) for
+     * a successful paginated conversations list, not just 200. The first
+     * live test against a real account returned real data with this
+     * status and the old ->ok() check (exactly 200) wrongly rejected it
+     * as an error.
+     */
+    public function test_list_conversations_treats_206_as_success(): void
+    {
+        Http::fake(['api.crisp.chat/*' => Http::response(['error' => false, 'reason' => 'listed', 'data' => [['session_id' => 'abc']]], 206)]);
+
+        $result = (new CrispService())->listConversations();
+
+        $this->assertSame([['session_id' => 'abc']], $result);
+    }
+
     public function test_list_conversations_hits_the_correct_url_with_basic_auth_and_tier_header(): void
     {
         Http::fake(['api.crisp.chat/*' => Http::response(['data' => [['session_id' => 'abc']]], 200)]);

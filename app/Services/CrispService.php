@@ -74,8 +74,17 @@ class CrispService
 
     private function unwrap(Response $response): array
     {
-        if (! $response->ok()) {
-            throw new \RuntimeException('Crisp API error ' . $response->status() . ': ' . $response->body());
+        // Crisp uses 206 (Partial Content) for successful paginated list
+        // responses, not just 200 — ->ok() checks exactly 200 and wrongly
+        // rejected a real, successful listConversations() response.
+        // ->successful() covers the whole 2xx range instead. Also check
+        // Crisp's own {"error": bool, "reason": "..."} envelope in case a
+        // future response is ever 2xx with error:true in the body.
+        if (! $response->successful() || $response->json('error') === true) {
+            $reason = $response->json('reason');
+            throw new \RuntimeException(
+                'Crisp API error ' . $response->status() . ($reason ? ": {$reason}" : ': ' . $response->body())
+            );
         }
 
         return $response->json('data') ?? [];
