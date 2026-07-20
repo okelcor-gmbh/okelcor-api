@@ -164,9 +164,18 @@ return [
     // GET /admin/insights keeps serving whatever was last generated (or an
     // empty list if nothing ever has been) — same pattern as gls/whatsapp
     // above, never a 500 for the admin panel.
+    //
+    // Default is the "-latest" alias (not a dated model like
+    // gemini-2.0-flash/gemini-2.5-flash) on purpose — confirmed live that
+    // a pinned dated model can return 429 (quota limit: 0) or 404 ("no
+    // longer available to new users") depending on the API key's project,
+    // while the alias reliably resolves to whatever Google currently
+    // treats as their standard free-tier lightweight model. If this ever
+    // needs changing, list what a given key actually has access to via:
+    //   curl "https://generativelanguage.googleapis.com/v1beta/models?key=$KEY"
     'gemini' => [
         'api_key'  => env('GEMINI_API_KEY'),
-        'model'    => env('GEMINI_MODEL', 'gemini-2.0-flash'),
+        'model'    => env('GEMINI_MODEL', 'gemini-flash-latest'),
         'base_url' => env('GEMINI_API_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta'),
     ],
 

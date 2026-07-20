@@ -938,8 +938,11 @@ MAIL_INBOUND_MESSAGE_ID_DOMAIN=okelcor.com
 
 # AI-generated admin dashboard insights (Gemini, free tier — aistudio.google.com/apikey)
 # Blank = feature silently disabled; insights:generate no-ops, GET /admin/insights returns empty.
+# Use the -latest alias, not a dated model — a pinned dated model
+# (gemini-2.0-flash, gemini-2.5-flash) can 429/404 depending on the key's
+# project even with a valid key; confirmed live 2026-07-20.
 GEMINI_API_KEY=
-GEMINI_MODEL=gemini-2.0-flash
+GEMINI_MODEL=gemini-flash-latest
 
 # Live chat real-time transport (Pusher, free tier — dashboard.pusher.com,
 # create a "Channels" app). BROADCAST_CONNECTION=null (the default here)
