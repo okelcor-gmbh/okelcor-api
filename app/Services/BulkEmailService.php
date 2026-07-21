@@ -21,6 +21,10 @@ class BulkEmailService
     {
         $query = MarketingContact::query()->where('status', '!=', 'unsubscribed');
 
+        if (! empty($filters['market'])) {
+            $query->where('market', $filters['market']);
+        }
+
         if (! empty($filters['company'])) {
             $query->where('company', 'like', '%' . $filters['company'] . '%');
         }

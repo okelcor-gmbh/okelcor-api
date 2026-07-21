@@ -752,7 +752,10 @@ Route::prefix('v1')->group(function () {
         Route::middleware('permission:marketing.manage')->group(function () {
             Route::get('marketing-contacts', [AdminMarketingContactController::class, 'index']);
             Route::get('marketing-contacts/stats', [AdminMarketingContactController::class, 'stats']);
+            Route::get('marketing-contacts/markets', [AdminMarketingContactController::class, 'markets']);
+            Route::post('marketing-contacts', [AdminMarketingContactController::class, 'store']);
             Route::post('marketing-contacts/import', [AdminMarketingContactController::class, 'import']);
+            Route::patch('marketing-contacts/{id}', [AdminMarketingContactController::class, 'update']);
             Route::delete('marketing-contacts/{id}', [AdminMarketingContactController::class, 'destroy']);
 
             Route::get('bulk-emails', [AdminBulkEmailController::class, 'index']);

@@ -13,6 +13,7 @@ class MarketingContact extends Model
         'phone',
         'company',
         'country',
+        'market',
         'vat_id',
         'labels',
         'source',

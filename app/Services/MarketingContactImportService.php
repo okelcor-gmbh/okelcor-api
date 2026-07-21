@@ -34,13 +34,21 @@ class MarketingContactImportService
         'phone'      => ['phone 1', 'phone', 'phone number', 'mobile', 'tel'],
         'company'    => ['company', 'company name', 'business name', 'organization', 'organisation'],
         'country'    => ['address 1 - country', 'country'],
+        'market'     => ['market', 'region', 'segment'],
         'vat_id'     => ['vat id', 'vat', 'vat number'],
         'labels'     => ['labels', 'business type', 'bussines type', 'type', 'category'],
         'source'     => ['source'],
         'status'     => ['email subscriber status', 'subscriber status', 'status'],
     ];
 
-    public function import(string $filePath): array
+    /**
+     * $defaultMarket applies to every row unless that row's own CSV has a
+     * market/region/segment column with a value — lets a marketing team
+     * member upload a whole batch under one market selector without
+     * needing a market column in the file at all, while still supporting
+     * a pre-tagged export if one exists.
+     */
+    public function import(string $filePath, ?string $defaultMarket = null): array
     {
         if (! file_exists($filePath)) {
             throw new \RuntimeException("File not found: {$filePath}");
@@ -104,6 +112,7 @@ class MarketingContactImportService
                     'phone'       => $this->cleanPhone($this->field($record, 'phone') ?? ''),
                     'company'     => $this->field($record, 'company'),
                     'country'     => $this->field($record, 'country'),
+                    'market'      => $this->field($record, 'market') ?: $defaultMarket,
                     'vat_id'      => $this->field($record, 'vat_id'),
                     'labels'      => $this->field($record, 'labels'),
                     'source'      => $this->field($record, 'source'),

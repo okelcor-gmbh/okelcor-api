@@ -38,7 +38,7 @@ class AdminBulkEmailController extends Controller
     // -------------------------------------------------------------------------
     public function recipientCount(Request $request, BulkEmailService $service): JsonResponse
     {
-        $filters = $request->only(['company', 'country', 'status', 'search']);
+        $filters = $request->only(['market', 'company', 'country', 'status', 'search']);
 
         return response()->json(['data' => ['count' => $service->countRecipients($filters)]]);
     }
@@ -63,6 +63,7 @@ class AdminBulkEmailController extends Controller
             'subject'         => ['required', 'string', 'max:255'],
             'body_html'       => ['required', 'string'],
             'filters'         => ['nullable', 'array'],
+            'filters.market'  => ['nullable', 'string', 'max:50'],
             'filters.company' => ['nullable', 'string', 'max:150'],
             'filters.country' => ['nullable', 'string', 'max:100'],
             'filters.status'  => ['nullable', 'in:subscribed,unknown'],

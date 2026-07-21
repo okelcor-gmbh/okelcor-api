@@ -1,3 +1,12 @@
+@if($isFullDocument)
+{{-- Already a complete HTML document (its own <html>/<head>/<body>) —
+     render exactly as authored. Its own unsubscribe link (if any) should
+     use the literal token [[UNSUBSCRIBE_URL]], already replaced with the
+     real per-recipient URL before this view ever renders (see
+     SendBulkEmailCampaignJob). Nothing appended here — a second footer
+     bolted onto a fully-designed template would look broken. --}}
+{!! $bodyHtml !!}
+@else
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -15,3 +24,4 @@
     </p>
 </body>
 </html>
+@endif

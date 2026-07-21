@@ -32,6 +32,14 @@ class BulkCampaignEmail extends Mailable
             with: [
                 'bodyHtml'       => $this->bodyHtml,
                 'unsubscribeUrl' => $this->unsubscribeUrl,
+                // A campaign body that's already a full, self-contained
+                // HTML document (its own <html>/<head>/<body> — e.g. a
+                // designed template pasted in whole) must render as-is:
+                // nesting it inside this view's own <html><body> would be
+                // invalid HTML and unpredictable across mail clients. A
+                // plain snippet (the original, simpler use case) still
+                // gets wrapped with the standard footer below.
+                'isFullDocument' => (bool) preg_match('/^\s*(<!doctype\s+html|<html)/i', $this->bodyHtml),
             ],
         );
     }

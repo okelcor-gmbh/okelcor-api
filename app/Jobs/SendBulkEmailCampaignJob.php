@@ -45,9 +45,20 @@ class SendBulkEmailCampaignJob implements ShouldQueue
                 foreach ($chunk as $recipient) {
                     $unsubscribeUrl = url("/api/v1/marketing-contacts/unsubscribe/{$recipient->contact->unsubscribe_token}");
 
+                    // Lets a full, self-contained campaign HTML document
+                    // (its own <html>/<body>, its own styled unsubscribe
+                    // link) reference the real per-recipient URL via this
+                    // literal token, instead of only ever getting the
+                    // generic footer emails.bulk-campaign appends for a
+                    // plain HTML snippet (see that view for the other half
+                    // of this — it skips its own wrapper/footer entirely
+                    // when body_html is already a full document, since
+                    // nesting two <html> documents is invalid).
+                    $personalizedBody = str_replace('[[UNSUBSCRIBE_URL]]', $unsubscribeUrl, $campaign->body_html);
+
                     try {
                         Mail::to($recipient->email)->send(
-                            new BulkCampaignEmail($campaign->subject, $campaign->body_html, $unsubscribeUrl)
+                            new BulkCampaignEmail($campaign->subject, $personalizedBody, $unsubscribeUrl)
                         );
 
                         $recipient->update(['status' => 'sent', 'sent_at' => now()]);
