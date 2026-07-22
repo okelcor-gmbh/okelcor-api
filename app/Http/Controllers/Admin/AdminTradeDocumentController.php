@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class AdminTradeDocumentController extends Controller
@@ -329,9 +330,27 @@ class AdminTradeDocumentController extends Controller
     }
 
     /**
+     * Document types a manual upload can be filed as — the same set the
+     * system's own generate* endpoints produce, plus the generic
+     * 'shipment_document' bucket (BOL, CMR, and anything else that isn't
+     * one of the "official" documents below, where having several at once
+     * is normal and expected).
+     */
+    private const UPLOADABLE_TYPES = ['order_confirmation', 'proforma', 'commercial_invoice', 'packing_list', 'delivery_note', 'shipment_document'];
+
+    /**
      * POST /api/v1/admin/orders/{id}/trade-documents/upload
      *
-     * Upload a shipment document (Bill of Lading, CMR, etc.) to an order.
+     * Upload a document to an order — either a generic shipment document
+     * (Bill of Lading, CMR, etc., the original/default use of this
+     * endpoint), or one of the "official" trade document types
+     * (order confirmation, proforma, commercial invoice, packing list,
+     * delivery note) when it was produced externally (e.g. by an
+     * accountant) and needs to be centralized here instead of the system
+     * generating its own version. Uploading one of the official types
+     * automatically supersedes any existing issued/sent document of that
+     * same type on this order, so there's never more than one active
+     * version regardless of whether it was generated or uploaded.
      */
     public function uploadShipmentDocument(Request $request, int $id): JsonResponse
     {
@@ -358,7 +377,10 @@ class AdminTradeDocumentController extends Controller
             'file'       => ['required', 'file', 'max:20480', 'mimes:pdf,jpg,jpeg,png,xls,xlsx,csv'],
             'type_label' => ['required', 'string', 'max:100'],
             'notes'      => ['nullable', 'string', 'max:500'],
+            'type'       => ['sometimes', 'nullable', Rule::in(self::UPLOADABLE_TYPES)],
         ]);
+
+        $type = $request->input('type') ?: 'shipment_document';
 
         $uploaded = $request->file('file');
 
@@ -380,10 +402,29 @@ class AdminTradeDocumentController extends Controller
             return response()->json(['message' => 'File could not be saved. Please try again.'], 500);
         }
 
+        // An "official" type replaces whatever was previously issued for
+        // it (generated or itself uploaded) — mirrors AdminTradeDocumentController::supersede,
+        // just triggered automatically instead of by a separate admin action.
+        if ($type !== 'shipment_document') {
+            $previous = TradeDocument::where('order_id', $order->id)
+                ->where('type', $type)
+                ->whereIn('status', ['issued', 'sent'])
+                ->get();
+
+            foreach ($previous as $doc) {
+                $doc->update([
+                    'status'           => 'superseded',
+                    'superseded_at'    => now(),
+                    'superseded_by_id' => $admin?->id,
+                    'supersede_reason' => 'Superseded by a manually uploaded replacement.',
+                ]);
+            }
+        }
+
         $document = TradeDocument::create([
             'order_id'          => $order->id,
             'order_ref'         => $order->ref,
-            'type'              => 'shipment_document',
+            'type'              => $type,
             'type_label'        => $request->input('type_label'),
             'status'            => 'issued',
             'file_path'         => $storagePath,
@@ -403,7 +444,7 @@ class AdminTradeDocumentController extends Controller
                 'admin_user_email' => $admin?->email,
                 'action'           => 'document_uploaded',
                 'new_value'        => $request->input('type_label'),
-                'notes'            => 'Shipment document uploaded: ' . $originalName,
+                'notes'            => 'Document uploaded (' . $type . '): ' . $originalName,
                 'ip_address'       => $request->ip(),
             ]);
         } catch (\Throwable $e) {
