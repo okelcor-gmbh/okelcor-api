@@ -151,7 +151,14 @@ shots, and shouldn't land in the carousel.
 
 ---
 
-## §3 — Saved fitments / reorder: already shipped
+## §3 — Saved fitments / reorder: SHIPPED, not parked
+
+> Flagging this twice because a follow-up note recorded §3 as "silent /
+> parked". It isn't parked — it is **built and live in production**. If
+> you're holding a feature back waiting on us, stop waiting; if you're
+> planning to build a workaround, don't.
+
+
 
 Built in Session 62, matching your requested contract exactly:
 
@@ -184,6 +191,33 @@ this as safely deferred. If it's slow, say the word and it's a small build.
 
 ---
 
+## Deploy ordering — you are not blocked
+
+**Verified, not assumed.** `ProductStockAndTyrePassportTest::test_public_payload_survives_code_deployed_before_migration`
+drops the new columns, removes the settings row, and asserts the public
+endpoints still return 200 with `tyre_batch: null` and
+`estimated_dispatch_days: null`.
+
+So all four orderings are safe for anything customer-facing:
+
+| Order | Result |
+|---|---|
+| FE renders fields, BE not deployed at all | Fields absent → your null checks handle it |
+| BE code deployed, migration **not** run | Fields present and `null` — **verified above** |
+| Migration run, BE code not deployed | Extra nullable columns nobody reads |
+| Everything deployed | Fields populate once an admin enters data |
+
+The one real consequence of code-before-migration is **admin-side only**:
+saving tyre-passport fields or uploading inspection photos would error
+until the migration runs. No customer-facing path is affected, and it
+self-corrects the moment `artisan migrate` runs.
+
+**Net: ship whenever you like.** There's no sequencing constraint on your
+side. Both fields are `null` today regardless, because nobody has set the
+dispatch number or entered any inspection data yet.
+
+---
+
 ## Migrations
 
 Two, both additive and guarded:
@@ -194,5 +228,45 @@ Two, both additive and guarded:
 Nothing here is a breaking change — every new field is additive to existing
 payloads, and `bulk-stock`'s existing boolean-only contract still works.
 
-Backend tests: `ProductStockAndTyrePassportTest`, 19 tests / 54 assertions,
+Backend tests: `ProductStockAndTyrePassportTest`, 20 tests / 62 assertions,
 run and passing.
+
+---
+
+## Addendum — EU tyre label: answering your feed question
+
+You asked, correctly framed as an open question, whether EU label data
+might already be in the Rapid supplier feed and therefore bulk-populatable
+rather than manual entry. **Checked — it isn't.**
+
+`SyncRapidProducts::parseExcel()` reads columns A–K and maps exactly ten
+fields:
+
+```
+brand, width, height, rim, load_index, speed_rating,
+season, size_pattern, stock, price
+```
+
+No fuel efficiency, no wet grip, no noise value, no EPREL identifier.
+It's also single-brand — every row whose brand isn't `Rapid` is skipped —
+so even if it did carry label data it would cover one brand of the
+catalogue.
+
+Your underlying reasoning still holds, though, and it's the right
+distinction: EU label values *are* a published property of a tyre model
+rather than something a human has to inspect, so unlike the tyre passport
+this is bulk-populatable **in principle**. It just needs a source we don't
+currently have — EPREL directly, or a richer supplier feed. That's a real
+piece of work (matching our SKUs to EPREL records), not a column-mapping
+change, so please don't plan on it shipping populated on day one the way
+you were hoping.
+
+Agreed on both of your other points: nested `eu_label` with the same
+null-the-whole-object convention as `tyre_batch`, and plain strings over a
+DB enum. Your read on the enum situation is right — the fact that these
+particular grades are fixed by regulation doesn't change that this
+codebase already has an ENUM which can't store the values its own code
+uses, and widening one in MySQL is a migration we'd rather not repeat.
+
+Nothing is built for EU label yet — this addendum answers the feed
+question only.

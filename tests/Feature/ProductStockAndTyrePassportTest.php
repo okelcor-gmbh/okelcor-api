@@ -420,6 +420,46 @@ class ProductStockAndTyrePassportTest extends TestCase
             ->assertStatus(404);
     }
 
+    // ------------------------------------------------------------------
+    // 4. Deploy-order safety
+    // ------------------------------------------------------------------
+
+    /**
+     * The public payload must degrade to nulls — not 500 — if this code ever
+     * reaches production ahead of its migration. Frontend renders these
+     * fields already, so a code-before-migration window has to be harmless
+     * rather than merely unlikely.
+     */
+    public function test_public_payload_survives_code_deployed_before_migration(): void
+    {
+        $product = $this->product(['stock' => 24]);
+
+        // Simulate production without migration #24 applied.
+        Schema::table('products', function (Blueprint $table) {
+            $table->dropColumn([
+                'condition_grade',
+                'tread_depth_mm',
+                'dot_code',
+                'inspection_date',
+                'inspection_photos',
+            ]);
+        });
+
+        // ...and without migration #25's site_settings row.
+        $this->assertNull(SiteSetting::where('key', 'estimated_dispatch_days')->first());
+
+        $this->getJson("/api/v1/products/{$product->id}")
+            ->assertOk()
+            ->assertJsonPath('data.stock', 24)
+            ->assertJsonPath('data.tyre_batch', null)
+            ->assertJsonPath('data.estimated_dispatch_days', null);
+
+        $this->getJson('/api/v1/products?type=PCR')
+            ->assertOk()
+            ->assertJsonPath('data.0.tyre_batch', null)
+            ->assertJsonPath('data.0.estimated_dispatch_days', null);
+    }
+
     public function test_tyre_passport_endpoints_require_products_edit_permission(): void
     {
         $product = $this->product();
