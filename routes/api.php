@@ -453,6 +453,8 @@ Route::prefix('v1')->group(function () {
             Route::delete('products/{product}', [AdminProductController::class, 'destroy']);
             Route::post('products/{product}/images', [AdminProductController::class, 'uploadImages']);
             Route::delete('products/{product}/images/{image}', [AdminProductController::class, 'deleteImage']);
+            Route::post('products/{product}/inspection-photos', [AdminProductController::class, 'uploadInspectionPhotos']);
+            Route::delete('products/{product}/inspection-photos/{index}', [AdminProductController::class, 'deleteInspectionPhoto']);
 
             // Articles — articles.manage roles are same as products.edit
             Route::post('articles/{id}/restore', [AdminArticleController::class, 'restore']);

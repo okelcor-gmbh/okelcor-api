@@ -31,9 +31,17 @@ class UpdateProductRequest extends FormRequest
             'primary_image' => ['nullable', 'file', 'mimes:jpeg,png,jpg,gif,webp,svg', 'max:5120'],
             'is_active'     => ['nullable', 'boolean'],
             'in_stock'      => ['nullable', 'boolean'],
+            'stock'         => ['nullable', 'integer', 'min:0'],
             'sort_order'    => ['nullable', 'integer'],
             'ebay_listed'   => ['nullable', 'boolean'],
             'ebay_item_id'  => ['nullable', 'string', 'max:100'],
+
+            // Tyre passport (see AddTyreBatchFieldsToProductsTable). Grade is a
+            // free string — ops hasn't fixed a grading scale yet.
+            'condition_grade'   => ['nullable', 'string', 'max:10'],
+            'tread_depth_mm'    => ['nullable', 'numeric', 'min:0', 'max:99.9'],
+            'dot_code'          => ['nullable', 'string', 'max:20'],
+            'inspection_date'   => ['nullable', 'date'],
         ];
     }
 }

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Brand;
 use App\Models\Product;
+use App\Models\SiteSetting;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -208,7 +209,56 @@ class ProductController extends Controller
             'is_active'     => (bool) $p->is_active,
             'stock'         => (int) $p->stock,
             'in_stock'      => (bool) $p->in_stock,
+
+            // Null unless the order manager has set a real number in Admin →
+            // Settings, and null for anything not in stock — the frontend
+            // renders this verbatim, so it must never carry a dispatch
+            // promise for a tyre we don't have.
+            'estimated_dispatch_days' => $p->in_stock ? $this->estimatedDispatchDays() : null,
+
+            'tyre_batch'    => $this->formatTyreBatch($p),
         ];
+    }
+
+    /**
+     * Null until an admin fills in tyre-passport data, so the frontend can
+     * skip the card entirely rather than render one full of blanks.
+     */
+    private function formatTyreBatch(Product $p): ?array
+    {
+        if (! $p->hasTyreBatchData()) {
+            return null;
+        }
+
+        return [
+            'condition_grade'   => $p->condition_grade,
+            'tread_depth_mm'    => $p->tread_depth_mm !== null ? (float) $p->tread_depth_mm : null,
+            'dot_code'          => $p->dot_code,
+            'inspection_date'   => $p->inspection_date?->toDateString(),
+            'inspection_photos' => collect($p->inspection_photos ?? [])
+                ->map(fn ($path) => url(Storage::url($path)))
+                ->values()
+                ->all(),
+        ];
+    }
+
+    // Resolved once per request — formatProduct() runs per row.
+    private ?int $dispatchDaysCache = null;
+    private bool $dispatchDaysLoaded = false;
+
+    private function estimatedDispatchDays(): ?int
+    {
+        if (! $this->dispatchDaysLoaded) {
+            $this->dispatchDaysLoaded = true;
+
+            $raw = SiteSetting::where('key', 'estimated_dispatch_days')->value('value');
+
+            // Blank/absent/non-numeric all mean "not configured" — omit
+            // rather than guess.
+            $this->dispatchDaysCache = is_numeric($raw) ? (int) $raw : null;
+        }
+
+        return $this->dispatchDaysCache;
     }
 
     // Lazily loaded once per request; keyed by lowercase brand name.

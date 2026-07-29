@@ -20,6 +20,7 @@ class AdminSettingController extends Controller
         'vat_rate'                 => 'VAT Rate (%)',
         'default_currency'         => 'Default Currency',
         'free_shipping_threshold'  => 'Free Shipping Threshold',
+        'estimated_dispatch_days'  => 'Estimated Dispatch (days)',
         'contact_email'            => 'Contact Email',
         'quote_email'              => 'Quote Email',
         'from_email'               => 'From Email',

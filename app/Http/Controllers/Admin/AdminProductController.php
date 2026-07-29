@@ -71,10 +71,21 @@ class AdminProductController extends Controller
         ]);
     }
 
+    /**
+     * Bulk stock update. Historically boolean-only (`in_stock`); now also
+     * accepts a real `stock` quantity, since that column was previously
+     * writable *only* by the Wix/Rapid importers — an order manager had no
+     * way to correct a wrong number from the panel at all, while the public
+     * product payload has been exposing it all along.
+     *
+     * Either field alone is valid, so existing callers sending just
+     * `in_stock` are unaffected.
+     */
     public function bulkStock(Request $request): JsonResponse
     {
         $request->validate([
-            'in_stock' => ['required', 'boolean'],
+            'in_stock' => ['required_without:stock', 'nullable', 'boolean'],
+            'stock'    => ['required_without:in_stock', 'nullable', 'integer', 'min:0'],
             'all'      => ['required', 'boolean'],
             'ids'      => ['nullable', 'array'],
             'ids.*'    => ['integer'],
@@ -87,7 +98,21 @@ class AdminProductController extends Controller
             $query->whereIn('id', $request->ids);
         }
 
-        $affected = $query->update(['in_stock' => $request->boolean('in_stock')]);
+        $update = [];
+
+        if ($request->has('stock')) {
+            $update['stock'] = (int) $request->input('stock');
+        }
+
+        if ($request->has('in_stock')) {
+            $update['in_stock'] = $request->boolean('in_stock');
+        } elseif (array_key_exists('stock', $update)) {
+            // Keep the flag coherent with the number rather than allowing
+            // "In Stock" to sit on top of a zero quantity.
+            $update['in_stock'] = $update['stock'] > 0;
+        }
+
+        $affected = $query->update($update);
 
         return response()->json([
             'message'  => 'Updated successfully.',
@@ -100,6 +125,7 @@ class AdminProductController extends Controller
         $data              = $request->validated();
         $data['spec']    ??= '';
         $data['is_active'] ??= true;
+        $data              = $this->reconcileStockFlag($data);
 
         // Handle primary_image file upload if present
         if ($request->hasFile('primary_image')) {
@@ -124,7 +150,7 @@ class AdminProductController extends Controller
     public function update(UpdateProductRequest $request, int $id): JsonResponse
     {
         $product  = Product::findOrFail($id);
-        $data     = $request->validated();
+        $data     = $this->reconcileStockFlag($request->validated());
 
         // Handle primary_image file upload if present
         if ($request->hasFile('primary_image')) {
@@ -224,6 +250,73 @@ class AdminProductController extends Controller
         return response()->json(['message' => 'Image deleted.']);
     }
 
+    /**
+     * Appends inspection photos to a product's tyre passport. Separate from
+     * the gallery (`product_images`) on purpose — these are evidence of a
+     * specific inspection, not marketing shots, and the frontend renders them
+     * inside the passport card rather than the carousel.
+     */
+    public function uploadInspectionPhotos(Request $request, int $id): JsonResponse
+    {
+        $request->validate([
+            'photos'   => ['required', 'array', 'min:1', 'max:10'],
+            'photos.*' => ['file', 'mimes:jpeg,png,jpg,webp', 'max:5120'],
+        ]);
+
+        $product = Product::findOrFail($id);
+        $photos  = $product->inspection_photos ?? [];
+
+        foreach ($request->file('photos') as $file) {
+            $photos[] = $this->storeImage($file, 'inspections');
+        }
+
+        $product->update(['inspection_photos' => array_values($photos)]);
+        $product->load('images');
+
+        return response()->json([
+            'data'    => $this->formatProduct($product),
+            'message' => 'Inspection photos uploaded.',
+        ], 201);
+    }
+
+    /**
+     * Removes one inspection photo by its index in the stored array.
+     */
+    public function deleteInspectionPhoto(int $id, int $index): JsonResponse
+    {
+        $product = Product::findOrFail($id);
+        $photos  = $product->inspection_photos ?? [];
+
+        if (! array_key_exists($index, $photos)) {
+            return response()->json(['message' => 'Inspection photo not found.'], 404);
+        }
+
+        Storage::disk('public')->delete($photos[$index]);
+        unset($photos[$index]);
+
+        $product->update(['inspection_photos' => array_values($photos)]);
+        $product->load('images');
+
+        return response()->json([
+            'data'    => $this->formatProduct($product),
+            'message' => 'Inspection photo deleted.',
+        ]);
+    }
+
+    /**
+     * Keeps `in_stock` consistent with `stock` when a caller sets the number
+     * but not the flag. An explicit `in_stock` always wins — an admin can
+     * still deliberately hide a product that has quantity on hand.
+     */
+    private function reconcileStockFlag(array $data): array
+    {
+        if (array_key_exists('stock', $data) && $data['stock'] !== null && ! array_key_exists('in_stock', $data)) {
+            $data['in_stock'] = ((int) $data['stock']) > 0;
+        }
+
+        return $data;
+    }
+
     private function storeImage($file, string $collection): string
     {
         $ext      = $file->guessExtension() ?? 'bin';
@@ -254,10 +347,34 @@ class AdminProductController extends Controller
             ])->values(),
             'is_active'     => (bool) $p->is_active,
             'in_stock'      => (bool) $p->in_stock,
+            'stock'         => (int) $p->stock,
             'ebay_listed'   => (bool) $p->ebay_listed,
             'ebay_item_id'  => $p->ebay_item_id,
             'sort_order'    => $p->sort_order,
+            'tyre_batch'    => $this->formatTyreBatch($p),
             'created_at'    => $p->created_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * Null until an admin enters something, so the frontend can decide
+     * whether to render a passport card at all instead of one full of blanks.
+     */
+    private function formatTyreBatch(Product $p): ?array
+    {
+        if (! $p->hasTyreBatchData()) {
+            return null;
+        }
+
+        return [
+            'condition_grade'   => $p->condition_grade,
+            'tread_depth_mm'    => $p->tread_depth_mm !== null ? (float) $p->tread_depth_mm : null,
+            'dot_code'          => $p->dot_code,
+            'inspection_date'   => $p->inspection_date?->toDateString(),
+            'inspection_photos' => collect($p->inspection_photos ?? [])
+                ->map(fn ($path) => url(Storage::url($path)))
+                ->values()
+                ->all(),
         ];
     }
 }

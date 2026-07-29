@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-07-15 | Branch: `main` | Latest commit: `8d965bd`
+Last updated: 2026-07-29 | Branch: `main` | Latest commit: `b983cec`
 
 ---
 
@@ -747,6 +747,227 @@ should already support generically).
 
 ---
 
+## Unified admin inbox + portal reply attachments (Session 60)
+
+Once inbound e-mail replies started landing in the system (Session 59), admins
+had no way to notice a new reply without opening each customer's profile
+individually. Added a single cross-customer feed instead of requiring that.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `GET /admin/communications/inbox` | ✅ | Paginated, unread-filterable feed of every inbound e-mail across all customers/leads, reusing the existing `staff_read_at` field for unread state (marking read per-customer already clears it here too — same row). |
+| Customer portal replies accept attachments | ✅ | `POST /auth/customer/communications/{id}/reply` — previously text-only; same limits as the admin composer (5 files, 10MB each). |
+| New-lead inbound e-mail linking bugfix | ✅ | A brand-new correspondent's first inbound row never linked back to the `quote_request` created for it — would have shown up unattributed in the new inbox. |
+
+See `FRONTEND_NOTE_inbound-email-replies.md` for the endpoint contract.
+
+---
+
+## Supplier intel — tyre-type aware (Session 61)
+
+The eBay-search-based supplier/competitor price lookup only recognized
+passenger-car tyre sizes (`225/45R18`) — TBR's decimal-rim notation
+(`295/80R22.5`) and OTR's completely different notation (`23.5R25`,
+`20.5-25`) either matched poorly or not at all, silently degrading two of
+Okelcor's four tyre categories.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Tyre-type-aware size parser | ✅ | `EbayService` now recognizes both PCR/TBR (incl. decimal rim) and OTR notations; an optional `type` param picks the right pattern first. |
+| OTR eBay lookup skipped entirely | ✅ | OTR (off-the-road) genuinely isn't sold on eBay in practice — the lookup is skipped with an explanatory `note`, marketplace links still returned, instead of returning near-empty junk results. |
+| `GET /admin/supplier/for-product/{id}` (new) | ✅ | Builds the search straight from one of Okelcor's own catalogue products (brand+size+type) instead of requiring manual copy-paste; includes a `price_vs_market_pct` comparison against the eBay average. |
+| `GET /admin/supplier/made-in-china-link` (new) | ✅ | Second B2B wholesale marketplace link alongside the existing Alibaba one — the stronger channel specifically for TBR/OTR sourcing. |
+| Result summary (min/max/avg price) | ✅ | Added to the existing `search` response alongside the raw listing array. |
+
+---
+
+## Saved fitments + order reorder (Session 62)
+
+From a frontend competitive-UX review (Tire Rack / SimpleTire / ATDOnline).
+Two of the four asks (real per-warehouse stock, tyre-batch traceability)
+were put on hold — confirmed with the business that neither the
+multi-warehouse split nor a tyre grading/inspection workflow actually exists
+yet, so nothing was fabricated for either.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `GET/POST/DELETE /auth/customer/saved-fitments` | ✅ | Simple saved size/brand profiles ("My Garage"). |
+| `POST /auth/orders/{ref}/reorder` | ✅ | Re-prices a past order's items against **live** product data — never replays old prices. Does not itself create a new order; hands the frontend a pre-fill payload for the existing checkout flow. Flags any item no longer sold/active instead of silently dropping it. |
+
+---
+
+## AI-generated admin dashboard insights (Session 63)
+
+A periodic Gemini summarization pass over dashboard/security/quotes numbers,
+surfaced as a handful of short plain-English observations — not a new data
+source, a summarization layer.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `insights:generate` (scheduled, every 15 min) + `GET /admin/insights` | ✅ | `AdminInsightsService` — aggregate-only snapshot (revenue/orders/inventory/security/quotes; never customer/admin PII) sent to Gemini in JSON mode; endpoint always serves the last successful batch instantly, never calls the AI per-request. |
+| Inventory stockout forecast | ✅ | Computed in PHP from real 7-day sales velocity, handed to Gemini as a fact to restate — the model never estimates this number itself. |
+| "Traffic" category dropped from original ask | ✅ scoped out | No PostHog integration exists on this backend to summarize — confirmed rather than fabricated; analytics live entirely frontend-side. |
+| **Production model gotcha, resolved live (2026-07-20)** | ✅ | `gemini-2.0-flash` (original default) returned `429` (quota **limit: 0** — an account/project entitlement issue, not a rate-limit-from-usage) on the real production API key; `gemini-2.5-flash` then returned `404 "no longer available to new users"`. `gemini-flash-latest` (a rolling alias, not a pinned dated model) works reliably and is now the codebase default — confirmed producing real, grounded output (e.g. correctly flagged 3,039 low-stock products, 30 pending orders, 100% 2FA adoption). |
+
+`GEMINI_API_KEY` unset = feature silently disabled, `insights:generate` no-ops, endpoint returns empty — never a 500.
+
+---
+
+## Order currency (Session 64)
+
+Frontend shipped a Currency (EUR/USD) dropdown on the order edit tab.
+**Two-phase**: shipped first as a pure display relabel per the frontend's
+own framing ("the USD amount was already what the customer paid, no
+exchange-rate math") — then the user explicitly corrected this after testing
+("make sure it converts the actual figures using today's rate"), which is a
+materially different, real-money feature.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `orders.currency` column | ✅ | Defaults `EUR` for all existing rows. |
+| Real conversion via `CurrencyConversionService` | ✅ | Live daily EUR/USD rate from Frankfurter (free, no API key, ECB-sourced), cached for the rest of the calendar day. Converts every money field on the order **and every line item** — not just the label. Rate + full before/after snapshot logged to `order_logs` (`currency_converted`) for a complete audit trail. |
+| Guarded the same as any other financial edit | ✅ | Blocked on eBay-synced orders and on orders with `financials_locked_at` set (an issued commercial document) — same protection the revision-request workflow already enforces. A failed exchange-rate lookup rejects the whole request rather than leaving stale figures under a new currency label. |
+
+---
+
+## Admin/Ops companion mobile app — backend foundations (Session 65)
+
+Planned as a **push-notification-first companion app** (not a full mobile
+admin panel) for the existing React Native mobile team, sharing code with
+the Next.js web frontend where sensible. See
+`FRONTEND_NOTE_admin-mobile-app.md` and
+`FRONTEND_NOTE_admin-mobile-app-v2-premium.md` for the full plan (live chat,
+in-app quick actions, premium UI pillars).
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `POST`/`DELETE /admin/push-tokens` + `ExpoPushService` | ✅ | Registers a device's Expo push token (upserted by token, not admin — a shared/reissued device re-points to whoever most recently logged in on it). Hooked into the single choke point every existing notification already flows through (`AdminNotificationService::notifyUser`) — every notification type reaches a registered device automatically, no per-type wiring needed. Dead tokens pruned automatically from Expo's own send response. |
+| `PUT /admin/presence` (`available_for_chat`) | ✅ | The mobile app's chat-availability toggle; also returned from `GET /admin/me`. |
+| Actionable push categories (`AdminPushCategories`) | ✅ | Push payloads now carry a `categoryId` + `related_type`/`related_id`, so the app can render Approve/Reject/Reply action buttons directly on the lock screen. |
+| **Real bug found + fixed while wiring this up** | ✅ | Financial revision requests (request/approve/reject) wrote an `OrderLog` entry but **never notified anyone at all** — nothing prompted an approver to act, and the requester never learned the outcome. Both directions now notify correctly. |
+
+---
+
+## Live chat — custom system (Session 66) — superseded, left dormant
+
+Built a full custom live-chat backend (Pusher-based) per the mobile app plan.
+**One session later, the frontend team identified that Crisp — already fully
+live on the website with its own Next.js admin proxy — is the actual live
+chat product, and this custom system had no real traffic.** Per explicit
+decision: left in place, not removed (real, working infrastructure, no
+reason to delete it), but nothing further should be built against it.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `live_chat_sessions` / `live_chat_messages` + Pusher broadcasting | ✅ built, 🔲 dormant | Session lifecycle (pending → active → closed), first-admin-to-accept-wins claiming, transcript roll-up into a single `customer_communications` row on close. Real Pusher credentials were configured in production before the pivot to Crisp was identified. |
+| Broadcasting infra (`config/broadcasting.php`, `routes/channels.php`) | ✅ | Registered under `api/v1/broadcasting/auth` with Sanctum auth (not the framework's default session-based route) — this piece is reused by nothing else, not Crisp-specific, but the auth wiring itself is sound infrastructure. |
+
+---
+
+## Crisp integration — the real live chat product (Session 67)
+
+Mobile app needs to reach Crisp conversations, but Crisp API credentials
+can't ship inside a mobile app bundle (extractable from a decompiled
+APK/IPA) the way they can live server-side in the existing Next.js proxy —
+so this backend now proxies the same four operations for mobile specifically.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `CrispService` + 4 admin proxy endpoints | ✅ | `GET conversations`, `GET conversations/{id}/messages`, `POST .../reply`, `POST .../resolve` — thin wrapper over Crisp's REST API v1 (Basic auth via a Crisp private plugin's identifier/key). Degrades to a clean `503` when unconfigured. |
+| `POST /webhooks/crisp` (`message:send` event) | ✅ built, 🔲 inactive | HMAC-verified same as every other webhook in this app. **Crisp's free plan doesn't support custom webhooks at all** (confirmed by the user — requires Premium) — the endpoint is fully built and will "just work" the moment Crisp's plan changes, but nothing calls it today. Mobile polls the list endpoint in the meantime. |
+| **Real bug found + fixed against the live account** | ✅ | Crisp genuinely returns **HTTP 206** (not 200) for a successful paginated conversations list — the original `->ok()` check (exactly 200) was silently discarding real, successful responses. Switched to `->successful()` (whole 2xx range). |
+
+---
+
+## Admin e-mail signature display fix (Session 68)
+
+A signature set under an admin's profile always rendered correctly in the
+actual e-mail a customer received, but never appeared in the admin panel's
+own "sent" thread view for that same message.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Signature appended once, shared by both | ✅ | Root cause: the signature was only ever stitched into the outgoing e-mail inside its own Blade template at send time, and that composed HTML was never what got saved as the `CustomerCommunication.body` — only the plain typed message was. Fixed by building the signed body once in the controller and using that same value for both the Mailable and the stored record. |
+
+---
+
+## Marketing contact market segmentation + Croatia campaign (Session 69)
+
+Existing marketing contacts had no concept of "market" at all — a bulk
+campaign filter could only match on company/country/status/search, so once
+a second market's contacts existed in the same table there was no reliable
+way to scope a send to just one.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `marketing_contacts.market` | ✅ | Plain string (not an enum) — a new market can be introduced just by importing a CSV or adding a contact under it, no backend change required. Existing rows backfilled to `asia` per the business's confirmation that's what the pre-existing list already was. |
+| `GET /admin/marketing-contacts/markets` (new) | ✅ | Auto-discovered distinct markets + counts — powers a dynamic picker with no hardcoded list. |
+| `POST`/`PATCH /admin/marketing-contacts` (new) | ✅ | Manual single-contact add + edit — previously the only way to add a contact at all was a full CSV import. |
+| `filters.market` on bulk campaign creation | ✅ | "Send to Croatia only" / "send to Asia only" are now real, mutually exclusive selections. |
+| **Real bug found + fixed while preparing the campaign** | ✅ | Pasting a full, self-contained HTML e-mail template (its own `<html>`/`<body>`) into a campaign body previously got wrapped inside *another* `<html><body>` by the send template — invalid nested documents — and the template's own unsubscribe link had nothing real to point at. Fixed: a full HTML document now renders as-is, and its own unsubscribe link can use a `[[UNSUBSCRIBE_URL]]` token the send job replaces with the real, personalized link before sending. |
+| `campaign:seed-assets` (new artisan command) | ✅ | Uploads a folder of campaign source images (`resources/campaign-assets/{set}/`) into the real Media Library through the same `MediaLibraryService` the admin upload endpoint uses. |
+| Croatia market seeded | ✅ | 200 contacts imported (cleaned/deduplicated from a spreadsheet), fully segmented from the existing Asia list. |
+
+---
+
+## Order-manager meeting fixes (Session 70)
+
+From a transcript of a call with the order manager — three items raised,
+plus a directly-reported bug.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Manual trade-document upload accepts a real `type` | ✅ | Previously always hardcoded `shipment_document` regardless of what was actually uploaded — there was no way to manually upload an externally-produced order confirmation / commercial invoice / etc. and have it recognized as that real type. Now accepts `order_confirmation \| proforma \| commercial_invoice \| packing_list \| delivery_note \| shipment_document`; uploading an "official" type automatically supersedes any existing issued/sent document of that same type, so a manual upload can never coexist with a stale generated version. |
+| `mark-balance-due` 404 | ✅ diagnosed, not a backend bug | The functionality genuinely exists and works (`POST /orders/{id}/payment-milestones/balance-due`) — the frontend was calling a different, never-registered path (`/payments/mark-balance-due`). Flagged for frontend to correct. |
+| "Already paid, without marking balance due, how do I get to balance-paid?" | ✅ confirmed already supported | `markBalancePaid` already accepts being called directly from `deposit_paid`, skipping `balance_due` entirely — no backend change needed. Flagged for frontend: the "Mark Balance Paid" action should be shown/enabled at `deposit_paid` too, not gated behind `balance_due` only. |
+| Order status missing "Processing" in the UI | ✅ confirmed already supported | `processing` is already a fully valid, already-used backend order status (accepted by every order-status endpoint; already used by the Mollie webhook and order-sync services) — purely a frontend dropdown-options gap. |
+
+---
+
+## Premium UX pass — stock, dispatch ETA, tyre passport (Session 71)
+
+A second frontend competitive review (Tire Rack / SimpleTire / ATDOnline)
+arrived asking for per-warehouse stock, tyre batch traceability, and saved
+fitments + reorder. Two of those were already settled — **saved fitments +
+reorder shipped in Session 62** with exactly the requested contract, and
+multi-warehouse/tyre-grading were put on hold that same session because
+neither exists in the business. The note's core premise about stock also
+turned out to be wrong, which changed the shape of the work.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| **Finding** — `stock` was never the gap | ✅ | The note claimed `in_stock` was "a bare boolean, no quantity". `ProductController::formatProduct()` has returned an integer `stock` on both `GET /products` and `GET /products/{id}` all along. The real gap was the *write* side, not the read side. |
+| **Fix** — `stock` is finally writable by an admin | ✅ | It was settable **only** by `WixProductImportService` and the manual `products:sync-rapid` Excel import — absent from `UpdateProductRequest` entirely, and `POST /admin/products/bulk-stock` only ever wrote the `in_stock` boolean. An order manager could not correct a wrong quantity from the panel at all, while the public API published it. Now accepted on create/update and on `bulk-stock` (`stock` or `in_stock`, or both — boolean-only callers unaffected). |
+| **Fix** — admin payload was missing `stock` | ✅ | `AdminProductController::formatProduct()` didn't include it, so the panel couldn't even display the number it was publishing publicly. |
+| Stock/flag coherence rule | ✅ | Setting `stock` without an explicit `in_stock` derives the flag (`stock > 0`), so "✓ In Stock" can't sit on top of a zero quantity. An explicit `in_stock` still wins — an admin can deliberately show a product with no counted stock. |
+| `estimated_dispatch_days` on the public payload | ✅ | New `site_settings` key (group `shop`), surfaced on both product endpoints. **Ships blank on purpose** — the frontend renders it verbatim, so an invented default would become an unapproved delivery promise. Also returns `null` for any out-of-stock product. Created via migration rather than `SiteSettingsSeeder`, whose `updateOrCreate()` would reset an admin-entered value on re-run. |
+| **Not built** — `stock_locations[]` per-warehouse split | 🔲 confirmed absent | No multi-warehouse concept exists anywhere (only hit is eBay's own single merchant inventory location). The one real signal is the Rapid import filename — stock *"being Held by Demir Keramic in Solnhofen"*, i.e. one third-party site. An array today would be one hardcoded entry pretending to be a real split. Same conclusion as Session 62, now with the evidence written down. |
+| Tyre passport schema (`tyre_batch`) | ✅ | New guarded/additive columns on `products`: `condition_grade` / `tread_depth_mm` / `dot_code` / `inspection_date` / `inspection_photos` (JSON). Confirmed first that **none of this existed anywhere** — genuinely new capability, not a surfacing exercise. `condition_grade` is a plain string, not an ENUM (no grading scale is fixed yet, and see the `admin_users.role` ENUM gap in Known Gaps). |
+| `tyre_batch` null until populated | ✅ | `Product::hasTyreBatchData()` gates the whole block out of both public and admin payloads, so the frontend can skip the passport card entirely rather than render one full of nulls. **Will be null on every product until ops starts entering data** — the plumbing is ready, the data-entry process is not. |
+| Inspection photo endpoints | ✅ | `POST /admin/products/{id}/inspection-photos` (multipart, max 10/call, 5MB each) + `DELETE .../inspection-photos/{index}` (deletes from disk, re-indexes). Stored separately from `product_images` on purpose — inspection evidence, not carousel shots. |
+| §4 search-suggest — assumption flagged as stale | 🔲 flagged | The note deferred it as "catalogue is small enough". `AdminInsightsService` recently reported 3,039 low-stock products, so the live catalogue is ≥ ~3k rows. Flagged back to frontend to measure the real payload before filing as safely deferred. |
+| Backend feature tests (19) | ✅ | `ProductStockAndTyrePassportTest` — **19 passed / 54 assertions, actually executed**, not just written. Uses the minimal-schema sqlite pattern (MediaLibraryTest / BulkEmailCampaignTest) rather than the MySQL-only gate, so it runs locally and in CI. Full suite after the change: 136 passed, 0 failed, 206 skipped (pre-existing MySQL gate). |
+
+**⚠️ Honesty caveat carried into the frontend note:** `stock` is *never
+decremented on order* and `products:sync-rapid` isn't scheduled — the number
+is "supplier availability as of the last manual import", not live on-hand
+stock. It's now correctable, but until ops keeps it current, an exact
+"24 in stock" is a stronger claim than the data supports. Frontend was told
+to band it (In stock / Low stock) rather than print the raw integer until
+the business confirms it's maintained.
+
+**Still open — needs the order manager's input:**
+1. What is the real dispatch-days number? (`estimated_dispatch_days` is
+   blank until someone sets it; the feature is inert by design until then.)
+2. Will ops actually capture tyre condition/grade/DOT/photos, and on which
+   grading scale? Nothing renders until they do.
+3. Is anyone maintaining `stock` now that it's editable, or should the
+   frontend keep it banded?
+
+See `FRONTEND_NOTE_premium-ux-pass.md`.
+
+---
+
 ## eBay Integration (Sessions 15–25)
 
 | Phase | Feature | Status |
@@ -823,9 +1044,12 @@ should already support generically).
 | Product translation table | Low | No multilingual products |
 | Preferred language on customers | Low | All emails English |
 | eBay production credentials rotation | **High** | `EBAY_CLIENT_SECRET` was exposed in a prior session — must rotate in eBay Developer Portal before listing live products |
-| `storage/logs/laravel.log` doesn't receive writes on production | Medium | Confirmed during GLS debugging — fresh `Log::` calls (even ones proven to run, via `tinker`) never appeared in that file, and it wasn't even the most-recently-modified file in `storage/logs/`. `LOG_CHANNEL`/`LOG_STACK` in production `.env` were never actually checked/reported — worth resolving so future debugging doesn't lose hours to this again |
+| ~~`storage/logs/laravel.log` doesn't receive writes on production~~ | ~~Medium~~ Resolved | Confirmed resolved in Session 63/70 — used this file repeatedly to diagnose real production issues (Gemini quota errors, Crisp API errors) and it received writes correctly both times |
 | GLS production API access | Low | Currently running on the sandbox host (`api-sandbox.gls-group.net`) for both auth and tracking — verified to return real live data for real parcels, so not urgent, but production access requires a separate GLS approval step if sandbox ever proves unreliable long-term |
 | `admin_users.role` ENUM missing documented roles | **High** | Column only allows `super_admin/admin/editor/order_manager`; `sales_manager`, `support`, `content_manager`, `viewer` are referenced throughout `AdminPermissions.php` and this doc but can't be stored under MySQL strict mode — creating an admin with any of those roles fails outright. Found via CI in Session 52; needs a migration widening the ENUM (or switching to a plain string column) plus a check for any admin accounts already silently affected |
+| `login_histories` table doesn't exist | Medium | Found in production logs (Session 70 investigation) — viewing a customer's login history in the admin panel throws `PDOException: Table 'login_histories' doesn't exist`. Distinct from the working `admin_login_histories` table (admin-side logins) — this is the customer-portal-side equivalent, apparently never migrated. Not yet fixed — flagged, not investigated further this session |
+| Crisp webhook inactive (free plan) | Low | `POST /webhooks/crisp` is fully built and HMAC-verified but Crisp's free plan doesn't support custom webhooks at all (requires Premium) — mobile polls the conversations list in the meantime. Will "just work" the moment the plan changes, no code change needed |
+| Custom live-chat system unused | Low | Session 66's Pusher-based `live_chat_sessions` system has zero real traffic — Crisp (Session 67) is the actual live chat product. Left in place rather than removed; candidate for deletion once Crisp is confirmed as the permanent choice |
 
 ---
 
@@ -874,6 +1098,10 @@ should already support generically).
 | `admin_security_events` | Security audit events |
 | `password_reset_tokens` | Customer password reset + invite tokens |
 | `failed_jobs` | Laravel queue failures |
+| `saved_fitments` | Customer-saved size/brand profiles ("My Garage") |
+| `admin_insights` | AI-generated dashboard insights, one row per insight per generation batch |
+| `admin_push_tokens` | Expo push tokens for the admin/ops mobile app, one row per device |
+| `live_chat_sessions` / `live_chat_messages` | Custom live-chat system — built, dormant (Crisp is the real product; see Session 66/67) |
 
 ---
 
@@ -1014,6 +1242,8 @@ composer install --no-dev
 21. `2026_07_14_000002_extend_customer_communications_for_composer` (Session 57 — Outlook-style e-mail)
 22. `2026_07_15_000001_extend_order_logs_action_enum` (order item editing — widens the ENUM to include several action values already used in shipped code, plus the new item-correction actions)
 23. `2026_07_15_000002_add_whatsapp_fields_to_customer_communications_table` (Session 58 — WhatsApp)
+24. `2026_07_29_000001_add_tyre_batch_fields_to_products_table` (Session 71 — tyre passport; guarded/additive)
+25. `2026_07_29_000002_add_estimated_dispatch_days_setting` (Session 71 — inserts one blank `site_settings` row via `insertOrIgnore`, idempotent)
 
 Migrations 1–18 verified to apply cleanly on MySQL via CI (`migrate:fresh`) and `LeadFunnelAnalyticsTest`'s `RefreshDatabase`; #16–18 were additionally exercised against sqlite in `BulkEmailCampaignTest`. Applied to production via `artisan migrate --force` as part of the 2026-07-01 deploy (which also shipped Session 51's code-only Media Library fix — no new migrations there). #19–23 are guarded/additive (`Schema::hasColumn` checks) and ready to deploy via the same command — not yet confirmed run against production as of this note. #21 also widens `customer_communications.body` from TEXT to LONGTEXT via raw SQL (no doctrine/dbal in this project). See `DEPLOY_RUNBOOK.md` for the ordered deploy + rollback plan.
 
