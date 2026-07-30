@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-07-29 | Branch: `main` | Latest commit: `b983cec`
+Last updated: 2026-07-30 | Branch: `main` | Latest commit: `59d87eb`
 
 ---
 
@@ -971,6 +971,47 @@ See `FRONTEND_NOTE_premium-ux-pass.md`.
 
 ---
 
+## Marketing contacts in multiple markets — move / add / remove (Session 72)
+
+Digital marketer's report: a contact already in one market (the `TEST` market
+created while verifying Session 69's segmentation) couldn't be added to
+another (`Germany`) — the add form returned "email exists", and the only
+workaround was delete-then-re-add.
+
+Her wording was "**add** it to another folder", so both readings were built
+rather than guessing: a contact can now belong to **several markets at once**,
+*and* there are real move/remove actions. The single-market constraint was the
+actual blocker — `marketing_contacts.market` was one string column and `email`
+is `UNIQUE`, so a second row was impossible and there was nothing to move with.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `marketing_contact_markets` table (migration #26) | ✅ | Membership is many-to-many. `unique(contact_id, market)` so "add to market" is safely repeatable via `insertOrIgnore`. Backfills one membership per existing contact from its current `market`, so behaviour is identical the moment it runs. |
+| `marketing_contacts.market` kept as the **primary** market | ✅ | Not dropped — respects CLAUDE.md's "do not change column names", and every existing response/query that reads `market` keeps working. Mirrored from the membership table (`refreshPrimaryMarket`): always holds one of the contact's real memberships, and never shifts just because another market was added alongside it. Contact payloads gain a `markets` array; `market` is unchanged. |
+| `POST /admin/marketing-contacts/add-to-market` (new) | ✅ | **The endpoint that answers the actual report.** Adds a market, keeps the existing ones. Three OR'd selectors shared with move: `contact_ids[]` (checkbox selection), `emails[]` (paste-a-list, no id lookup), `from_market` (whole market at once). Idempotent — re-adding reports `already_in_place` rather than erroring. |
+| `POST /admin/marketing-contacts/move-market` (new) | ✅ | Relocates rather than accumulates. **With** `from_market`: leaves that market for the target, keeping the contact's *other* markets. **Without**: the target replaces its markets outright (the original single-market meaning). `from_market` + `to_market` alone is effectively a market rename. |
+| `POST /admin/marketing-contacts/remove-from-market` (new) | ✅ | Takes contacts out of one market without deleting them; called with no ids/emails it retires the market entirely. **Refuses to strip a contact's last market** — that would leave it invisible to every market-scoped list and campaign filter with no way to find it again; those contacts come back in `skipped_last_market` instead of vanishing silently. |
+| Move/add/remove never create or delete contacts | ✅ | An email with no matching contact is reported in `not_found` rather than imported — a move must not quietly become an import. |
+| Unsubscribed status preserved by every market operation | ✅ | Neither `status` nor `unsubscribe_token` is touched — same guarantee `MarketingContactImportService` already makes on re-import; a market change can never re-enter an opted-out contact into a send. |
+| **Fix** — campaign filter matched only the primary market | ✅ | `BulkEmailService::recipientQuery()` now matches **any** of a contact's markets. Without this the whole feature would have looked like it worked in the UI while quietly not sending: a contact added to `germany` alongside `test` would have been left out of the germany campaign. Same fix applied to the admin contact-list `market` filter and the `markets`/`stats` counts. |
+| Campaigns can target several markets in one send | ✅ | `filters.markets[]` (max 20) alongside the existing `filters.market`, on both `POST /admin/bulk-emails` and `recipient-count`. Because the filter narrows contact *rows*, a contact in two targeted markets is selected exactly once — no de-dupe step needed, nobody can be emailed twice by one campaign. Covered by a test asserting exactly that. |
+| Create/patch accept several markets | ✅ | `POST` takes `market` (string) **or** `markets[]`; `PATCH` takes `markets[]` (replaces the set) or `market` (single-market move, unchanged meaning). |
+| Duplicate add now says **which markets** hold the contact | ✅ | Still 422 with `errors.email` populated (no client breakage), plus `code: 'contact_exists'` + `existing_markets` / `can_add_market` / `can_move` / `target_market` so the UI can offer "already in *test* — add to *germany* too, or move it?" instead of a dead end. Checked before validation so the message can name both. |
+| Membership registered on save, not just by the endpoints | ✅ | A `saved` hook keeps the primary `market` column and the membership table consistent, so a contact written the old single-column way anywhere in the codebase — now or in future — still lands in that market's list. Prevents the failure mode where a contact claims a market in its own row but is missing from every list of it. Fires only when `market` actually changed, so a 1,700-row import doesn't pay for a redundant write per contact. |
+| **Fix** — CSV re-import silently relocated existing contacts | ✅ | Importing a Germany list containing an existing Asia contact used to overwrite its `market`, moving it out of Asia as a side effect of an unrelated import. Now **adds** germany alongside asia and leaves the primary alone — relocation is `move-market`'s job, explicitly. |
+| Deploy-order safe | ✅ | Proved, not argued: `test_contacts_still_work_when_the_membership_table_is_missing` drops the table and asserts contact list / markets / stats / move / campaign recipient-count all still return 200 on the single-column fallback. Frontend can deploy independently of migration #26. |
+| Migration backfill proved against real SQL | ✅ | `test_migration_backfills_one_membership_per_existing_contact` runs the real migration file from the pre-migration state, asserts every contact keeps exactly the market it had (null-market contacts get none), and asserts a re-run is idempotent. The backfill is the only part of this feature that touches live production rows. |
+| Backend feature tests (18 new) | ✅ | Added to `BulkEmailCampaignTest` — **46 passed / 169 assertions, actually executed** (uses that file's minimal-schema sqlite harness, not the MySQL-only gate). Full suite after the change: **164 passed, 0 failed**, 206 skipped (pre-existing MySQL gate). |
+
+Confirmed by grep that nothing else in the codebase reads or writes
+`marketing_contacts.market` — the only consumers are this controller, the import
+service and `BulkEmailService`, all updated. (Other `market*` hits are unrelated:
+`customers.market_region`, eBay `marketplace_id`, supplier price comparison.)
+
+See `FRONTEND_NOTE_marketing-contact-market-move.md`.
+
+---
+
 ## eBay Integration (Sessions 15–25)
 
 | Phase | Feature | Status |
@@ -1096,6 +1137,7 @@ See `FRONTEND_NOTE_premium-ux-pass.md`.
 | `newsletter_subscribers` | Newsletter opt-ins |
 | `contact_messages` | Contact form submissions |
 | `marketing_contacts` | Imported mailing list for admin bulk-email campaigns 🔧 |
+| `marketing_contact_markets` | Market membership per marketing contact (many-to-many; `marketing_contacts.market` remains the primary market) |
 | `bulk_email_campaigns` | Bulk email sends (subject/body/filters/progress) 🔧 |
 | `bulk_email_campaign_recipients` | Per-recipient send status per campaign 🔧 |
 | `admin_security_events` | Security audit events |
@@ -1247,6 +1289,7 @@ composer install --no-dev
 23. `2026_07_15_000002_add_whatsapp_fields_to_customer_communications_table` (Session 58 — WhatsApp)
 24. `2026_07_29_000001_add_tyre_batch_fields_to_products_table` (Session 71 — tyre passport; guarded/additive)
 25. `2026_07_29_000002_add_estimated_dispatch_days_setting` (Session 71 — inserts one blank `site_settings` row via `insertOrIgnore`, idempotent)
+26. `2026_07_30_000001_create_marketing_contact_markets_table` (Session 72 — multi-market marketing contacts; guarded/additive + idempotent backfill from `marketing_contacts.market`. Backfill proved against real SQL by `BulkEmailCampaignTest::test_migration_backfills_one_membership_per_existing_contact`; code is deploy-order safe and falls back to the single column until this runs)
 
 Migrations 1–18 verified to apply cleanly on MySQL via CI (`migrate:fresh`) and `LeadFunnelAnalyticsTest`'s `RefreshDatabase`; #16–18 were additionally exercised against sqlite in `BulkEmailCampaignTest`. Applied to production via `artisan migrate --force` as part of the 2026-07-01 deploy (which also shipped Session 51's code-only Media Library fix — no new migrations there). #19–23 are guarded/additive (`Schema::hasColumn` checks) and ready to deploy via the same command — not yet confirmed run against production as of this note. #21 also widens `customer_communications.body` from TEXT to LONGTEXT via raw SQL (no doctrine/dbal in this project). See `DEPLOY_RUNBOOK.md` for the ordered deploy + rollback plan.
 

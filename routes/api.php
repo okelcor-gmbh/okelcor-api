@@ -757,6 +757,9 @@ Route::prefix('v1')->group(function () {
             Route::get('marketing-contacts/markets', [AdminMarketingContactController::class, 'markets']);
             Route::post('marketing-contacts', [AdminMarketingContactController::class, 'store']);
             Route::post('marketing-contacts/import', [AdminMarketingContactController::class, 'import']);
+            Route::post('marketing-contacts/move-market', [AdminMarketingContactController::class, 'moveMarket']);
+            Route::post('marketing-contacts/add-to-market', [AdminMarketingContactController::class, 'addToMarket']);
+            Route::post('marketing-contacts/remove-from-market', [AdminMarketingContactController::class, 'removeFromMarket']);
             Route::patch('marketing-contacts/{id}', [AdminMarketingContactController::class, 'update']);
             Route::delete('marketing-contacts/{id}', [AdminMarketingContactController::class, 'destroy']);
 

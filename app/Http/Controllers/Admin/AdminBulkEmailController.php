@@ -38,7 +38,7 @@ class AdminBulkEmailController extends Controller
     // -------------------------------------------------------------------------
     public function recipientCount(Request $request, BulkEmailService $service): JsonResponse
     {
-        $filters = $request->only(['market', 'company', 'country', 'status', 'search']);
+        $filters = $request->only(['market', 'markets', 'company', 'country', 'status', 'search']);
 
         return response()->json(['data' => ['count' => $service->countRecipients($filters)]]);
     }
@@ -62,8 +62,12 @@ class AdminBulkEmailController extends Controller
         $request->validate([
             'subject'         => ['required', 'string', 'max:255'],
             'body_html'       => ['required', 'string'],
-            'filters'         => ['nullable', 'array'],
-            'filters.market'  => ['nullable', 'string', 'max:50'],
+            'filters'           => ['nullable', 'array'],
+            'filters.market'    => ['nullable', 'string', 'max:50'],
+            // Several markets in one send. A contact in two of them is still
+            // selected once (see BulkEmailService::recipientQuery).
+            'filters.markets'   => ['nullable', 'array', 'max:20'],
+            'filters.markets.*' => ['string', 'max:50'],
             'filters.company' => ['nullable', 'string', 'max:150'],
             'filters.country' => ['nullable', 'string', 'max:100'],
             'filters.status'  => ['nullable', 'in:subscribed,unknown'],

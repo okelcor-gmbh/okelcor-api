@@ -21,8 +21,28 @@ class BulkEmailService
     {
         $query = MarketingContact::query()->where('status', '!=', 'unsubscribed');
 
-        if (! empty($filters['market'])) {
-            $query->where('market', $filters['market']);
+        // A contact can belong to several markets, so this must match ANY of
+        // them rather than only the primary `market` column — otherwise a
+        // contact added to `germany` alongside `test` would be silently left
+        // out of the germany campaign.
+        //
+        // `markets` (array) targets several markets in one send. Because the
+        // filter narrows contact ROWS, a contact belonging to two of the
+        // targeted markets is still selected exactly once — no de-duplication
+        // step is needed and nobody can be emailed twice by one campaign.
+        $markets = [];
+        if (! empty($filters['markets']) && is_array($filters['markets'])) {
+            $markets = array_values(array_filter($filters['markets']));
+        } elseif (! empty($filters['market'])) {
+            $markets = [$filters['market']];
+        }
+
+        if (! empty($markets)) {
+            if (MarketingContact::supportsMultipleMarkets()) {
+                $query->whereHas('marketMemberships', fn ($q) => $q->whereIn('market', $markets));
+            } else {
+                $query->whereIn('market', $markets);
+            }
         }
 
         if (! empty($filters['company'])) {

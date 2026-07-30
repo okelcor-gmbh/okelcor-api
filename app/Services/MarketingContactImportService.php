@@ -106,13 +106,14 @@ class MarketingContactImportService
                     $status = 'unsubscribed';
                 }
 
+                $market = $this->field($record, 'market') ?: $defaultMarket;
+
                 $attributes = [
                     'first_name'  => $this->field($record, 'first_name'),
                     'last_name'   => $this->field($record, 'last_name'),
                     'phone'       => $this->cleanPhone($this->field($record, 'phone') ?? ''),
                     'company'     => $this->field($record, 'company'),
                     'country'     => $this->field($record, 'country'),
-                    'market'      => $this->field($record, 'market') ?: $defaultMarket,
                     'vat_id'      => $this->field($record, 'vat_id'),
                     'labels'      => $this->field($record, 'labels'),
                     'source'      => $this->field($record, 'source'),
@@ -121,12 +122,26 @@ class MarketingContactImportService
                 ];
 
                 if ($existing) {
+                    // Deliberately does NOT set `market`: importing a Germany
+                    // list that happens to contain an existing Asia contact
+                    // ADDS germany alongside asia rather than moving them out
+                    // of it. Before markets were many-to-many this overwrote
+                    // the column, silently relocating contacts as a side effect
+                    // of an unrelated import. Use the move-market endpoint when
+                    // a relocation is actually what's wanted.
                     $existing->update($attributes);
+                    if ($market) {
+                        $existing->addMarkets([$market]);
+                    }
                     $stats['updated']++;
                 } else {
                     $attributes['email']             = $email;
+                    $attributes['market']            = $market;
                     $attributes['unsubscribe_token']  = $this->generateToken();
-                    MarketingContact::create($attributes);
+                    $contact = MarketingContact::create($attributes);
+                    if ($market) {
+                        $contact->addMarkets([$market]);
+                    }
                     $stats['imported']++;
                 }
 
