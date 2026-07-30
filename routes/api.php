@@ -28,6 +28,7 @@ use App\Http\Controllers\Admin\AdminArticleController;
 use App\Http\Controllers\Admin\AdminBrandController;
 use App\Http\Controllers\Admin\AdminCategoryController;
 use App\Http\Controllers\Admin\AdminBulkEmailController;
+use App\Http\Controllers\Admin\AdminCampaignTemplateController;
 use App\Http\Controllers\Admin\AdminContactController;
 use App\Http\Controllers\Admin\AdminHeroSlideController;
 use App\Http\Controllers\Admin\AdminMarketingContactController;
@@ -765,8 +766,20 @@ Route::prefix('v1')->group(function () {
 
             Route::get('bulk-emails', [AdminBulkEmailController::class, 'index']);
             Route::get('bulk-emails/recipient-count', [AdminBulkEmailController::class, 'recipientCount']);
+            Route::post('bulk-emails/preview', [AdminBulkEmailController::class, 'preview']);
+            Route::post('bulk-emails/test-send', [AdminBulkEmailController::class, 'testSend']);
             Route::get('bulk-emails/{id}', [AdminBulkEmailController::class, 'show']);
             Route::post('bulk-emails', [AdminBulkEmailController::class, 'store']);
+
+            // Campaign design — block catalogue, built-in starting points, and
+            // the team's own saved designs.
+            Route::get('campaign-design', [AdminCampaignTemplateController::class, 'design']);
+            Route::get('campaign-templates', [AdminCampaignTemplateController::class, 'index']);
+            Route::get('campaign-templates/starters', [AdminCampaignTemplateController::class, 'starters']);
+            Route::get('campaign-templates/{id}', [AdminCampaignTemplateController::class, 'show']);
+            Route::post('campaign-templates', [AdminCampaignTemplateController::class, 'store']);
+            Route::patch('campaign-templates/{id}', [AdminCampaignTemplateController::class, 'update']);
+            Route::delete('campaign-templates/{id}', [AdminCampaignTemplateController::class, 'destroy']);
         });
 
         // -----------------------------------------------------------------

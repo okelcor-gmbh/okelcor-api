@@ -11,6 +11,13 @@ class BulkEmailCampaign extends Model
     protected $fillable = [
         'subject',
         'body_html',
+        // The block-based source of `body_html` when the campaign was designed
+        // in the editor rather than pasted in as HTML. Kept so a sent campaign
+        // can be reopened or duplicated; the send path only ever reads
+        // `body_html`.
+        'blocks',
+        'theme',
+        'body_text',
         'filters',
         'total_recipients',
         'sent_count',
@@ -21,6 +28,8 @@ class BulkEmailCampaign extends Model
     ];
 
     protected $casts = [
+        'blocks'       => 'array',
+        'theme'        => 'array',
         'filters'      => 'array',
         'completed_at' => 'datetime',
     ];

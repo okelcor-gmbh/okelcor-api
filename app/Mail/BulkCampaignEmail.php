@@ -16,6 +16,10 @@ class BulkCampaignEmail extends Mailable
         public string $subjectLine,
         public string $bodyHtml,
         public string $unsubscribeUrl,
+        // Plain-text alternative, when the campaign was built from blocks.
+        // A bulk HTML-only message is markedly more likely to be filtered as
+        // spam, and some recipients read text only.
+        public ?string $bodyText = null,
     ) {}
 
     public function envelope(): Envelope
@@ -29,7 +33,9 @@ class BulkCampaignEmail extends Mailable
     {
         return new Content(
             view: 'emails.bulk-campaign',
+            text: $this->bodyText === null ? null : 'emails.bulk-campaign-text',
             with: [
+                'bodyText'       => $this->bodyText,
                 'bodyHtml'       => $this->bodyHtml,
                 'unsubscribeUrl' => $this->unsubscribeUrl,
                 // A campaign body that's already a full, self-contained

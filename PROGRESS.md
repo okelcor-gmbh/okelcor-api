@@ -1012,6 +1012,49 @@ See `FRONTEND_NOTE_marketing-contact-market-move.md`.
 
 ---
 
+## Campaign builder — no-HTML email design (Session 72)
+
+The email marketers aren't technical and couldn't hand-write HTML for a
+well-structured campaign. They supplied screenshots of the Wix-built campaigns
+they used to send (teal page, dark centred card, centred title, hero photo,
+three benefit sections, teal call-to-action, address/social/website footer) and
+asked for that back as something they fill in rather than code. Session 69 had
+already made a pasted full-HTML document render correctly — that solved the
+*rendering*, not the *authoring*.
+
+A campaign is now a list of **blocks**; the backend renders the house style
+around them. `body_html` still works unchanged — this is a second, easier way
+to author, not a replacement.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `CampaignBlockRenderer` (new) | ✅ | 8 block types (heading / text / image / button / list / divider / spacer / footer) → table-based, inline-styled, Outlook-safe HTML. Two theme presets: `okelcor_dark` (reconstructed from the screenshots — `#2E6E75` page, `#2B2B2B` card) and `light`. The one `<style>` block carries mobile-only overrides; layout never depends on it, so a client that drops it still renders correctly. |
+| Marketer text can never become markup | ✅ | All text is escaped, then a tiny inline syntax (`**bold**`, `*italic*`, `[label](url)`) is re-introduced as tags the renderer generates itself. `javascript:` URLs are rejected in links, buttons, images and footer social links — including the entity-encoded form (`javascript&#58;`). Theme overrides accept only hex colours, a constrained font stack and a clamped width, so nothing arbitrary reaches a `style` attribute. |
+| `CampaignMergeTags` (new) — personalization | ✅ | `[[FIRST_NAME]] [[LAST_NAME]] [[FULL_NAME]] [[COMPANY]] [[EMAIL]] [[COUNTRY]] [[MARKET]] [[UNSUBSCRIBE_URL]]`, usable in block text, a button URL **or the subject line**, substituted per recipient in the send job. Every tag takes a fallback — `[[FIRST_NAME|there]]` — which matters because most of the imported list is an email address and nothing else, so a bare tag would send "Hi ," to a large part of it. A tag with no fallback resolves to empty, never to the raw token; an *unknown* tag is left visible so a typo shows up in the preview. |
+| `CampaignStarterTemplates` (new) — 3 built-in designs | ✅ | `okelcor_classic` (the full Wix layout, landmark-for-landmark), `simple_announcement`, `product_offer`. Deliberately **code, not seeded rows**: always present, can't be deleted by accident, improve with a deploy, and no seeder-re-run gotcha (cf. `SiteSettingsSeeder` overwriting admin-entered values). |
+| `GET /admin/campaign-design` (new) | ✅ | Block catalogue with per-field types/options/defaults, theme presets, merge tags, inline-format syntax — the editor UI is generated from this rather than a hardcoded frontend copy that can drift, same philosophy as auto-discovered markets. |
+| `GET /admin/campaign-templates/starters` (new) | ✅ | So the editor never opens on a blank canvas. |
+| `campaign_templates` CRUD (new, migration #27) | ✅ | The team's own saved/reusable designs. `created_by` is nullable + `nullOnDelete` — a shared design must outlive the admin who saved it. List endpoint stays light (`block_count`), detail carries the blocks. |
+| `POST /admin/bulk-emails/preview` (new) | ✅ | Renders without creating anything: the real HTML, a sample-personalized copy for the preview iframe, the plain-text part, and `unknown_merge_tags` — catching a misspelled tag in the editor instead of after 1,700 emails went out with a blank in them. |
+| `POST /admin/bulk-emails/test-send` (new) | ✅ | Sends one real `[TEST]`-prefixed email to an address the marketer picks. Creates no campaign, touches no contact, and its unsubscribe link is **inert** — a tester clicking through their own test cannot opt a real contact out. The most important control for a non-technical user. |
+| `POST /admin/bulk-emails` accepts `blocks` + `theme` | ✅ | Rendered to HTML **at creation time** into the existing `body_html` column, so the queue, resume logic, per-recipient substitution and send job are all completely unchanged — a new way to author, not a new way to send. Blocks/theme stored alongside so a sent campaign can be reopened or duplicated; payload gains `designed`. |
+| Plain-text alternative now sent | ✅ | `renderText()` → new `body_text` column → text part on the mailable. A bulk HTML-only message is markedly more likely to be filtered as spam, and some recipients read text only. Null for pasted-HTML campaigns, where there's nothing to derive it from. |
+| Validation phrased for a non-technical user | ✅ | 422 `code: invalid_blocks` with `errors.blocks` as plain strings — *"Block 2 (Button): \"Where it goes\" is required."* — each prefixed `Block N` so the editor attaches it to the right block instead of dumping a schema error. |
+| **Bug found by its own test** — test-send's unsubscribe link | ✅ | `applySamples()` ran before the inert-link substitution, so `[[UNSUBSCRIBE_URL]]` picked up the generic *sample* value, which was shaped like a real unsubscribe URL (`…/marketing-contacts/unsubscribe/preview`). Order reversed and the sample changed to something visibly inert. Caught by the assertion that a test send contains no unsubscribe-shaped URL. |
+| Deploy-order safe | ✅ | Proved: `test_campaigns_still_send_when_the_design_columns_are_missing` drops `blocks`/`theme`/`body_text` and asserts both pasted-HTML and blocks-designed campaigns still create and render. `BulkEmailService::designColumns()` writes those columns only when they exist — a campaign send is not something to break over a column that stores editor state. |
+| Migration proved against real SQL | ✅ | `test_campaign_design_migration_applies_and_is_idempotent` drops the table + columns, runs the real migration file, asserts all four land, and re-runs it to prove the guards. |
+| Backend tests (41 new) | ✅ | `CampaignBuilderTest` (24, no DB — rendering, escaping, URL rejection, theme clamping, merge tags, text part, starter integrity, and a `DOMDocument` check that the output is a single well-formed document with balanced tables) + 17 endpoint tests in `BulkEmailCampaignTest`. **All actually executed** — full suite **205 passed, 0 failed**, 206 skipped (pre-existing MySQL gate). |
+
+**Deliberate design decisions worth knowing:** social links render as text
+("Facebook · X · Pinterest") rather than the Wix original's icon graphics — those
+need hosted images and a broken image in a footer is worse than a word. Rich
+inline formatting is limited to bold/italic/link on purpose; anything more and the
+escape-everything guarantee stops holding.
+
+See `FRONTEND_NOTE_campaign-builder.md`.
+
+---
+
 ## eBay Integration (Sessions 15–25)
 
 | Phase | Feature | Status |
@@ -1138,7 +1181,8 @@ See `FRONTEND_NOTE_marketing-contact-market-move.md`.
 | `contact_messages` | Contact form submissions |
 | `marketing_contacts` | Imported mailing list for admin bulk-email campaigns 🔧 |
 | `marketing_contact_markets` | Market membership per marketing contact (many-to-many; `marketing_contacts.market` remains the primary market) |
-| `bulk_email_campaigns` | Bulk email sends (subject/body/filters/progress) 🔧 |
+| `bulk_email_campaigns` | Bulk email sends (subject/body/filters/progress; + `blocks`/`theme`/`body_text` from the campaign builder) 🔧 |
+| `campaign_templates` | Saved reusable campaign designs (blocks + theme). Built-in starters are code, not rows |
 | `bulk_email_campaign_recipients` | Per-recipient send status per campaign 🔧 |
 | `admin_security_events` | Security audit events |
 | `password_reset_tokens` | Customer password reset + invite tokens |
@@ -1290,6 +1334,7 @@ composer install --no-dev
 24. `2026_07_29_000001_add_tyre_batch_fields_to_products_table` (Session 71 — tyre passport; guarded/additive)
 25. `2026_07_29_000002_add_estimated_dispatch_days_setting` (Session 71 — inserts one blank `site_settings` row via `insertOrIgnore`, idempotent)
 26. `2026_07_30_000001_create_marketing_contact_markets_table` (Session 72 — multi-market marketing contacts; guarded/additive + idempotent backfill from `marketing_contacts.market`. Backfill proved against real SQL by `BulkEmailCampaignTest::test_migration_backfills_one_membership_per_existing_contact`; code is deploy-order safe and falls back to the single column until this runs)
+27. `2026_07_30_000002_create_campaign_templates_table` (Session 72 — campaign builder; creates `campaign_templates` + adds `blocks`/`theme`/`body_text` to `bulk_email_campaigns`. All guarded, no data touched. Proved by `test_campaign_design_migration_applies_and_is_idempotent`; code is deploy-order safe — campaigns still render and send without these columns)
 
 Migrations 1–18 verified to apply cleanly on MySQL via CI (`migrate:fresh`) and `LeadFunnelAnalyticsTest`'s `RefreshDatabase`; #16–18 were additionally exercised against sqlite in `BulkEmailCampaignTest`. Applied to production via `artisan migrate --force` as part of the 2026-07-01 deploy (which also shipped Session 51's code-only Media Library fix — no new migrations there). #19–23 are guarded/additive (`Schema::hasColumn` checks) and ready to deploy via the same command — not yet confirmed run against production as of this note. #21 also widens `customer_communications.body` from TEXT to LONGTEXT via raw SQL (no doctrine/dbal in this project). See `DEPLOY_RUNBOOK.md` for the ordered deploy + rollback plan.
 

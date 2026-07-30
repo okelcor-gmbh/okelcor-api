@@ -7,6 +7,7 @@ use App\Models\BulkEmailCampaign;
 use App\Models\MarketingContact;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Builds the recipient list for a bulk email send from admin-supplied
@@ -75,19 +76,30 @@ class BulkEmailService
         return $this->recipientQuery($filters)->count();
     }
 
-    public function createCampaign(string $subject, string $bodyHtml, array $filters, int $createdBy): BulkEmailCampaign
-    {
-        return DB::transaction(function () use ($subject, $bodyHtml, $filters, $createdBy) {
+    /**
+     * @param  array<int, array<string, mixed>>|null  $blocks  design source, when authored in the editor
+     * @param  array<string, mixed>|null  $theme
+     */
+    public function createCampaign(
+        string $subject,
+        string $bodyHtml,
+        array $filters,
+        int $createdBy,
+        ?array $blocks = null,
+        ?array $theme = null,
+        ?string $bodyText = null,
+    ): BulkEmailCampaign {
+        return DB::transaction(function () use ($subject, $bodyHtml, $filters, $createdBy, $blocks, $theme, $bodyText) {
             $contactIds = $this->recipientQuery($filters)->pluck('email', 'id');
 
-            $campaign = BulkEmailCampaign::create([
+            $campaign = BulkEmailCampaign::create(array_merge([
                 'subject'          => $subject,
                 'body_html'        => $bodyHtml,
                 'filters'          => $filters,
                 'total_recipients' => $contactIds->count(),
                 'status'           => 'queued',
                 'created_by'       => $createdBy,
-            ]);
+            ], $this->designColumns($blocks, $theme, $bodyText)));
 
             $rows = [];
             $now  = now();
@@ -113,5 +125,25 @@ class BulkEmailService
     public function dispatch(BulkEmailCampaign $campaign): void
     {
         SendBulkEmailCampaignJob::dispatch($campaign->id);
+    }
+
+    /**
+     * The design columns, included only when they exist — this code can reach
+     * production before the migration that adds them, and a campaign send is
+     * not something to break over a column that only stores editor state.
+     *
+     * @return array<string, mixed>
+     */
+    private function designColumns(?array $blocks, ?array $theme, ?string $bodyText): array
+    {
+        $columns = [];
+
+        foreach (['blocks' => $blocks, 'theme' => $theme, 'body_text' => $bodyText] as $column => $value) {
+            if ($value !== null && Schema::hasColumn('bulk_email_campaigns', $column)) {
+                $columns[$column] = $value;
+            }
+        }
+
+        return $columns;
     }
 }

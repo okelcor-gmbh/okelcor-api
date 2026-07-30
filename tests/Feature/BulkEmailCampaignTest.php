@@ -41,6 +41,7 @@ class BulkEmailCampaignTest extends TestCase
         foreach ([
             'bulk_email_campaign_recipients',
             'bulk_email_campaigns',
+            'campaign_templates',
             'marketing_contact_markets',
             'marketing_contacts',
             'admin_users',
@@ -86,10 +87,23 @@ class BulkEmailCampaignTest extends TestCase
             $table->index('market');
         });
 
+        Schema::create('campaign_templates', function (Blueprint $table) {
+            $table->id();
+            $table->string('name', 150);
+            $table->string('description', 500)->nullable();
+            $table->json('blocks');
+            $table->json('theme')->nullable();
+            $table->foreignId('created_by')->nullable()->constrained('admin_users')->nullOnDelete();
+            $table->timestamps();
+        });
+
         Schema::create('bulk_email_campaigns', function (Blueprint $table) {
             $table->id();
             $table->string('subject', 255);
             $table->longText('body_html');
+            $table->json('blocks')->nullable();
+            $table->json('theme')->nullable();
+            $table->longText('body_text')->nullable();
             $table->json('filters')->nullable();
             $table->unsignedInteger('total_recipients')->default(0);
             $table->unsignedInteger('sent_count')->default(0);
@@ -126,6 +140,7 @@ class BulkEmailCampaignTest extends TestCase
         foreach ([
             'bulk_email_campaign_recipients',
             'bulk_email_campaigns',
+            'campaign_templates',
             'marketing_contact_markets',
             'marketing_contacts',
             'admin_users',
@@ -802,6 +817,73 @@ class BulkEmailCampaignTest extends TestCase
         $this->assertSame(2, \DB::table('marketing_contact_markets')->count());
     }
 
+    /**
+     * Runs the real campaign-design migration against real SQL, from the
+     * pre-migration state, so the additive columns and the new table are proved
+     * rather than assumed.
+     */
+    public function test_campaign_design_migration_applies_and_is_idempotent(): void
+    {
+        Schema::disableForeignKeyConstraints();
+        Schema::dropIfExists('campaign_templates');
+        Schema::enableForeignKeyConstraints();
+
+        foreach (['blocks', 'theme', 'body_text'] as $column) {
+            Schema::table('bulk_email_campaigns', fn (Blueprint $t) => $t->dropColumn($column));
+        }
+
+        $this->assertFalse(Schema::hasColumn('bulk_email_campaigns', 'blocks'));
+
+        $migration = require base_path('database/migrations/2026_07_30_000002_create_campaign_templates_table.php');
+        $migration->up();
+
+        $this->assertTrue(Schema::hasTable('campaign_templates'));
+        foreach (['blocks', 'theme', 'body_text'] as $column) {
+            $this->assertTrue(Schema::hasColumn('bulk_email_campaigns', $column), "missing {$column}");
+        }
+
+        // Guarded, so a partially-applied deploy re-runs cleanly.
+        $migration->up();
+        $this->assertTrue(Schema::hasTable('campaign_templates'));
+    }
+
+    /**
+     * Deploy-order safety: the campaign endpoints must keep working if this code
+     * reaches production before the design migration. A pasted-HTML campaign is
+     * the pre-existing path and must be entirely unaffected.
+     */
+    public function test_campaigns_still_send_when_the_design_columns_are_missing(): void
+    {
+        Queue::fake();
+
+        foreach (['blocks', 'theme', 'body_text'] as $column) {
+            Schema::table('bulk_email_campaigns', fn (Blueprint $t) => $t->dropColumn($column));
+        }
+
+        MarketingContact::create(['email' => 'a@example.com', 'market' => 'croatia', 'status' => 'subscribed', 'unsubscribe_token' => 't1']);
+
+        $this->actingAs($this->admin('order_manager'), 'sanctum')
+            ->postJson('/api/v1/admin/bulk-emails', [
+                'subject'   => 'Pasted',
+                'body_html' => '<p>Still works</p>',
+                'filters'   => ['market' => 'croatia'],
+            ])
+            ->assertCreated();
+
+        // A blocks-designed campaign also still sends — the design just isn't
+        // stored for later reopening until the migration runs.
+        $this->actingAs($this->admin('order_manager'), 'sanctum')
+            ->postJson('/api/v1/admin/bulk-emails', [
+                'subject' => 'Designed',
+                'blocks'  => $this->sampleBlocks(),
+                'filters' => ['market' => 'croatia'],
+            ])
+            ->assertCreated();
+
+        $designed = BulkEmailCampaign::where('subject', 'Designed')->first();
+        $this->assertStringContainsString('Accelerate Your Growth', $designed->body_html);
+    }
+
     public function test_reimport_adds_a_market_instead_of_moving_the_contact(): void
     {
         $contact = MarketingContact::create(['email' => 'jane@example.com', 'market' => 'asia', 'unsubscribe_token' => 't1']);
@@ -1039,6 +1121,324 @@ class BulkEmailCampaignTest extends TestCase
     // -------------------------------------------------------------------------
     // Unsubscribe
     // -------------------------------------------------------------------------
+
+    // -------------------------------------------------------------------------
+    // Block-based campaign design (the marketer-facing editor)
+    // -------------------------------------------------------------------------
+
+    private function sampleBlocks(): array
+    {
+        return [
+            ['type' => 'heading', 'text' => 'Accelerate Your Growth'],
+            ['type' => 'text', 'text' => 'Hi [[FIRST_NAME|there]], we have tyres.'],
+            ['type' => 'button', 'label' => 'Get a Quote', 'url' => 'https://okelcor.com/contact'],
+        ];
+    }
+
+    public function test_design_endpoint_describes_blocks_themes_and_merge_tags(): void
+    {
+        $response = $this->actingAs($this->admin('order_manager'), 'sanctum')
+            ->getJson('/api/v1/admin/campaign-design');
+
+        $response->assertOk();
+
+        // The editor UI is generated from this, so the shape matters.
+        $types = array_column($response->json('data.blocks'), 'type');
+        foreach (['heading', 'text', 'image', 'button', 'list', 'divider', 'spacer', 'footer'] as $type) {
+            $this->assertContains($type, $types);
+        }
+
+        $this->assertNotEmpty($response->json('data.blocks.0.fields'));
+        $this->assertSame('okelcor_dark', $response->json('data.default_theme'));
+        $this->assertContains('okelcor_dark', array_column($response->json('data.themes'), 'preset'));
+        $this->assertContains('[[FIRST_NAME]]', array_column($response->json('data.merge_tags'), 'tag'));
+    }
+
+    public function test_starter_templates_are_served(): void
+    {
+        $response = $this->actingAs($this->admin('order_manager'), 'sanctum')
+            ->getJson('/api/v1/admin/campaign-templates/starters');
+
+        $response->assertOk();
+        $this->assertContains('okelcor_classic', array_column($response->json('data'), 'key'));
+    }
+
+    public function test_preview_renders_html_and_fills_sample_values(): void
+    {
+        $response = $this->actingAs($this->admin('order_manager'), 'sanctum')
+            ->postJson('/api/v1/admin/bulk-emails/preview', [
+                'subject' => 'Hello [[FIRST_NAME|there]]',
+                'blocks'  => $this->sampleBlocks(),
+            ]);
+
+        $response->assertOk();
+
+        // Real HTML, with the token still there for per-recipient substitution.
+        $this->assertStringContainsString('Accelerate Your Growth', $response->json('data.html'));
+        $this->assertStringContainsString('[[UNSUBSCRIBE_URL]]', $response->json('data.html'));
+
+        // The preview copy shows what a recipient sees instead of raw tokens.
+        $this->assertStringContainsString('Hi Anna', $response->json('data.html_personalized'));
+        $this->assertSame('Hello Anna', $response->json('data.subject_personalized'));
+
+        $this->assertNotEmpty($response->json('data.text'));
+        $this->assertSame([], $response->json('data.unknown_merge_tags'));
+    }
+
+    public function test_preview_reports_a_misspelled_merge_tag(): void
+    {
+        $response = $this->actingAs($this->admin('order_manager'), 'sanctum')
+            ->postJson('/api/v1/admin/bulk-emails/preview', [
+                'blocks' => [['type' => 'text', 'text' => 'Hi [[FIRSTNAME]]']],
+            ]);
+
+        // Caught in the editor rather than after 1,700 emails went out blank.
+        $response->assertOk()->assertJsonPath('data.unknown_merge_tags', ['FIRSTNAME']);
+    }
+
+    public function test_preview_returns_readable_block_errors(): void
+    {
+        $response = $this->actingAs($this->admin('order_manager'), 'sanctum')
+            ->postJson('/api/v1/admin/bulk-emails/preview', [
+                'blocks' => [
+                    ['type' => 'heading', 'text' => 'Fine'],
+                    ['type' => 'button', 'label' => 'Broken'],
+                ],
+            ]);
+
+        $response->assertStatus(422)->assertJsonPath('code', 'invalid_blocks');
+        $this->assertStringContainsString('Block 2 (Button)', $response->json('errors.blocks.0'));
+    }
+
+    public function test_preview_still_accepts_pasted_html(): void
+    {
+        $this->actingAs($this->admin('order_manager'), 'sanctum')
+            ->postJson('/api/v1/admin/bulk-emails/preview', ['body_html' => '<p>Hi</p>'])
+            ->assertOk()
+            ->assertJsonPath('data.text', null);
+    }
+
+    public function test_test_send_delivers_one_email_and_creates_nothing(): void
+    {
+        Mail::fake();
+
+        $this->actingAs($this->admin('order_manager'), 'sanctum')
+            ->postJson('/api/v1/admin/bulk-emails/test-send', [
+                'to'      => 'marketer@okelcor.com',
+                'subject' => 'Check this',
+                'blocks'  => $this->sampleBlocks(),
+            ])
+            ->assertOk();
+
+        Mail::assertSent(BulkCampaignEmail::class, function ($mail) {
+            // Flagged as a test, personalized with samples, and the unsubscribe
+            // link is inert so a tester can't opt a real contact out.
+            return $mail->subjectLine === '[TEST] Check this'
+                && str_contains($mail->bodyHtml, 'Hi Anna')
+                && ! str_contains($mail->bodyHtml, '[[UNSUBSCRIBE_URL]]')
+                && ! str_contains($mail->bodyHtml, '/marketing-contacts/unsubscribe/')
+                && $mail->hasTo('marketer@okelcor.com');
+        });
+
+        // No campaign, no recipients, no contact touched.
+        $this->assertSame(0, BulkEmailCampaign::count());
+        $this->assertSame(0, MarketingContact::count());
+    }
+
+    public function test_test_send_rejects_invalid_blocks(): void
+    {
+        Mail::fake();
+
+        $this->actingAs($this->admin('order_manager'), 'sanctum')
+            ->postJson('/api/v1/admin/bulk-emails/test-send', [
+                'to'      => 'marketer@okelcor.com',
+                'subject' => 'Check this',
+                'blocks'  => [['type' => 'image', 'url' => '/relative.jpg']],
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('code', 'invalid_blocks');
+
+        Mail::assertNothingSent();
+    }
+
+    public function test_campaign_created_from_blocks_renders_and_stores_the_design(): void
+    {
+        Queue::fake();
+
+        MarketingContact::create([
+            'email' => 'anna@example.com', 'first_name' => 'Anna', 'market' => 'croatia',
+            'status' => 'subscribed', 'unsubscribe_token' => 't1',
+        ]);
+
+        $response = $this->actingAs($this->admin('order_manager'), 'sanctum')
+            ->postJson('/api/v1/admin/bulk-emails', [
+                'subject' => 'Designed campaign',
+                'blocks'  => $this->sampleBlocks(),
+                'theme'   => ['preset' => 'okelcor_dark'],
+                'filters' => ['market' => 'croatia'],
+            ]);
+
+        $response->assertCreated()->assertJsonPath('data.designed', true);
+
+        $campaign = BulkEmailCampaign::first();
+
+        // Rendered to HTML at creation, so the send path is untouched…
+        $this->assertStringContainsString('Accelerate Your Growth', $campaign->body_html);
+        $this->assertStringContainsString('background-color:#2B2B2B', $campaign->body_html);
+        // …with a text alternative for deliverability…
+        $this->assertStringContainsString('ACCELERATE YOUR GROWTH', $campaign->body_text);
+        // …and the blocks kept so it can be reopened or duplicated.
+        $this->assertCount(3, $campaign->blocks);
+        $this->assertSame('okelcor_dark', $campaign->theme['preset']);
+    }
+
+    public function test_campaign_creation_rejects_invalid_blocks_before_queueing(): void
+    {
+        Queue::fake();
+
+        MarketingContact::create(['email' => 'a@example.com', 'market' => 'croatia', 'status' => 'subscribed', 'unsubscribe_token' => 't1']);
+
+        $this->actingAs($this->admin('order_manager'), 'sanctum')
+            ->postJson('/api/v1/admin/bulk-emails', [
+                'subject' => 'Broken',
+                'blocks'  => [['type' => 'button', 'label' => 'No URL']],
+                'filters' => ['market' => 'croatia'],
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('code', 'invalid_blocks');
+
+        $this->assertSame(0, BulkEmailCampaign::count());
+        Queue::assertNothingPushed();
+    }
+
+    public function test_pasted_html_campaign_is_unaffected_by_the_editor(): void
+    {
+        Queue::fake();
+
+        MarketingContact::create(['email' => 'a@example.com', 'market' => 'croatia', 'status' => 'subscribed', 'unsubscribe_token' => 't1']);
+
+        $this->actingAs($this->admin('order_manager'), 'sanctum')
+            ->postJson('/api/v1/admin/bulk-emails', [
+                'subject'   => 'Pasted',
+                'body_html' => '<p>Still works</p>',
+                'filters'   => ['market' => 'croatia'],
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.designed', false);
+
+        $campaign = BulkEmailCampaign::first();
+        $this->assertStringContainsString('Still works', $campaign->body_html);
+        $this->assertNull($campaign->blocks);
+        $this->assertNull($campaign->body_text);
+    }
+
+    public function test_send_job_personalizes_each_recipient(): void
+    {
+        Mail::fake();
+
+        MarketingContact::create([
+            'email' => 'anna@example.com', 'first_name' => 'Anna', 'company' => 'Zagreb Tyres',
+            'market' => 'croatia', 'status' => 'subscribed', 'unsubscribe_token' => 'tok-anna',
+        ]);
+        // No first name — the fallback is what stops "Hi ," going out.
+        MarketingContact::create([
+            'email' => 'nameless@example.com', 'market' => 'croatia',
+            'status' => 'subscribed', 'unsubscribe_token' => 'tok-nameless',
+        ]);
+
+        $this->actingAs($this->admin('order_manager'), 'sanctum')
+            ->postJson('/api/v1/admin/bulk-emails', [
+                'subject' => 'Hello [[FIRST_NAME|there]]',
+                'blocks'  => [['type' => 'text', 'text' => 'Hi [[FIRST_NAME|there]] at [[COMPANY|your company]].']],
+                'filters' => ['market' => 'croatia'],
+            ])
+            ->assertCreated();
+
+        (new SendBulkEmailCampaignJob(BulkEmailCampaign::first()->id))->handle();
+
+        Mail::assertSent(BulkCampaignEmail::class, function ($mail) {
+            return $mail->hasTo('anna@example.com')
+                && $mail->subjectLine === 'Hello Anna'
+                && str_contains($mail->bodyHtml, 'Hi Anna at Zagreb Tyres.')
+                && str_contains($mail->bodyHtml, 'tok-anna')
+                && str_contains((string) $mail->bodyText, 'Hi Anna');
+        });
+
+        Mail::assertSent(BulkCampaignEmail::class, function ($mail) {
+            return $mail->hasTo('nameless@example.com')
+                && $mail->subjectLine === 'Hello there'
+                && str_contains($mail->bodyHtml, 'Hi there at your company.')
+                && ! str_contains($mail->bodyHtml, '[[');
+        });
+    }
+
+    // -------------------------------------------------------------------------
+    // Saved templates
+    // -------------------------------------------------------------------------
+
+    public function test_template_save_list_show_update_delete(): void
+    {
+        $admin = $this->admin('order_manager');
+
+        $created = $this->actingAs($admin, 'sanctum')
+            ->postJson('/api/v1/admin/campaign-templates', [
+                'name'        => 'Croatia monthly',
+                'description' => 'What we send to Croatia every month',
+                'blocks'      => $this->sampleBlocks(),
+                'theme'       => ['preset' => 'okelcor_dark'],
+            ]);
+
+        $created->assertCreated()->assertJsonPath('data.name', 'Croatia monthly');
+        $id = $created->json('data.id');
+
+        // The list stays light; the detail carries the design.
+        $list = $this->actingAs($admin, 'sanctum')->getJson('/api/v1/admin/campaign-templates');
+        $list->assertOk()->assertJsonPath('data.0.block_count', 3);
+        $this->assertArrayNotHasKey('blocks', $list->json('data.0'));
+
+        $this->actingAs($admin, 'sanctum')
+            ->getJson("/api/v1/admin/campaign-templates/{$id}")
+            ->assertOk()
+            ->assertJsonPath('data.blocks.0.type', 'heading');
+
+        $this->actingAs($admin, 'sanctum')
+            ->patchJson("/api/v1/admin/campaign-templates/{$id}", ['name' => 'Croatia monthly v2'])
+            ->assertOk()
+            ->assertJsonPath('data.name', 'Croatia monthly v2');
+
+        $this->actingAs($admin, 'sanctum')
+            ->deleteJson("/api/v1/admin/campaign-templates/{$id}")
+            ->assertOk();
+
+        $this->assertSame(0, \DB::table('campaign_templates')->count());
+    }
+
+    public function test_template_save_rejects_invalid_blocks(): void
+    {
+        $this->actingAs($this->admin('order_manager'), 'sanctum')
+            ->postJson('/api/v1/admin/campaign-templates', [
+                'name'   => 'Broken',
+                'blocks' => [['type' => 'nope']],
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('code', 'invalid_blocks');
+    }
+
+    public function test_campaign_design_endpoints_require_marketing_permission(): void
+    {
+        $viewer = $this->admin('viewer');
+
+        $this->actingAs($viewer, 'sanctum')->getJson('/api/v1/admin/campaign-design')->assertStatus(403);
+        $this->actingAs($viewer, 'sanctum')->getJson('/api/v1/admin/campaign-templates')->assertStatus(403);
+        $this->actingAs($viewer, 'sanctum')
+            ->postJson('/api/v1/admin/bulk-emails/preview', ['blocks' => $this->sampleBlocks()])
+            ->assertStatus(403);
+        $this->actingAs($viewer, 'sanctum')
+            ->postJson('/api/v1/admin/bulk-emails/test-send', [
+                'to' => 'x@y.com', 'subject' => 's', 'blocks' => $this->sampleBlocks(),
+            ])
+            ->assertStatus(403);
+    }
 
     public function test_unsubscribe_endpoint_flips_status(): void
     {

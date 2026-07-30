@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Mail\BulkCampaignEmail;
 use App\Models\BulkEmailCampaign;
+use App\Services\CampaignMergeTags;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -42,23 +43,31 @@ class SendBulkEmailCampaignJob implements ShouldQueue
             ->where('status', 'pending')
             ->orderBy('id')
             ->chunkById(50, function ($chunk) use ($campaign) {
+                $mergeTags = app(CampaignMergeTags::class);
+
                 foreach ($chunk as $recipient) {
                     $unsubscribeUrl = url("/api/v1/marketing-contacts/unsubscribe/{$recipient->contact->unsubscribe_token}");
 
-                    // Lets a full, self-contained campaign HTML document
-                    // (its own <html>/<body>, its own styled unsubscribe
-                    // link) reference the real per-recipient URL via this
-                    // literal token, instead of only ever getting the
-                    // generic footer emails.bulk-campaign appends for a
-                    // plain HTML snippet (see that view for the other half
-                    // of this — it skips its own wrapper/footer entirely
-                    // when body_html is already a full document, since
-                    // nesting two <html> documents is invalid).
-                    $personalizedBody = str_replace('[[UNSUBSCRIBE_URL]]', $unsubscribeUrl, $campaign->body_html);
+                    // Substitutes every merge tag for this one recipient:
+                    // [[FIRST_NAME]], [[COMPANY]] and friends, plus
+                    // [[UNSUBSCRIBE_URL]] — which is how a fully-designed
+                    // campaign (its own <html>/<body> and its own styled
+                    // unsubscribe link) reaches the real per-recipient URL
+                    // instead of only ever getting the generic footer
+                    // emails.bulk-campaign appends for a plain HTML snippet
+                    // (see that view for the other half of this — it skips its
+                    // own wrapper entirely when body_html is already a full
+                    // document, since nesting two <html> documents is invalid).
+                    $personalizedBody = $mergeTags->apply($campaign->body_html, $recipient->contact, $unsubscribeUrl);
+                    $personalizedText = $campaign->body_text === null
+                        ? null
+                        : $mergeTags->apply($campaign->body_text, $recipient->contact, $unsubscribeUrl);
+
+                    $personalizedSubject = $mergeTags->apply($campaign->subject, $recipient->contact, $unsubscribeUrl);
 
                     try {
                         Mail::to($recipient->email)->send(
-                            new BulkCampaignEmail($campaign->subject, $personalizedBody, $unsubscribeUrl)
+                            new BulkCampaignEmail($personalizedSubject, $personalizedBody, $unsubscribeUrl, $personalizedText)
                         );
 
                         $recipient->update(['status' => 'sent', 'sent_at' => now()]);
