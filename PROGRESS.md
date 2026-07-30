@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-07-30 | Branch: `main` | Latest commit: `59d87eb`
+Last updated: 2026-07-30 | Branch: `main` | Latest commit: `faa31bd`
 
 ---
 
@@ -908,6 +908,13 @@ way to scope a send to just one.
 | `campaign:seed-assets` (new artisan command) | ✅ | Uploads a folder of campaign source images (`resources/campaign-assets/{set}/`) into the real Media Library through the same `MediaLibraryService` the admin upload endpoint uses. |
 | Croatia market seeded | ✅ | 200 contacts imported (cleaned/deduplicated from a spreadsheet), fully segmented from the existing Asia list. |
 
+**Superseded in places by Session 72** — read that section alongside this one:
+a contact is no longer limited to one market, `filters.market` now matches any
+of a contact's markets (not just the primary), and a CSV re-import no longer
+overwrites an existing contact's market. The `market` column and everything
+described above still exist and still behave as written; Session 72 only added
+to them.
+
 ---
 
 ## Order-manager meeting fixes (Session 70)
@@ -973,6 +980,11 @@ See `FRONTEND_NOTE_premium-ux-pass.md`.
 
 ## Marketing contacts in multiple markets — move / add / remove (Session 72)
 
+> **Deploy status:** pushed to `main` as `b8757c7`. **Not yet deployed** —
+> migration #26 is unapplied in production, so multi-market membership is inert
+> there until `artisan migrate --force` runs (the code falls back to the old
+> single-market behaviour in the meantime; see the deploy-order row below).
+
 Digital marketer's report: a contact already in one market (the `TEST` market
 created while verifying Session 69's segmentation) couldn't be added to
 another (`Germany`) — the add form returned "email exists", and the only
@@ -986,19 +998,19 @@ is `UNIQUE`, so a second row was impossible and there was nothing to move with.
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| `marketing_contact_markets` table (migration #26) | ✅ | Membership is many-to-many. `unique(contact_id, market)` so "add to market" is safely repeatable via `insertOrIgnore`. Backfills one membership per existing contact from its current `market`, so behaviour is identical the moment it runs. |
-| `marketing_contacts.market` kept as the **primary** market | ✅ | Not dropped — respects CLAUDE.md's "do not change column names", and every existing response/query that reads `market` keeps working. Mirrored from the membership table (`refreshPrimaryMarket`): always holds one of the contact's real memberships, and never shifts just because another market was added alongside it. Contact payloads gain a `markets` array; `market` is unchanged. |
-| `POST /admin/marketing-contacts/add-to-market` (new) | ✅ | **The endpoint that answers the actual report.** Adds a market, keeps the existing ones. Three OR'd selectors shared with move: `contact_ids[]` (checkbox selection), `emails[]` (paste-a-list, no id lookup), `from_market` (whole market at once). Idempotent — re-adding reports `already_in_place` rather than erroring. |
-| `POST /admin/marketing-contacts/move-market` (new) | ✅ | Relocates rather than accumulates. **With** `from_market`: leaves that market for the target, keeping the contact's *other* markets. **Without**: the target replaces its markets outright (the original single-market meaning). `from_market` + `to_market` alone is effectively a market rename. |
-| `POST /admin/marketing-contacts/remove-from-market` (new) | ✅ | Takes contacts out of one market without deleting them; called with no ids/emails it retires the market entirely. **Refuses to strip a contact's last market** — that would leave it invisible to every market-scoped list and campaign filter with no way to find it again; those contacts come back in `skipped_last_market` instead of vanishing silently. |
-| Move/add/remove never create or delete contacts | ✅ | An email with no matching contact is reported in `not_found` rather than imported — a move must not quietly become an import. |
-| Unsubscribed status preserved by every market operation | ✅ | Neither `status` nor `unsubscribe_token` is touched — same guarantee `MarketingContactImportService` already makes on re-import; a market change can never re-enter an opted-out contact into a send. |
-| **Fix** — campaign filter matched only the primary market | ✅ | `BulkEmailService::recipientQuery()` now matches **any** of a contact's markets. Without this the whole feature would have looked like it worked in the UI while quietly not sending: a contact added to `germany` alongside `test` would have been left out of the germany campaign. Same fix applied to the admin contact-list `market` filter and the `markets`/`stats` counts. |
-| Campaigns can target several markets in one send | ✅ | `filters.markets[]` (max 20) alongside the existing `filters.market`, on both `POST /admin/bulk-emails` and `recipient-count`. Because the filter narrows contact *rows*, a contact in two targeted markets is selected exactly once — no de-dupe step needed, nobody can be emailed twice by one campaign. Covered by a test asserting exactly that. |
-| Create/patch accept several markets | ✅ | `POST` takes `market` (string) **or** `markets[]`; `PATCH` takes `markets[]` (replaces the set) or `market` (single-market move, unchanged meaning). |
-| Duplicate add now says **which markets** hold the contact | ✅ | Still 422 with `errors.email` populated (no client breakage), plus `code: 'contact_exists'` + `existing_markets` / `can_add_market` / `can_move` / `target_market` so the UI can offer "already in *test* — add to *germany* too, or move it?" instead of a dead end. Checked before validation so the message can name both. |
-| Membership registered on save, not just by the endpoints | ✅ | A `saved` hook keeps the primary `market` column and the membership table consistent, so a contact written the old single-column way anywhere in the codebase — now or in future — still lands in that market's list. Prevents the failure mode where a contact claims a market in its own row but is missing from every list of it. Fires only when `market` actually changed, so a 1,700-row import doesn't pay for a redundant write per contact. |
-| **Fix** — CSV re-import silently relocated existing contacts | ✅ | Importing a Germany list containing an existing Asia contact used to overwrite its `market`, moving it out of Asia as a side effect of an unrelated import. Now **adds** germany alongside asia and leaves the primary alone — relocation is `move-market`'s job, explicitly. |
+| `marketing_contact_markets` table (migration #26) | 🔧 | Membership is many-to-many. `unique(contact_id, market)` so "add to market" is safely repeatable via `insertOrIgnore`. Backfills one membership per existing contact from its current `market`, so behaviour is identical the moment it runs. |
+| `marketing_contacts.market` kept as the **primary** market | 🔧 | Not dropped — respects CLAUDE.md's "do not change column names", and every existing response/query that reads `market` keeps working. Mirrored from the membership table (`refreshPrimaryMarket`): always holds one of the contact's real memberships, and never shifts just because another market was added alongside it. Contact payloads gain a `markets` array; `market` is unchanged. |
+| `POST /admin/marketing-contacts/add-to-market` (new) | 🔧 | **The endpoint that answers the actual report.** Adds a market, keeps the existing ones. Three OR'd selectors shared with move: `contact_ids[]` (checkbox selection), `emails[]` (paste-a-list, no id lookup), `from_market` (whole market at once). Idempotent — re-adding reports `already_in_place` rather than erroring. |
+| `POST /admin/marketing-contacts/move-market` (new) | 🔧 | Relocates rather than accumulates. **With** `from_market`: leaves that market for the target, keeping the contact's *other* markets. **Without**: the target replaces its markets outright (the original single-market meaning). `from_market` + `to_market` alone is effectively a market rename. |
+| `POST /admin/marketing-contacts/remove-from-market` (new) | 🔧 | Takes contacts out of one market without deleting them; called with no ids/emails it retires the market entirely. **Refuses to strip a contact's last market** — that would leave it invisible to every market-scoped list and campaign filter with no way to find it again; those contacts come back in `skipped_last_market` instead of vanishing silently. |
+| Move/add/remove never create or delete contacts | 🔧 | An email with no matching contact is reported in `not_found` rather than imported — a move must not quietly become an import. |
+| Unsubscribed status preserved by every market operation | 🔧 | Neither `status` nor `unsubscribe_token` is touched — same guarantee `MarketingContactImportService` already makes on re-import; a market change can never re-enter an opted-out contact into a send. |
+| **Fix** — campaign filter matched only the primary market | 🔧 | `BulkEmailService::recipientQuery()` now matches **any** of a contact's markets. Without this the whole feature would have looked like it worked in the UI while quietly not sending: a contact added to `germany` alongside `test` would have been left out of the germany campaign. Same fix applied to the admin contact-list `market` filter and the `markets`/`stats` counts. |
+| Campaigns can target several markets in one send | 🔧 | `filters.markets[]` (max 20) alongside the existing `filters.market`, on both `POST /admin/bulk-emails` and `recipient-count`. Because the filter narrows contact *rows*, a contact in two targeted markets is selected exactly once — no de-dupe step needed, nobody can be emailed twice by one campaign. Covered by a test asserting exactly that. |
+| Create/patch accept several markets | 🔧 | `POST` takes `market` (string) **or** `markets[]`; `PATCH` takes `markets[]` (replaces the set) or `market` (single-market move, unchanged meaning). |
+| Duplicate add now says **which markets** hold the contact | 🔧 | Still 422 with `errors.email` populated (no client breakage), plus `code: 'contact_exists'` + `existing_markets` / `can_add_market` / `can_move` / `target_market` so the UI can offer "already in *test* — add to *germany* too, or move it?" instead of a dead end. Checked before validation so the message can name both. |
+| Membership registered on save, not just by the endpoints | 🔧 | A `saved` hook keeps the primary `market` column and the membership table consistent, so a contact written the old single-column way anywhere in the codebase — now or in future — still lands in that market's list. Prevents the failure mode where a contact claims a market in its own row but is missing from every list of it. Fires only when `market` actually changed, so a 1,700-row import doesn't pay for a redundant write per contact. |
+| **Fix** — CSV re-import silently relocated existing contacts | 🔧 | Importing a Germany list containing an existing Asia contact used to overwrite its `market`, moving it out of Asia as a side effect of an unrelated import. Now **adds** germany alongside asia and leaves the primary alone — relocation is `move-market`'s job, explicitly. |
 | Deploy-order safe | ✅ | Proved, not argued: `test_contacts_still_work_when_the_membership_table_is_missing` drops the table and asserts contact list / markets / stats / move / campaign recipient-count all still return 200 on the single-column fallback. Frontend can deploy independently of migration #26. |
 | Migration backfill proved against real SQL | ✅ | `test_migration_backfills_one_membership_per_existing_contact` runs the real migration file from the pre-migration state, asserts every contact keeps exactly the market it had (null-market contacts get none), and asserts a re-run is idempotent. The backfill is the only part of this feature that touches live production rows. |
 | Backend feature tests (18 new) | ✅ | Added to `BulkEmailCampaignTest` — **46 passed / 169 assertions, actually executed** (uses that file's minimal-schema sqlite harness, not the MySQL-only gate). Full suite after the change: **164 passed, 0 failed**, 206 skipped (pre-existing MySQL gate). |
@@ -1014,6 +1026,11 @@ See `FRONTEND_NOTE_marketing-contact-market-move.md`.
 
 ## Campaign builder — no-HTML email design (Session 72)
 
+> **Deploy status:** pushed to `main` as `faa31bd`. **Not yet deployed** —
+> migration #27 is unapplied in production. Block-designed campaigns would
+> already render and send correctly without it; only saved templates and
+> reopen/duplicate need the new columns (see the deploy-order row below).
+
 The email marketers aren't technical and couldn't hand-write HTML for a
 well-structured campaign. They supplied screenshots of the Wix-built campaigns
 they used to send (teal page, dark centred card, centred title, hero photo,
@@ -1028,19 +1045,19 @@ to author, not a replacement.
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| `CampaignBlockRenderer` (new) | ✅ | 8 block types (heading / text / image / button / list / divider / spacer / footer) → table-based, inline-styled, Outlook-safe HTML. Two theme presets: `okelcor_dark` (reconstructed from the screenshots — `#2E6E75` page, `#2B2B2B` card) and `light`. The one `<style>` block carries mobile-only overrides; layout never depends on it, so a client that drops it still renders correctly. |
-| Marketer text can never become markup | ✅ | All text is escaped, then a tiny inline syntax (`**bold**`, `*italic*`, `[label](url)`) is re-introduced as tags the renderer generates itself. `javascript:` URLs are rejected in links, buttons, images and footer social links — including the entity-encoded form (`javascript&#58;`). Theme overrides accept only hex colours, a constrained font stack and a clamped width, so nothing arbitrary reaches a `style` attribute. |
-| `CampaignMergeTags` (new) — personalization | ✅ | `[[FIRST_NAME]] [[LAST_NAME]] [[FULL_NAME]] [[COMPANY]] [[EMAIL]] [[COUNTRY]] [[MARKET]] [[UNSUBSCRIBE_URL]]`, usable in block text, a button URL **or the subject line**, substituted per recipient in the send job. Every tag takes a fallback — `[[FIRST_NAME|there]]` — which matters because most of the imported list is an email address and nothing else, so a bare tag would send "Hi ," to a large part of it. A tag with no fallback resolves to empty, never to the raw token; an *unknown* tag is left visible so a typo shows up in the preview. |
-| `CampaignStarterTemplates` (new) — 3 built-in designs | ✅ | `okelcor_classic` (the full Wix layout, landmark-for-landmark), `simple_announcement`, `product_offer`. Deliberately **code, not seeded rows**: always present, can't be deleted by accident, improve with a deploy, and no seeder-re-run gotcha (cf. `SiteSettingsSeeder` overwriting admin-entered values). |
-| `GET /admin/campaign-design` (new) | ✅ | Block catalogue with per-field types/options/defaults, theme presets, merge tags, inline-format syntax — the editor UI is generated from this rather than a hardcoded frontend copy that can drift, same philosophy as auto-discovered markets. |
-| `GET /admin/campaign-templates/starters` (new) | ✅ | So the editor never opens on a blank canvas. |
-| `campaign_templates` CRUD (new, migration #27) | ✅ | The team's own saved/reusable designs. `created_by` is nullable + `nullOnDelete` — a shared design must outlive the admin who saved it. List endpoint stays light (`block_count`), detail carries the blocks. |
-| `POST /admin/bulk-emails/preview` (new) | ✅ | Renders without creating anything: the real HTML, a sample-personalized copy for the preview iframe, the plain-text part, and `unknown_merge_tags` — catching a misspelled tag in the editor instead of after 1,700 emails went out with a blank in them. |
-| `POST /admin/bulk-emails/test-send` (new) | ✅ | Sends one real `[TEST]`-prefixed email to an address the marketer picks. Creates no campaign, touches no contact, and its unsubscribe link is **inert** — a tester clicking through their own test cannot opt a real contact out. The most important control for a non-technical user. |
-| `POST /admin/bulk-emails` accepts `blocks` + `theme` | ✅ | Rendered to HTML **at creation time** into the existing `body_html` column, so the queue, resume logic, per-recipient substitution and send job are all completely unchanged — a new way to author, not a new way to send. Blocks/theme stored alongside so a sent campaign can be reopened or duplicated; payload gains `designed`. |
-| Plain-text alternative now sent | ✅ | `renderText()` → new `body_text` column → text part on the mailable. A bulk HTML-only message is markedly more likely to be filtered as spam, and some recipients read text only. Null for pasted-HTML campaigns, where there's nothing to derive it from. |
-| Validation phrased for a non-technical user | ✅ | 422 `code: invalid_blocks` with `errors.blocks` as plain strings — *"Block 2 (Button): \"Where it goes\" is required."* — each prefixed `Block N` so the editor attaches it to the right block instead of dumping a schema error. |
-| **Bug found by its own test** — test-send's unsubscribe link | ✅ | `applySamples()` ran before the inert-link substitution, so `[[UNSUBSCRIBE_URL]]` picked up the generic *sample* value, which was shaped like a real unsubscribe URL (`…/marketing-contacts/unsubscribe/preview`). Order reversed and the sample changed to something visibly inert. Caught by the assertion that a test send contains no unsubscribe-shaped URL. |
+| `CampaignBlockRenderer` (new) | 🔧 | 8 block types (heading / text / image / button / list / divider / spacer / footer) → table-based, inline-styled, Outlook-safe HTML. Two theme presets: `okelcor_dark` (reconstructed from the screenshots — `#2E6E75` page, `#2B2B2B` card) and `light`. The one `<style>` block carries mobile-only overrides; layout never depends on it, so a client that drops it still renders correctly. |
+| Marketer text can never become markup | 🔧 | All text is escaped, then a tiny inline syntax (`**bold**`, `*italic*`, `[label](url)`) is re-introduced as tags the renderer generates itself. `javascript:` URLs are rejected in links, buttons, images and footer social links — including the entity-encoded form (`javascript&#58;`). Theme overrides accept only hex colours, a constrained font stack and a clamped width, so nothing arbitrary reaches a `style` attribute. |
+| `CampaignMergeTags` (new) — personalization | 🔧 | `[[FIRST_NAME]] [[LAST_NAME]] [[FULL_NAME]] [[COMPANY]] [[EMAIL]] [[COUNTRY]] [[MARKET]] [[UNSUBSCRIBE_URL]]`, usable in block text, a button URL **or the subject line**, substituted per recipient in the send job. Every tag takes a fallback — `[[FIRST_NAME|there]]` — which matters because most of the imported list is an email address and nothing else, so a bare tag would send "Hi ," to a large part of it. A tag with no fallback resolves to empty, never to the raw token; an *unknown* tag is left visible so a typo shows up in the preview. |
+| `CampaignStarterTemplates` (new) — 3 built-in designs | 🔧 | `okelcor_classic` (the full Wix layout, landmark-for-landmark), `simple_announcement`, `product_offer`. Deliberately **code, not seeded rows**: always present, can't be deleted by accident, improve with a deploy, and no seeder-re-run gotcha (cf. `SiteSettingsSeeder` overwriting admin-entered values). |
+| `GET /admin/campaign-design` (new) | 🔧 | Block catalogue with per-field types/options/defaults, theme presets, merge tags, inline-format syntax — the editor UI is generated from this rather than a hardcoded frontend copy that can drift, same philosophy as auto-discovered markets. |
+| `GET /admin/campaign-templates/starters` (new) | 🔧 | So the editor never opens on a blank canvas. |
+| `campaign_templates` CRUD (new, migration #27) | 🔧 | The team's own saved/reusable designs. `created_by` is nullable + `nullOnDelete` — a shared design must outlive the admin who saved it. List endpoint stays light (`block_count`), detail carries the blocks. |
+| `POST /admin/bulk-emails/preview` (new) | 🔧 | Renders without creating anything: the real HTML, a sample-personalized copy for the preview iframe, the plain-text part, and `unknown_merge_tags` — catching a misspelled tag in the editor instead of after 1,700 emails went out with a blank in them. |
+| `POST /admin/bulk-emails/test-send` (new) | 🔧 | Sends one real `[TEST]`-prefixed email to an address the marketer picks. Creates no campaign, touches no contact, and its unsubscribe link is **inert** — a tester clicking through their own test cannot opt a real contact out. The most important control for a non-technical user. |
+| `POST /admin/bulk-emails` accepts `blocks` + `theme` | 🔧 | Rendered to HTML **at creation time** into the existing `body_html` column, so the queue, resume logic, per-recipient substitution and send job are all completely unchanged — a new way to author, not a new way to send. Blocks/theme stored alongside so a sent campaign can be reopened or duplicated; payload gains `designed`. |
+| Plain-text alternative now sent | 🔧 | `renderText()` → new `body_text` column → text part on the mailable. A bulk HTML-only message is markedly more likely to be filtered as spam, and some recipients read text only. Null for pasted-HTML campaigns, where there's nothing to derive it from. |
+| Validation phrased for a non-technical user | 🔧 | 422 `code: invalid_blocks` with `errors.blocks` as plain strings — *"Block 2 (Button): \"Where it goes\" is required."* — each prefixed `Block N` so the editor attaches it to the right block instead of dumping a schema error. |
+| **Bug found by its own test** — test-send's unsubscribe link | 🔧 | `applySamples()` ran before the inert-link substitution, so `[[UNSUBSCRIBE_URL]]` picked up the generic *sample* value, which was shaped like a real unsubscribe URL (`…/marketing-contacts/unsubscribe/preview`). Order reversed and the sample changed to something visibly inert. Caught by the assertion that a test send contains no unsubscribe-shaped URL. |
 | Deploy-order safe | ✅ | Proved: `test_campaigns_still_send_when_the_design_columns_are_missing` drops `blocks`/`theme`/`body_text` and asserts both pasted-HTML and blocks-designed campaigns still create and render. `BulkEmailService::designColumns()` writes those columns only when they exist — a campaign send is not something to break over a column that stores editor state. |
 | Migration proved against real SQL | ✅ | `test_campaign_design_migration_applies_and_is_idempotent` drops the table + columns, runs the real migration file, asserts all four land, and re-runs it to prove the guards. |
 | Backend tests (41 new) | ✅ | `CampaignBuilderTest` (24, no DB — rendering, escaping, URL rejection, theme clamping, merge tags, text part, starter integrity, and a `DOMDocument` check that the output is a single well-formed document with balanced tables) + 17 endpoint tests in `BulkEmailCampaignTest`. **All actually executed** — full suite **205 passed, 0 failed**, 206 skipped (pre-existing MySQL gate). |
@@ -1337,6 +1354,18 @@ composer install --no-dev
 27. `2026_07_30_000002_create_campaign_templates_table` (Session 72 — campaign builder; creates `campaign_templates` + adds `blocks`/`theme`/`body_text` to `bulk_email_campaigns`. All guarded, no data touched. Proved by `test_campaign_design_migration_applies_and_is_idempotent`; code is deploy-order safe — campaigns still render and send without these columns)
 
 Migrations 1–18 verified to apply cleanly on MySQL via CI (`migrate:fresh`) and `LeadFunnelAnalyticsTest`'s `RefreshDatabase`; #16–18 were additionally exercised against sqlite in `BulkEmailCampaignTest`. Applied to production via `artisan migrate --force` as part of the 2026-07-01 deploy (which also shipped Session 51's code-only Media Library fix — no new migrations there). #19–23 are guarded/additive (`Schema::hasColumn` checks) and ready to deploy via the same command — not yet confirmed run against production as of this note. #21 also widens `customer_communications.body` from TEXT to LONGTEXT via raw SQL (no doctrine/dbal in this project). See `DEPLOY_RUNBOOK.md` for the ordered deploy + rollback plan.
+
+**#26–27 (Session 72) are pushed but NOT yet applied to production.** Both are
+guarded/additive and each is exercised against real SQL by a test that runs the
+migration file itself (`test_migration_backfills_one_membership_per_existing_contact`,
+`test_campaign_design_migration_applies_and_is_idempotent`), including a re-run to
+prove idempotency. #26 is the only one of the two that touches existing rows — it
+backfills one `marketing_contact_markets` row per contact from its current
+`market`, changing no column on `marketing_contacts` itself. Take a backup first
+(`artisan backup:okelcor`), then `migrate --pretend` before `migrate --force`.
+Both features degrade to their previous behaviour while unapplied, so the code
+being live ahead of the migration is safe — verified by test, not assumed.
+`route:cache` must be rebuilt on that deploy: Session 72 adds 8 routes.
 
 ⚠️ Bulk email is deployed but **not yet safe to use for a real send**: `.env`
 still has `QUEUE_CONNECTION=sync`, so `SendBulkEmailCampaignJob` would run
