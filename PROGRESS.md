@@ -1151,6 +1151,45 @@ See `FRONTEND_NOTE_partner-sales-log.md`.
 
 ---
 
+## Campaign autosave — losing work on tab change (Session 74)
+
+> **Deploy status:** built and tested, **not yet deployed**. Migration #29
+> unapplied. Deploy-order safe in one direction only: the API tolerates the
+> table being absent for everything *except* the six new draft endpoints, which
+> 500 until it exists. The campaign editor itself is unaffected — sending has
+> never depended on drafts.
+
+A marketer reported that leaving the Mail Campaign tab for the Media Library
+and coming back lost everything she had composed, and asked for autosave.
+
+**The cause was not a UI bug.** `POST /admin/bulk-emails` creates a campaign
+**and immediately dispatches it** — it is a send button, not a save. There was
+no update endpoint and no draft state, so until a campaign was sent it existed
+only in browser memory. Nothing was ever going to survive a navigation.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `campaign_drafts` table (migration #29) | 🔧 | A **separate table**, not nullable columns on `bulk_email_campaigns`. Three reasons: a draft is legitimately incomplete mid-edit and would fail that table's NOT NULL `subject`/`body_html` (and relaxing those means a MySQL-only ALTER on live send history); half-finished editor state would pollute the campaign list, the `status` index and every count of "campaigns"; and drafts are disposable personal scratch, the opposite of `campaign_templates`, which are deliberate shared designs. |
+| Every content column nullable | 🔧 | Autosave fires while the marketer is still typing. A save that refuses incomplete work is a save that does not run exactly when it is most needed. |
+| Validation deliberately permissive | 🔧 | Blocks are **not** run through `CampaignBlockRenderer::validateBlocks()` on save — a half-built Button with no URL yet is precisely what autosave must store. Block rules stay enforced at preview and at send, where an error can actually be acted on. Only size caps apply (200 blocks, 512KB HTML), to stop a runaway autosave writing megabytes per keystroke. |
+| `GET /admin/campaign-drafts/latest` | 🔧 | What the editor calls on load. Returns `data: null` rather than 404 when there is nothing to restore, so a normal empty state is not an error the client has to special-case. |
+| An empty draft is never offered for restore | 🔧 | The editor opening and autosaving a blank canvas would otherwise produce a "restore your work" prompt that restores nothing — which trains the marketer to dismiss the prompt, including the times it mattered. |
+| Autosave is a **full replace**, not a merge | 🔧 | `PUT` with an absent key means "empty", not "leave alone". Under merge semantics, deleting the last block would be inexpressible and the blocks would reappear on restore. |
+| Drafts are private to their author | 🔧 | Every query scoped to the caller; another admin's id returns **404, not 403** — same rule as partner sales, same reason: a 403 confirms the id exists. A colleague's discard cannot destroy someone else's work. |
+| Capped at 20 per author, pruned on write | 🔧 | Autosave creates rows casually. Enforced on write rather than by a scheduled command, because nothing guarantees a scheduler runs on this host. |
+| **Bug found by its own test** — non-deterministic prune | ✅ | `pruneFor()` ordered by `updated_at` alone. MySQL timestamps have second resolution and autosave writes several rows per second, so "keep the newest 20" was non-deterministic — a prune could have discarded the draft being typed into. Tie-broken by `id` now. |
+| Draft retired when the campaign sends | 🔧 | `POST /admin/bulk-emails` accepts an optional `draft_id`. Deleted **only after** the campaign is safely queued — deleting earlier would destroy the marketer's only copy if any step above failed. Scoped to the caller, and silent on an unknown id: the campaign did send, and failing the request over draft bookkeeping would tell her the send failed when it did not. |
+| Backend tests (12 new) | ✅ | `CampaignDraftTest` — **12 passed / 90 assertions, actually executed**, including the real migration file applied and re-applied. Full suite: **259 passed, 0 failed**, 206 skipped (pre-existing gate), up from 247. |
+| Test-harness trap documented | ✅ | `auth:sanctum` memoises the resolved user on the guard instance, and that instance survives between requests inside one test method — so a second request made as a different admin was still served as the first. The privacy test passed for the wrong reason until `forgetGuards()` was added. Worth knowing for any future multi-admin test; `PartnerAuth` is immune because it resolves the token itself. |
+
+**The autosave is the safety net, not the actual fix.** The marketer left the
+tab to fetch an image from the Media Library, and `GET`/`POST /admin/media`
+have existed since Session 51 — so an in-place image picker needs no backend
+work at all and removes the trigger entirely. Flagged to frontend as the
+higher-value half; see `FRONTEND_NOTE_campaign-autosave.md`.
+
+---
+
 ## eBay Integration (Sessions 15–25)
 
 | Phase | Feature | Status |
@@ -1279,6 +1318,7 @@ See `FRONTEND_NOTE_partner-sales-log.md`.
 | `marketing_contact_markets` | Market membership per marketing contact (many-to-many; `marketing_contacts.market` remains the primary market) |
 | `bulk_email_campaigns` | Bulk email sends (subject/body/filters/progress; + `blocks`/`theme`/`body_text` from the campaign builder) 🔧 |
 | `campaign_templates` | Saved reusable campaign designs (blocks + theme). Built-in starters are code, not rows |
+| `campaign_drafts` | Autosaved campaign editor state — disposable, private to its author, deleted when the campaign sends 🔧 |
 | `bulk_email_campaign_recipients` | Per-recipient send status per campaign 🔧 |
 | `admin_security_events` | Security audit events |
 | `password_reset_tokens` | Customer password reset + invite tokens |
@@ -1446,6 +1486,7 @@ composer install --no-dev
 26. `2026_07_30_000001_create_marketing_contact_markets_table` (Session 72 — multi-market marketing contacts; guarded/additive + idempotent backfill from `marketing_contacts.market`. Backfill proved against real SQL by `BulkEmailCampaignTest::test_migration_backfills_one_membership_per_existing_contact`; code is deploy-order safe and falls back to the single column until this runs)
 27. `2026_07_30_000002_create_campaign_templates_table` (Session 72 — campaign builder; creates `campaign_templates` + adds `blocks`/`theme`/`body_text` to `bulk_email_campaigns`. All guarded, no data touched. Proved by `test_campaign_design_migration_applies_and_is_idempotent`; code is deploy-order safe — campaigns still render and send without these columns)
 28. `2026_08_07_000001_create_partner_sales_tables` (Session 73 — Partner Sales Log; creates `partner_organisations`, `partner_users`, `partner_sales`, `partner_sale_audits`. All four are NEW: nothing existing is read, altered or backfilled, so this cannot affect a live row. Every table guarded with `Schema::hasTable`. Proved by `PartnerSalesLogTest::test_the_migration_applies_against_real_sql_and_is_idempotent`, which runs the migration file itself and re-runs it. **Unlike #24–27 the code is NOT deploy-order safe, deliberately** — there is no previous behaviour to degrade to, so the partner endpoints 500 until this runs rather than accepting entries into nowhere; the frontend keeps its mock transport on until it is confirmed applied)
+29. `2026_08_07_000002_create_campaign_drafts_table` (Session 74 — campaign autosave; creates `campaign_drafts`. One new table, nothing existing read, altered or backfilled. Guarded with `Schema::hasTable`. Proved by `CampaignDraftTest::test_the_migration_applies_against_real_sql_and_is_idempotent`, which runs the migration file itself and re-runs it. The campaign editor's existing send path does not depend on this table, so only the six new draft endpoints are affected while it is unapplied)
 
 Migrations 1–18 verified to apply cleanly on MySQL via CI (`migrate:fresh`) and `LeadFunnelAnalyticsTest`'s `RefreshDatabase`; #16–18 were additionally exercised against sqlite in `BulkEmailCampaignTest`. Applied to production via `artisan migrate --force` as part of the 2026-07-01 deploy (which also shipped Session 51's code-only Media Library fix — no new migrations there). #19–23 are guarded/additive (`Schema::hasColumn` checks) and ready to deploy via the same command — not yet confirmed run against production as of this note. #21 also widens `customer_communications.body` from TEXT to LONGTEXT via raw SQL (no doctrine/dbal in this project). See `DEPLOY_RUNBOOK.md` for the ordered deploy + rollback plan.
 

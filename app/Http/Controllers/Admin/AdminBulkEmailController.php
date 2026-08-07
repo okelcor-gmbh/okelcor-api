@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Mail\BulkCampaignEmail;
 use App\Models\BulkEmailCampaign;
+use App\Models\CampaignDraft;
 use App\Services\ArticleHtmlSanitizer;
 use App\Services\BulkEmailService;
 use App\Services\CampaignBlockRenderer;
@@ -205,6 +206,11 @@ class AdminBulkEmailController extends Controller
             'filters.country' => ['nullable', 'string', 'max:100'],
             'filters.status'  => ['nullable', 'in:subscribed,unknown'],
             'filters.search'  => ['nullable', 'string', 'max:150'],
+
+            // Optional. When the campaign was composed from an autosaved
+            // draft, sending it retires that draft — see the end of this
+            // method. Omitting it changes nothing.
+            'draft_id'        => ['nullable', 'integer'],
         ]);
 
         $filters = $request->input('filters', []);
@@ -244,6 +250,20 @@ class AdminBulkEmailController extends Controller
         );
 
         $service->dispatch($campaign);
+
+        // Retire the draft only once the campaign is safely queued. Deleting
+        // it earlier would destroy the marketer's work if any step above
+        // failed — the draft is the only copy until this point.
+        //
+        // Scoped to the caller so one admin cannot delete another's draft by
+        // guessing an id, and silent when the id is unknown: the campaign did
+        // send, and failing the request over draft bookkeeping would tell the
+        // marketer their send failed when it did not.
+        if ($request->filled('draft_id')) {
+            CampaignDraft::where('admin_user_id', $request->user()->id)
+                ->where('id', $request->integer('draft_id'))
+                ->delete();
+        }
 
         return response()->json([
             'data'    => $this->formatCampaign($campaign->fresh()),

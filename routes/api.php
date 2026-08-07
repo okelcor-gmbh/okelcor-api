@@ -32,6 +32,7 @@ use App\Http\Controllers\Admin\AdminCampaignTemplateController;
 use App\Http\Controllers\Admin\AdminContactController;
 use App\Http\Controllers\Admin\AdminHeroSlideController;
 use App\Http\Controllers\Admin\AdminMarketingContactController;
+use App\Http\Controllers\Admin\AdminCampaignDraftController;
 use App\Http\Controllers\Admin\AdminPartnerController;
 use App\Http\Controllers\Admin\AdminPartnerSaleController;
 use App\Http\Controllers\Partner\PartnerAuthController;
@@ -774,6 +775,17 @@ Route::prefix('v1')->group(function () {
             Route::post('bulk-emails/test-send', [AdminBulkEmailController::class, 'testSend']);
             Route::get('bulk-emails/{id}', [AdminBulkEmailController::class, 'show']);
             Route::post('bulk-emails', [AdminBulkEmailController::class, 'store']);
+
+            // Campaign autosave. Separate from campaign-templates: a draft is
+            // disposable personal work-in-progress, a template is a deliberate
+            // shared design. `latest` is declared before `{id}` so it is not
+            // swallowed by it.
+            Route::get('campaign-drafts', [AdminCampaignDraftController::class, 'index']);
+            Route::get('campaign-drafts/latest', [AdminCampaignDraftController::class, 'latest']);
+            Route::get('campaign-drafts/{id}', [AdminCampaignDraftController::class, 'show'])->whereNumber('id');
+            Route::post('campaign-drafts', [AdminCampaignDraftController::class, 'store']);
+            Route::put('campaign-drafts/{id}', [AdminCampaignDraftController::class, 'update'])->whereNumber('id');
+            Route::delete('campaign-drafts/{id}', [AdminCampaignDraftController::class, 'destroy'])->whereNumber('id');
 
             // Campaign design — block catalogue, built-in starting points, and
             // the team's own saved designs.
