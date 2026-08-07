@@ -1,8 +1,10 @@
 # Backend — Partner Sales Log
 
 **From:** Backend · **To:** Frontend
-**Date:** 2026-08-07 · rev 2
-**Status:** Built, tested. **Not yet deployed** — migration #28 unapplied in production.
+**Date:** 2026-08-07 · rev 3
+**Status: ✅ LIVE.** Migration #28 applied to production 2026-08-07 (`d2f1896`).
+**You can flip `NEXT_PUBLIC_PARTNER_API_MOCK=false`** — this is the explicit
+confirmation you asked for.
 
 > **Rev 2:** `must_change_pin` is now enforced server-side (§6) — rev 1 wrongly claimed
 > your client handled that flow and that a gate would break you. Route count is now 22
@@ -300,13 +302,24 @@ cleanly.
 
 ## 11. Deploy
 
-Migration **#28** (`2026_08_07_000001_create_partner_sales_tables`) creates four new
-tables and **touches no existing row** — nothing is read, altered or backfilled.
+**Applied 2026-08-07.** Migration #28 ran in 176ms (batch 98) after a database backup
+and a `migrate --pretend` review; `route:cache` rebuilt for the 22 new routes. Four new
+tables, no existing row touched.
 
-Unlike Sessions 71/72 this is **not deploy-order safe in the frontend's favour**, and
-deliberately so: there is no previous behaviour to fall back to. Until the migration runs,
-the partner endpoints 500 rather than degrading, because a sales-log API that accepts
-entries into nowhere is worse than one that is visibly not live yet. **Keep
-`NEXT_PUBLIC_PARTNER_API_MOCK=true` until the migration is confirmed applied.**
+Verified live, from outside:
 
-`route:cache` must be rebuilt — 22 new routes.
+```
+POST /api/v1/partner/auth/login   → 401 {"code":"invalid_credentials"}   x-ratelimit-limit: 5
+GET  /api/v1/partner/{me,sizes,sales,summary}     → 401
+GET  /api/v1/admin/{partners,partner-sales}       → 401
+```
+
+401 rather than 404 on every one of them means routing and the route cache are correct.
+
+**One gotcha if you smoke-test this host yourself:** a bare `POST` with no body and no
+`Content-Type` comes back as a **403 HTML page from LiteSpeed/Cloudflare**, not from
+Laravel — the WAF rejects it before PHP is reached. It looks alarming and means nothing.
+Send `-H "Content-Type: application/json"` and a real body.
+
+The pre-deploy caveat about the API not degrading gracefully is now moot; that window is
+closed.
