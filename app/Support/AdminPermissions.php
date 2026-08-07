@@ -96,6 +96,18 @@ class AdminPermissions
         'customers.import'        => ['super_admin'],
 
         // ── Supplier intelligence ─────────────────────────────────────────
+        // ── Partner sales log ─────────────────────────────────────────────
+        // Granted to roles that actually EXIST in the admin_users.role ENUM.
+        // `sales_manager` is the natural fit and is documented above, but the
+        // column cannot store it (Known Gaps, High) — granting it here would
+        // create a permission nobody could ever hold. Add it to this list in
+        // the same change that widens the ENUM, not before.
+        'partners.view'           => ['super_admin', 'admin', 'order_manager'],
+        'partners.manage'         => ['super_admin', 'admin'],
+        'partner_sales.view'      => ['super_admin', 'admin', 'order_manager'],
+        'partner_sales.verify'    => ['super_admin', 'admin', 'order_manager'],
+        'partner_sales.export'    => ['super_admin', 'admin', 'order_manager'],
+
         'supplier.view'           => ['super_admin', 'admin', 'order_manager'],
 
         // ── Carrier shipment tracking (GLS / DHL / ocean freight) ─────────

@@ -41,6 +41,8 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'admin.role'       => \App\Http\Middleware\CheckAdminRole::class,
             'auth.customer'    => \App\Http\Middleware\CustomerAuth::class,
+            'auth.partner'     => \App\Http\Middleware\PartnerAuth::class,
+            'partner.pin'      => \App\Http\Middleware\EnsurePartnerPinChanged::class,
             'auth.admin'       => \App\Http\Middleware\EnsureAdminToken::class,
             'ensure.admin.2fa' => \App\Http\Middleware\EnsureAdminTwoFactorEnabled::class,
             'permission'       => \App\Http\Middleware\CheckPermission::class,

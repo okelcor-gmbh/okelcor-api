@@ -35,6 +35,33 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinutes(5, 10)->by($request->ip());
         });
 
+        // ── Partner app auth ──────────────────────────────────────────────────
+
+        // Partner login: 5 per minute per IP+phone, AND 20 per minute per IP.
+        //
+        // Both limits are needed and neither is redundant. Keyed on phone
+        // alone, an attacker with a pool of IPs still gets unlimited attempts
+        // against one account. Keyed on IP alone, an attacker who rotates the
+        // phone number gets unlimited attempts across many accounts — which is
+        // the realistic attack against a 6-digit numeric secret. The per-phone
+        // lockout in PartnerAuthController sits behind both as the account-level
+        // backstop, since a distributed attacker defeats any IP-based limit.
+        RateLimiter::for('partner-login', function (Request $request) {
+            $phone = preg_replace('/\D+/', '', (string) $request->input('phone', ''));
+
+            return [
+                Limit::perMinute(5)->by($request->ip() . '|' . $phone),
+                Limit::perMinute(20)->by('partner-login-ip|' . $request->ip()),
+            ];
+        });
+
+        // Partner sale writes: generous, because a returning offline device
+        // legitimately flushes a whole backlog at once. Per authenticated user,
+        // falling back to IP for the unauthenticated case.
+        RateLimiter::for('partner-sync', function (Request $request) {
+            return Limit::perMinute(120)->by($request->user()?->id ?? $request->ip());
+        });
+
         // ── Customer auth ─────────────────────────────────────────────────────
 
         // Customer register / login: 10 per IP per minute

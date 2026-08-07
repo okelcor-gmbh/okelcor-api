@@ -32,6 +32,10 @@ use App\Http\Controllers\Admin\AdminCampaignTemplateController;
 use App\Http\Controllers\Admin\AdminContactController;
 use App\Http\Controllers\Admin\AdminHeroSlideController;
 use App\Http\Controllers\Admin\AdminMarketingContactController;
+use App\Http\Controllers\Admin\AdminPartnerController;
+use App\Http\Controllers\Admin\AdminPartnerSaleController;
+use App\Http\Controllers\Partner\PartnerAuthController;
+use App\Http\Controllers\Partner\PartnerSaleController;
 use App\Http\Controllers\Admin\AdminNewsletterController;
 use App\Http\Controllers\Admin\AdminOrderController;
 use App\Http\Controllers\Admin\AdminOrderItemController;
@@ -925,6 +929,74 @@ Route::prefix('v1')->group(function () {
                 Route::post('ebay/sync-all', [EbayListingController::class, 'syncAll']);
                 Route::post('ebay/orders/sync', [EbayOrderController::class, 'sync']);
                 Route::post('ebay/orders/{ebayOrderId}/sync', [EbayOrderController::class, 'syncOne']);
+            });
+        });
+
+        // ---------------------------------------------------------------------
+        // Partner Sales Log — Okelcor-side review and the books export
+        // ---------------------------------------------------------------------
+
+        // Partner organisations and their users
+        Route::middleware('permission:partners.view')->group(function () {
+            Route::get('partners', [AdminPartnerController::class, 'index']);
+            Route::get('partners/{id}', [AdminPartnerController::class, 'show'])->whereNumber('id');
+        });
+
+        Route::middleware('permission:partners.manage')->group(function () {
+            Route::post('partners', [AdminPartnerController::class, 'store']);
+            Route::patch('partners/{id}', [AdminPartnerController::class, 'update'])->whereNumber('id');
+            Route::post('partners/{id}/users', [AdminPartnerController::class, 'storeUser'])->whereNumber('id');
+            Route::patch('partner-users/{id}', [AdminPartnerController::class, 'updateUser'])->whereNumber('id');
+        });
+
+        // Sales feed. `export` and `totals` are declared BEFORE the {id} route
+        // so they are not swallowed by it.
+        Route::middleware('permission:partner_sales.export')->group(function () {
+            Route::get('partner-sales/export', [AdminPartnerSaleController::class, 'export']);
+        });
+
+        Route::middleware('permission:partner_sales.view')->group(function () {
+            Route::get('partner-sales', [AdminPartnerSaleController::class, 'index']);
+            Route::get('partner-sales/totals', [AdminPartnerSaleController::class, 'totals']);
+            Route::get('partner-sales/{id}', [AdminPartnerSaleController::class, 'show'])->whereNumber('id');
+        });
+
+        Route::middleware('permission:partner_sales.verify')->group(function () {
+            Route::post('partner-sales/{id}/verify', [AdminPartnerSaleController::class, 'verify'])->whereNumber('id');
+            Route::post('partner-sales/{id}/dispute', [AdminPartnerSaleController::class, 'dispute'])->whereNumber('id');
+        });
+    });
+
+    // -------------------------------------------------------------------------
+    // Partner Sales Log — the partner app (partners.okelcor.com)
+    //
+    // A third authenticated user class alongside customer and admin, isolated
+    // by Sanctum token type in PartnerAuth.
+    // -------------------------------------------------------------------------
+    Route::prefix('partner')->group(function () {
+        // Login — rate limited per IP+phone AND per IP; see AppServiceProvider.
+        Route::middleware('throttle:partner-login')->group(function () {
+            Route::post('auth/login', [PartnerAuthController::class, 'login']);
+        });
+
+        // `partner.pin` blocks every route below except me / change-pin /
+        // logout until an admin-set starting PIN has been replaced. Enforced
+        // server-side because a client-side gate is a courtesy, not a control.
+        Route::middleware(['auth.partner', 'partner.pin'])->group(function () {
+            Route::get('me', [PartnerAuthController::class, 'me']);
+            Route::post('auth/logout', [PartnerAuthController::class, 'logout']);
+            Route::post('auth/change-pin', [PartnerAuthController::class, 'changePin']);
+
+            Route::get('sales', [PartnerSaleController::class, 'index']);
+            Route::get('summary', [PartnerSaleController::class, 'summary']);
+            Route::get('sizes', [PartnerSaleController::class, 'sizes']);
+
+            // Writes are throttled generously — a device coming back online
+            // legitimately flushes a whole backlog at once.
+            Route::middleware('throttle:partner-sync')->group(function () {
+                Route::post('sales', [PartnerSaleController::class, 'store']);
+                Route::patch('sales/{id}', [PartnerSaleController::class, 'update'])->whereNumber('id');
+                Route::delete('sales/{id}', [PartnerSaleController::class, 'destroy'])->whereNumber('id');
             });
         });
     });

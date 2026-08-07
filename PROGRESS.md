@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-07-30 | Branch: `main` | Latest commit: `faa31bd`
+Last updated: 2026-08-07 | Branch: `main` | Latest commit: `faa31bd` (Session 73 uncommitted)
 
 ---
 
@@ -1072,6 +1072,74 @@ See `FRONTEND_NOTE_campaign-builder.md`.
 
 ---
 
+## Partner Sales Log — Okelcor Partner (Session 73)
+
+> **Deploy status:** built and tested, **not yet deployed**. Migration #28 is
+> unapplied in production. Unlike Sessions 71/72 this is **deliberately not
+> deploy-order safe**: there is no previous behaviour to fall back to, so the
+> partner endpoints 500 until the tables exist rather than accepting entries
+> into nowhere. Frontend keeps `NEXT_PUBLIC_PARTNER_API_MOCK=true` until the
+> migration is confirmed applied.
+
+Partners selling Okelcor product in other markets (Ghana first) report what
+they sold on paper today, and reviewing those reports takes real time. The
+brief — *"it's always hard for me to get data on book-related stuff"* — is
+about **bookkeeping**, so the deliverable is a clean exportable set of numbers
+at the Okelcor end; the partner web app is only the intake. Frontend built the
+app against a mock and sent a proposal; this is the backend for it, built to a
+contract settled over two rounds of review (see the exchange summarised in
+`FRONTEND_NOTE_partner-sales-log.md`).
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `partner_organisations` + `partner_users` (migration #28) | 🔧 | A partner is an **organisation**, not a person — a distributor with a shop and staff is the likely shape in these markets. Sales are owned by the org; `entered_by_user_id` records who typed it (`nullOnDelete` — a sale outlives the person who left). Decided up front precisely because collapsing an org model later is trivial while splitting a single-user model later means rewriting every row and every report. |
+| `partner_sales` + `partner_sale_audits` | 🔧 | The brief's own sentence *"we sold tyre 315-70 rim 22.5, X pieces, at this amount"* is the entire data model. Soft-deleted: a sale that may already have been exported into the books must not vanish because someone tapped delete on a phone. Audit trail is append-only and records the **editor** separately from `entered_by_user_id`, since a colleague in the same org can edit inside the window. |
+| **The idempotency contract** | 🔧 | `unique(partner_org_id, client_generated_id)` — scoped to the org, not the user, so a re-authenticated colleague on a shared device can't create a second copy. POST with an existing id: update inside the window, `200` + existing row outside it, **never 409**. A 409 tells the device its send failed, so the outbox retries forever or drops the entry. |
+| **Collision found by frontend, in my own rule** | ✅ | My review proposed "reject a replay carrying a different payload under the same id". Their client **reuses `client_generated_id` for edits**, so that rule would have silently broken editing — the partner sees "Sent" while Okelcor holds the old figure, which is the exact corruption the mechanism exists to prevent, arriving through the other door. Rule withdrawn; same id + different payload is an **update**. |
+| Stale-revision guard (optional `client_revision`) | 🔧 | The agreed table is last-write-wins within the window, which leaves an in-flight retry of v1 landing after v2 free to revert the correction. An optional monotonic counter closes it: a revision that is not newer is refused. Clock-free — those are cheap shared Android handsets and their clocks drift. **Omit the field and behaviour is exactly the agreed table**, so this is additive, not a contract change. |
+| Deleted entries not resurrected | 🔧 | A device offline when an entry was deleted re-pushes it on the next flush. Returns `unchanged_deleted` rather than recreating the row — otherwise the sale silently comes back and nobody can tell. |
+| Cross-partner access → **404, not 403** | 🔧 | On `PATCH`/`DELETE`. A 403 would confirm the id exists, letting one partner probe for another's entries. On POST the case cannot arise at all, since uniqueness is org-scoped and every lookup is org-scoped. |
+| **Books export streams real CSV** | 🔧 | The single most valuable catch of the review, and it was found in *existing* code: `AdminCustomerController::export()` returns **paginated JSON at 200 rows/page**, which is not an export. Had partner-sales copied that pattern, the one feature the brief was actually about would have silently failed. Follows `OrderImportController::export()` instead — `streamDownload` + `fputcsv`, chunked at 200 so memory stays flat on a year-end pull. |
+| **No FX conversion anywhere** | 🔧 | `CurrencyConversionService` uses Frankfurter, which is ECB-sourced and **does not publish NGN, GHS, KES or AED** — exactly the partner markets. So no automated conversion path exists, and inventing one in a bookkeeping tool would be worse than none. Amount + currency + `sold_at` travel together in every payload and CSV row; totals group **by currency and are never combined**, with a `meta.note` saying so. |
+| Currency is an allowlist, not any 3 letters | 🔧 | A typo'd `NGM` would sit outside every total in the export and, because nothing converts, nothing else would ever catch it. |
+| `total_amount` computed server-side | 🔧 | Never accepted from the client, so a stored total cannot disagree with its own line. Re-derived on a PATCH that changes only one of quantity/unit price. |
+| PIN hardening — frontend conceded outright | 🔧 | 4 digits on a public endpoint against a shared-device threat model *they had themselves named*. Now 6–10 digits, rejecting runs/repeats/repeated blocks; `throttle:partner-login` at 5/min per IP+phone **and** 20/min per IP (either alone fails — per-phone lets a botnet through, per-IP lets an attacker rotate phones); account lockout behind both, since a distributed attacker defeats any IP limit; a locked account rejected on its **existing token** too, not just at login. Unknown-phone and wrong-PIN return byte-identical 401s so the endpoint can't enumerate partners. |
+| **Correction from frontend** — `must_change_pin` now enforced server-side | 🔧 | I shipped it as an advisory flag on the stated grounds that "the client already handles the flow and a hard gate would break it" — an assertion about code I had never seen, and it was false: there was no change-PIN screen at all. Left that way, every admin-created partner would have kept a PIN their admin chose *and knows*, indefinitely, on devices both sides agreed may be shared — and it would have shipped silently because neither side would have looked. New `EnsurePartnerPinChanged` middleware returns **428** on every partner route except `me` / `change-pin` / `logout`, mirroring `EnsureAdminTwoFactorEnabled` (same status, same allowed-path shape) rather than inventing a second convention. An admin PIN reset **re-arms** the gate; a rejected weak-PIN change does not clear it. |
+| Security events → `admin_security_events`, not `security_events` | 🔧 | `security_events.type` is a MySQL **ENUM** (widening it needs a MySQL-only migration — the same trap that silently corrupted audit rows here before) and its `customer_id` is an FK to `customers`, which a partner is not. `admin_security_events.type` is a plain string with a nullable `admin_id` and a `metadata` JSON column, so partner events needed **no migration at all**. |
+| Edit window on the **server clock** | 🔧 | Never `sold_at`, which is partner-declared and backdatable — keying off it would let anyone reopen a locked entry by editing the date. Consequence accepted and documented: an entry authored offline Monday and synced Wednesday gets a Wednesday window. Flip side is the point of it — a backlog entry backdated a year is still editable for 24h after arrival. |
+| `PartnerAuth` middleware, not a guard | 🔧 | Mirrors `CustomerAuth`. `config/auth.php` has only `web` (unused) and `admin`; customer auth has always been a middleware here, so a third of the same shape keeps one pattern. Token-type isolation (`tokenable_type !== PartnerUser::class`) lets three user classes share one token table safely. |
+| Market derived from `partner_organisations.country` | 🔧 | Not stored. `customers.market_region` and `marketing_contacts.market` are already two market vocabularies; a third stored one would be a third thing to keep in sync. Auto-discovered from distinct partner countries, Session 72 style. |
+| Verification granted to `admin` + `order_manager` only | 🔧 | `sales_manager` is the natural fit and is documented throughout `AdminPermissions.php`, but `admin_users.role` is an ENUM that **cannot store it** (Known Gaps, High) — granting it would create a permission nobody could hold. Left out with a comment saying to add it in the same change that widens the ENUM. |
+| Catalogue matching silent and conservative | 🔧 | `product_id` linked only on an unambiguous single match; two matches → null. A wrong link attributes a sale to the wrong SKU in every report, which is worse than no link. Free-text size stays the source of truth. |
+| Route closures avoided | ✅ | verify/dispute are real controller methods — a route closure cannot be serialised by `artisan route:cache`, which the production deploy runs on every release. Verified by running `route:cache` against the new routes. |
+| **Bug found by its own test** — identical replays reported as edits | ✅ | The change-detection diff compared values as strings, so a client sending `250.00` (stringifies to `"250"`) against a stored `decimal:2` (`"250.00"`) registered a change on **every identical replay** — a spurious audit row and an `updated` response per retry, on the exact path a flaky connection hits most. Now compares numerically. |
+| Backend tests (42 new) | ✅ | `PartnerSalesLogTest` — **42 passed / 192 assertions, actually executed**. Uses the minimal-schema sqlite harness (`BulkEmailCampaignTest` pattern) so it runs in CI rather than sitting behind the MySQL gate. Includes a test running the **real migration file** and re-running it for idempotency, and one proving the unique index — not just the controller check — stops a concurrent duplicate. Full suite: **247 passed, 0 failed**, 206 skipped (pre-existing gate), up from 205. |
+| CORS — frontend overruled me, correctly | ✅ | I flagged `partners.okelcor.com` as a day-one blocker. It isn't: every request goes through a Next server-side proxy and server-to-server fetch is not subject to CORS. Nothing changed. Flagged back the one path where a browser plausibly *would* hit Laravel directly — the token-protected CSV export, which cannot be triggered by a plain `<a href>`. |
+
+**Deliberately not built:** consignment / stock-on-hand (deferred until the
+business answers; the sale table is column-identical either way, so it is
+purely additive), and a batch upload endpoint (the outbox posts individually
+and that path is genuinely idempotent — a batch endpoint would be a second code
+path to keep correct for a round-trip saving).
+
+**Frontend-side gap, recorded for coordination:** their client is currently
+write-only — it reads from its own IndexedDB and never pulls — so a partner
+today sees only what *that device* created, not a colleague's entries. The
+shared-organisation book is correct on the API; pull-and-merge is the next
+piece of frontend work. Not a contract problem, but it means the org model
+isn't visible end-to-end yet.
+
+**Still open:** `sales_manager` cannot verify until the `admin_users.role` ENUM
+is widened; and **no copy of the Ghana paper report has been seen**, so the
+field list is an informed reading of the brief rather than a match to what
+partners fill today. The schema is additive, but discovering the wrong shape
+after the pilot is expensive — getting sight of one real report remains the
+cheapest way to de-risk it.
+
+See `FRONTEND_NOTE_partner-sales-log.md`.
+
+---
+
 ## eBay Integration (Sessions 15–25)
 
 | Phase | Feature | Status |
@@ -1208,6 +1276,10 @@ See `FRONTEND_NOTE_campaign-builder.md`.
 | `admin_insights` | AI-generated dashboard insights, one row per insight per generation batch |
 | `admin_push_tokens` | Expo push tokens for the admin/ops mobile app, one row per device |
 | `live_chat_sessions` / `live_chat_messages` | Custom live-chat system — built, dormant (Crisp is the real product; see Session 66/67) |
+| `partner_organisations` | Partner distributors selling Okelcor product in other markets. Market is derived from `country`, not stored 🔧 |
+| `partner_users` | People at a partner who log sales — phone + PIN auth, Sanctum token 🔧 |
+| `partner_sales` | Reported sale lines. Soft-deleted; `unique(partner_org_id, client_generated_id)` is the offline idempotency key 🔧 |
+| `partner_sale_audits` | Append-only trail of every change to a partner sale 🔧 |
 
 ---
 
@@ -1307,6 +1379,16 @@ ADMIN_SESSION_TTL_MINUTES=300
 # Backup
 BACKUP_ENABLED=true
 BACKUP_RETENTION_DAYS=14
+
+# Partner Sales Log (Session 73) — ALL OPTIONAL, sensible defaults in
+# config/partner.php. Listed so the tunables are discoverable rather than
+# needing a code read. Accepted currencies and the PIN policy live in that
+# config file, not in .env.
+PARTNER_EDIT_WINDOW_HOURS=24     # how long a partner may edit their own entry
+PARTNER_MAX_BACKDATE_DAYS=730    # how far back a sale may be dated (paper backlog)
+PARTNER_TOKEN_TTL_DAYS=90        # long by design — the app must work offline,
+                                 # and a partner who can't reach the network
+                                 # also can't re-authenticate
 ```
 
 ---
@@ -1352,6 +1434,7 @@ composer install --no-dev
 25. `2026_07_29_000002_add_estimated_dispatch_days_setting` (Session 71 — inserts one blank `site_settings` row via `insertOrIgnore`, idempotent)
 26. `2026_07_30_000001_create_marketing_contact_markets_table` (Session 72 — multi-market marketing contacts; guarded/additive + idempotent backfill from `marketing_contacts.market`. Backfill proved against real SQL by `BulkEmailCampaignTest::test_migration_backfills_one_membership_per_existing_contact`; code is deploy-order safe and falls back to the single column until this runs)
 27. `2026_07_30_000002_create_campaign_templates_table` (Session 72 — campaign builder; creates `campaign_templates` + adds `blocks`/`theme`/`body_text` to `bulk_email_campaigns`. All guarded, no data touched. Proved by `test_campaign_design_migration_applies_and_is_idempotent`; code is deploy-order safe — campaigns still render and send without these columns)
+28. `2026_08_07_000001_create_partner_sales_tables` (Session 73 — Partner Sales Log; creates `partner_organisations`, `partner_users`, `partner_sales`, `partner_sale_audits`. All four are NEW: nothing existing is read, altered or backfilled, so this cannot affect a live row. Every table guarded with `Schema::hasTable`. Proved by `PartnerSalesLogTest::test_the_migration_applies_against_real_sql_and_is_idempotent`, which runs the migration file itself and re-runs it. **Unlike #24–27 the code is NOT deploy-order safe, deliberately** — there is no previous behaviour to degrade to, so the partner endpoints 500 until this runs rather than accepting entries into nowhere; the frontend keeps its mock transport on until it is confirmed applied)
 
 Migrations 1–18 verified to apply cleanly on MySQL via CI (`migrate:fresh`) and `LeadFunnelAnalyticsTest`'s `RefreshDatabase`; #16–18 were additionally exercised against sqlite in `BulkEmailCampaignTest`. Applied to production via `artisan migrate --force` as part of the 2026-07-01 deploy (which also shipped Session 51's code-only Media Library fix — no new migrations there). #19–23 are guarded/additive (`Schema::hasColumn` checks) and ready to deploy via the same command — not yet confirmed run against production as of this note. #21 also widens `customer_communications.body` from TEXT to LONGTEXT via raw SQL (no doctrine/dbal in this project). See `DEPLOY_RUNBOOK.md` for the ordered deploy + rollback plan.
 
@@ -1366,6 +1449,12 @@ backfills one `marketing_contact_markets` row per contact from its current
 Both features degrade to their previous behaviour while unapplied, so the code
 being live ahead of the migration is safe — verified by test, not assumed.
 `route:cache` must be rebuilt on that deploy: Session 72 adds 8 routes.
+
+**#28 (Session 73) is also not yet applied.** It creates four new tables and
+touches nothing existing, so it is the safest of the three to run — but it is
+the one migration here whose feature does **not** degrade gracefully without it,
+by design. Run it before the partner app is pointed at the real API.
+`route:cache` must be rebuilt: Session 73 adds 22 routes.
 
 ⚠️ Bulk email is deployed but **not yet safe to use for a real send**: `.env`
 still has `QUEUE_CONNECTION=sync`, so `SendBulkEmailCampaignJob` would run
