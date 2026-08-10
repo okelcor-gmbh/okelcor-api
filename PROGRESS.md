@@ -1190,6 +1190,43 @@ higher-value half; see `FRONTEND_NOTE_campaign-autosave.md`.
 
 ---
 
+## Order totals doubling — €15,000 order shown as €30,000 (Session 75)
+
+> **Deploy status:** built and tested, **not yet deployed**. **No migration.**
+> Code-only, deploy-order safe in both directions.
+
+An order manager reported an order showing one line — 2,000 tyres at €7.50,
+subtotal €15,000 — under a total of **€30,000**. Exactly double.
+
+**Real backend bug, and money-facing.** The total is what goes on the proforma
+and the commercial invoice, so an order in this state overcharges the customer
+by 100% on paper.
+
+**Cause.** An order recorded without line items (`POST /admin/orders` with a
+hand-typed `total` and no `items`) stores that figure in **both** `subtotal`
+and `total` as a stand-in for line items that do not exist yet. `Add Item` then
+applied the new line as a **delta on top of the stored subtotal** — so the
+first item added to such an order counted the same money twice. The
+give-away in the report is the `—` in the SKU column: `POST /orders` requires a
+SKU on every item, `Add Item` does not, so that line was added after the fact
+to an order that began as a lump sum.
+
+| Change | Status | Notes |
+|--------|--------|-------|
+| `Order::recalculateTotalsFromItems()` | 🔧 | **Items are the source of truth**, not a delta on whatever subtotal happened to be stored. Re-derives `subtotal` from `SUM(line_total)` and carries the change into `total`. |
+| Non-line charges preserved, not recomputed | 🔧 | Delivery, tax, discount and whatever an imported order folded in are carried across as `total − subtotal`, rather than rebuilt from columns — that relationship is **not** consistent across the four order sources (website, eBay, Wix, manual). A €150 delivery survives an item price correction instead of being absorbed. |
+| No-op for an order with no items | 🔧 | There the hand-typed total is the only record of what the order is worth; recomputing would zero it. This is also why `store()` must keep writing `subtotal = total` for itemless orders — see the comment there. Setting it to `0` would make the entire order value read as "extras" and reintroduce the double count from the other side. |
+| Same fix in the revision-approval path | 🔧 | `AdminOrderFinancialsController::approveRevision` had the identical delta logic for locked orders and the identical bug. Totals now re-derived once after all item changes. Only when items actually changed — a delivery-fee-only revision must not quietly restate the subtotal of an imported order whose items were never itemised in full. |
+| `php artisan orders:repair-totals` | 🔧 | Finds every order whose stored subtotal disagrees with its items and reports it. Writes only with `--fix`. **Skips orders with locked financials** unless `--include-locked`: a commercial document has already been issued carrying the wrong figure, and correcting the order does not supersede it — the customer may be holding an invoice for the old amount. Every correction writes an `OrderLog` (`totals_repaired`). |
+| Backend tests (10 new) | ✅ | `OrderTotalFromItemsTest` — **10 passed / 36 assertions, actually executed** on the minimal-schema sqlite harness rather than behind the MySQL gate that skips `AdminOrderItemEditingTest`. Verified to fail against the old logic first, reproducing exactly `30000.0`. Full suite: **269 passed, 0 failed**, 206 skipped. |
+
+**The audit log was wrong too, in the same direction.** `item_added` recorded
+`order total: X → Y` from the same bad arithmetic, so anyone reconciling from
+the log would have been sent after a €30,000 order that never existed. Now
+logs the figure actually written.
+
+---
+
 ## eBay Integration (Sessions 15–25)
 
 | Phase | Feature | Status |

@@ -157,6 +157,13 @@ class AdminOrderController extends Controller
                 'city'               => $data['city'] ?? null,
                 'postal_code'        => $data['postal_code'] ?? null,
                 'country'            => $data['country'] ?? null,
+                // No items means no line total to derive from, so the
+                // hand-typed total stands in for the subtotal. Keep the two
+                // equal: Order::recalculateTotalsFromItems reads the gap
+                // between them as delivery/tax/discount and carries it over
+                // when the order is later itemised. Setting subtotal to 0
+                // here would make that gap the whole order value and the
+                // first item added would be charged on top of it.
                 'subtotal'           => $subtotal ?: $total,
                 'delivery_cost'      => 0,
                 'total'              => $total,

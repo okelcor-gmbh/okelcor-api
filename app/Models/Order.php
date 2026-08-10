@@ -129,6 +129,62 @@ class Order extends Model
     }
 
     /**
+     * Re-derives `subtotal` from the line items and carries that through to
+     * `total`, preserving whatever non-line component the total already had.
+     *
+     * The line items are the source of truth — not a delta applied on top of
+     * whatever subtotal happened to be stored. That distinction is the whole
+     * point: an order created without items keeps a placeholder subtotal equal
+     * to the total typed in by hand (see AdminOrderController::store, where
+     * `subtotal` falls back to `total`). Adding a line to such an order under
+     * a delta model added the line on top of the placeholder and counted the
+     * same money twice — a €15,000 order displayed a €30,000 total.
+     *
+     * Deliberately a no-op for an order with no items: there the stored total
+     * is the only record of what the order is worth, and recomputing would
+     * zero it.
+     *
+     * @return array{subtotal_from: float, subtotal_to: float, total_from: float, total_to: float, changed: bool}
+     */
+    public function recalculateTotalsFromItems(): array
+    {
+        $subtotalFrom = round((float) $this->subtotal, 2);
+        $totalFrom    = round((float) $this->total, 2);
+
+        $unchanged = [
+            'subtotal_from' => $subtotalFrom, 'subtotal_to' => $subtotalFrom,
+            'total_from'    => $totalFrom,    'total_to'    => $totalFrom,
+            'changed'       => false,
+        ];
+
+        if ($this->items()->count() === 0) {
+            return $unchanged;
+        }
+
+        // Everything in the total the line items do not explain: delivery,
+        // tax, discount, and for imported orders whatever the source system
+        // folded in. Carried across rather than rebuilt from columns — the
+        // relationship between those columns and `total` is not consistent
+        // across every order source (website, eBay, Wix, manual).
+        $extras = round($totalFrom - $subtotalFrom, 2);
+
+        $subtotalTo = round((float) $this->items()->sum('line_total'), 2);
+        $totalTo    = round($subtotalTo + $extras, 2);
+
+        if ($subtotalTo === $subtotalFrom && $totalTo === $totalFrom) {
+            return $unchanged;
+        }
+
+        $this->update(['subtotal' => $subtotalTo, 'total' => $totalTo]);
+
+        return [
+            'subtotal_from' => $subtotalFrom, 'subtotal_to' => $subtotalTo,
+            'total_from'    => $totalFrom,    'total_to'    => $totalTo,
+            'changed'       => true,
+        ];
+    }
+
+    /**
      * True once the customer owes nothing further — either a non-milestone
      * order paid in full, or a milestone order that reached balance_paid.
      */

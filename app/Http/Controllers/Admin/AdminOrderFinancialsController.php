@@ -162,6 +162,7 @@ class AdminOrderFinancialsController extends Controller
                 }
 
                 $appliedChanges = [];
+                $itemsChanged   = false;
 
                 if (isset($changes['delivery_fee'])) {
                     $oldDeliveryCost      = (float) $order->delivery_cost;
@@ -174,9 +175,11 @@ class AdminOrderFinancialsController extends Controller
                     $appliedChanges['total']         = ['from' => $oldTotal,        'to' => $newTotal];
                 }
 
-                // Existing item corrections — same surgical delta approach as
-                // the direct-edit path (AdminOrderItemController) for
-                // unlocked orders.
+                // Existing item corrections. Order totals are not touched
+                // here — they are re-derived from the items once, below, the
+                // same way the direct-edit path (AdminOrderItemController)
+                // handles unlocked orders. The per-item delta is kept only as
+                // an audit figure.
                 foreach ($changes['items'] ?? [] as $itemChange) {
                     $item = OrderItem::where('order_id', $order->id)->find($itemChange['id'] ?? null);
                     if (! $item) {
@@ -188,10 +191,9 @@ class AdminOrderFinancialsController extends Controller
                     $item->line_total = round((float) $item->unit_price * (int) $item->quantity, 2);
                     $item->save();
 
-                    $delta            = round((float) $item->line_total - $oldLineTotal, 2);
-                    $order->subtotal  = round((float) $order->subtotal + $delta, 2);
-                    $order->total     = round((float) $order->total + $delta, 2);
+                    $delta = round((float) $item->line_total - $oldLineTotal, 2);
                     $appliedChanges['items'][] = ['id' => $item->id, 'line_total_delta' => $delta];
+                    $itemsChanged = true;
                 }
 
                 // New items added as part of the revision.
@@ -209,9 +211,8 @@ class AdminOrderFinancialsController extends Controller
                         'line_total' => $lineTotal,
                     ]);
 
-                    $order->subtotal = round((float) $order->subtotal + $lineTotal, 2);
-                    $order->total    = round((float) $order->total + $lineTotal, 2);
                     $appliedChanges['new_items'][] = ['id' => $newItem->id, 'line_total' => $lineTotal];
+                    $itemsChanged = true;
                 }
 
                 // Items removed as part of the revision — guarded so an
@@ -228,9 +229,27 @@ class AdminOrderFinancialsController extends Controller
                     foreach (OrderItem::where('order_id', $order->id)->whereIn('id', $removeIds)->get() as $item) {
                         $lineTotal = (float) $item->line_total;
                         $item->delete();
-                        $order->subtotal = round((float) $order->subtotal - $lineTotal, 2);
-                        $order->total    = round((float) $order->total - $lineTotal, 2);
                         $appliedChanges['removed_items'][] = ['id' => $item->id, 'line_total' => $lineTotal];
+                        $itemsChanged = true;
+                    }
+                }
+
+                // Re-derive subtotal/total from the line items now that every
+                // item change in this revision has been written, rather than
+                // nudging the stored subtotal by each delta in turn. A delta
+                // double-counted on an order created without items, whose
+                // subtotal is a placeholder copy of the hand-typed total.
+                //
+                // Only when items actually changed: a delivery-fee-only
+                // revision must not quietly restate the subtotal of an
+                // imported order whose items were never itemised in full.
+                if ($itemsChanged) {
+                    $recalculated = $order->recalculateTotalsFromItems();
+                    if ($recalculated['changed']) {
+                        $appliedChanges['recalculated'] = [
+                            'subtotal' => ['from' => $recalculated['subtotal_from'], 'to' => $recalculated['subtotal_to']],
+                            'total'    => ['from' => $recalculated['total_from'],    'to' => $recalculated['total_to']],
+                        ];
                     }
                 }
 

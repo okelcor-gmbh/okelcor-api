@@ -45,15 +45,14 @@ class AdminOrderItemController extends Controller
             'reason'     => ['required', 'string', 'min:5', 'max:1000'],
         ]);
 
-        $oldSnapshot  = $item->only(['sku', 'name', 'brand', 'size', 'unit_price', 'quantity', 'line_total']);
-        $oldLineTotal = (float) $item->line_total;
+        $oldSnapshot = $item->only(['sku', 'name', 'brand', 'size', 'unit_price', 'quantity', 'line_total']);
 
         $item->fill(collect($data)->except('reason')->all());
         $item->line_total = round((float) $item->unit_price * (int) $item->quantity, 2);
         $item->save();
 
-        $this->applyOrderDelta(
-            $request, $order, $oldLineTotal, (float) $item->line_total, $data['reason'],
+        $this->applyOrderTotals(
+            $request, $order, $data['reason'],
             'item_corrected', $oldSnapshot, $item->fresh()->only(['sku', 'name', 'brand', 'size', 'unit_price', 'quantity', 'line_total'])
         );
 
@@ -97,8 +96,8 @@ class AdminOrderItemController extends Controller
             'line_total' => $lineTotal,
         ]);
 
-        $this->applyOrderDelta(
-            $request, $order, 0, $lineTotal, $data['reason'],
+        $this->applyOrderTotals(
+            $request, $order, $data['reason'],
             'item_added', null, $item->only(['sku', 'name', 'brand', 'size', 'unit_price', 'quantity', 'line_total'])
         );
 
@@ -131,11 +130,10 @@ class AdminOrderItemController extends Controller
             'reason' => ['required', 'string', 'min:5', 'max:1000'],
         ]);
 
-        $oldSnapshot  = $item->only(['sku', 'name', 'brand', 'size', 'unit_price', 'quantity', 'line_total']);
-        $oldLineTotal = (float) $item->line_total;
+        $oldSnapshot = $item->only(['sku', 'name', 'brand', 'size', 'unit_price', 'quantity', 'line_total']);
         $item->delete();
 
-        $this->applyOrderDelta($request, $order, $oldLineTotal, 0, $data['reason'], 'item_removed', $oldSnapshot, null);
+        $this->applyOrderTotals($request, $order, $data['reason'], 'item_removed', $oldSnapshot, null);
 
         return response()->json(['message' => 'Item removed successfully.']);
     }
@@ -163,28 +161,25 @@ class AdminOrderItemController extends Controller
     }
 
     /**
-     * Applies just the delta this one item change caused to subtotal/total —
-     * the same surgical swap-one-component approach AdminOrderFinancialsController
-     * already uses for delivery_fee, so any tax/discount baked into `total`
-     * from elsewhere is left untouched rather than assumed away.
+     * Re-derives the order totals from the line items after a change, leaving
+     * any tax/discount/delivery baked into `total` from elsewhere untouched.
+     *
+     * Not a delta. Adding a delta to the stored subtotal double-counted on an
+     * order that was created without items — its subtotal is a placeholder
+     * copy of the hand-typed total, so the first item added was charged twice
+     * (a €15,000 order showed €30,000). See Order::recalculateTotalsFromItems.
      */
-    private function applyOrderDelta(
-        Request $request, Order $order, float $oldLineTotal, float $newLineTotal,
-        string $reason, string $action, ?array $oldItem, ?array $newItem
+    private function applyOrderTotals(
+        Request $request, Order $order, string $reason, string $action, ?array $oldItem, ?array $newItem
     ): void {
-        $delta       = round($newLineTotal - $oldLineTotal, 2);
-        $newSubtotal = round((float) $order->subtotal + $delta, 2);
-        $newTotal    = round((float) $order->total + $delta, 2);
-        $oldTotal    = (float) $order->total;
-
-        $order->update(['subtotal' => $newSubtotal, 'total' => $newTotal]);
+        $totals = $order->recalculateTotalsFromItems();
 
         // old_value/new_value are VARCHAR(100) — keep them short, bounded
         // summaries; the full item snapshot goes in `notes` (unbounded TEXT).
         $this->writeLog($request, $order, $action, [
             'old_value' => $oldItem ? $this->summarizeItem($oldItem) : null,
             'new_value' => $newItem ? $this->summarizeItem($newItem) : null,
-            'notes'     => $reason . " (order total: {$oldTotal} \u{2192} {$newTotal}) — "
+            'notes'     => $reason . " (order total: {$totals['total_from']} \u{2192} {$totals['total_to']}) — "
                 . ($oldItem ? 'before: ' . json_encode($oldItem) . ' ' : '')
                 . ($newItem ? 'after: ' . json_encode($newItem) : ''),
         ]);
