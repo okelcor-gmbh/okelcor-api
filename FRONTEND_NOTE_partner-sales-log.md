@@ -126,7 +126,7 @@ Three consequences worth knowing:
 ### Partner app — `Authorization: Bearer <token>`
 
 ```
-POST   /api/v1/partner/auth/login          phone + PIN → { token, user }
+POST   /api/v1/partner/auth/login          phone + PIN — response shape below
 POST   /api/v1/partner/auth/logout         this device's token only
 POST   /api/v1/partner/auth/change-pin     current_pin + new_pin
 GET    /api/v1/partner/me
@@ -137,6 +137,51 @@ DELETE /api/v1/partner/sales/{id}          soft delete, within the window
 GET    /api/v1/partner/summary?period=week|month
 GET    /api/v1/partner/sizes               autocomplete source
 ```
+
+#### Login response — corrected
+
+An earlier revision of this note documented login as returning `{ token, user }`
+at the top level. **It does not, and never did.** Frontend built against that,
+got a 502 on the first genuinely successful sign-in, and found the real shape
+only by reading `formatUser()` in the source. The implementation is:
+
+```jsonc
+{
+  "data": {
+    "token": "…",
+    "user": {
+      "id": 12,
+      "name": "Kwame Mensah",
+      "phone": "233241234567",
+      "role": "owner",
+      "must_change_pin": false,
+      "last_login_at": "2026-08-10T09:14:22+00:00",
+      "organisation": {
+        "id": 3,
+        "name": "Accra Tyre Distributors",
+        "country": "Ghana",
+        "country_code": "GH",
+        "market": "ghana",
+        "default_currency": "GHS"
+      }
+    }
+  },
+  "message": "Signed in."
+}
+```
+
+Transcribed from `PartnerAuthController::formatUser()` — those are all the
+fields, and there are no others. `organisation` is `null` only if the record is
+missing, which an admin-created partner user cannot be. `GET /partner/me`
+returns the same `user` object at `data`, with no `token`.
+
+So: `data.token`, `data.user`, and — the one that bit — **`data.user.organisation.default_currency`**,
+nested a level deeper than the old note implied. That is the value the entry
+form defaults a partner's currency from.
+
+The response is not changing; the note was wrong. Every other endpoint in this
+document follows the same `{ data, meta, message }` envelope, which is the
+project-wide convention — read `data` first everywhere.
 
 ### Admin panel (existing) — permission-gated
 
@@ -152,6 +197,7 @@ GET    /api/v1/admin/partner-sales/totals
 GET    /api/v1/admin/partner-sales/{id}    includes the full audit trail
 POST   /api/v1/admin/partner-sales/{id}/verify
 POST   /api/v1/admin/partner-sales/{id}/dispute   `note` REQUIRED
+PATCH  /api/v1/admin/partner-sales/{id}           `reason` REQUIRED — see §5a
 GET    /api/v1/admin/partner-sales/export         streams CSV
 ```
 
@@ -184,6 +230,66 @@ total in the books export and, since nothing converts, nothing else would ever c
 
 Response `data` includes `editable` (boolean) and `deleted` (boolean) so the history
 screen can render the lock state without recomputing the window client-side.
+
+---
+
+## 5a. Admin correction — `PATCH /admin/partner-sales/{id}`
+
+Built as asked. `dispute` records that a row is wrong; this is what makes it
+right, so a known-bad figure no longer has "flagged and uncorrectable" as its
+only end state.
+
+```jsonc
+PATCH /api/v1/admin/partner-sales/{id}
+{
+  "quantity": 6,
+  "unit_price": 300,        // any subset of: sold_at, size, brand, tyre_type,
+  "reason": "Paper report…" // quantity, unit_price, currency, customer_name, notes
+}
+```
+
+- **`reason` is required**, min 5 characters, same as `dispute`'s `note`.
+- **No edit window.** The window protects the partner's own book from drift; an
+  admin correcting a known-wrong figure is the escalation the window exists to
+  produce.
+- **`total_amount` is always re-derived** from whatever quantity and unit price
+  now stand — including when you send only one of the two. Never send a total.
+- **Same validation bounds as the partner's own create/update.** An admin
+  correction is not a way around a rule the partner is held to: an unlisted
+  currency or a future `sold_at` is a 422 here too.
+- **Written to the audit trail** as `admin_corrected`, with the reason and a
+  per-field `{from, to}`. `GET /admin/partner-sales/{id}` returns it unchanged.
+- **Permission `partner_sales.correct`** — currently `super_admin`, `admin`,
+  `order_manager`, the same list as `verify`, but its own key so it can be
+  narrowed later without a code change.
+
+**Three behaviours to build against:**
+
+1. **Correcting the figures clears a prior verification.** If the sale was
+   `verified` and anything substantive moves, it returns to `submitted` with
+   `verified_by`/`verified_at` nulled, and the reset appears in the trail as a
+   `status` change. Reason: "verified by X" must never sit in the CSV next to a
+   figure X never saw. **Changing only `notes` or `customer_name` does not
+   clear it** — those are not what was signed off. So the flow for a disputed
+   row is correct → verify, two deliberate acts. Please show the status change
+   in the UI rather than letting a row silently drop out of "verified".
+2. **A no-op correction is a 200, not an error**, with `meta.result:
+   "unchanged"` and no audit row written. Sending `250.0` against a stored
+   `250.00` counts as unchanged — values are compared numerically, so a resave
+   with no edits will not litter the trail.
+3. **A soft-deleted entry returns 422 `sale_deleted`.** It is already out of
+   the books and out of the totals, so there is nothing to correct. If a
+   removed entry ever needs to come back, say so and we will add a restore —
+   there is deliberately none today.
+
+`meta.changed` lists the field names that actually moved, if that is useful for
+a confirmation toast.
+
+**Not covered, flag it if you need it:** the partner sees the corrected numbers
+in their own list, but has no view of *why* they changed — the audit trail is
+admin-only and `review_note` still holds the verify/dispute note, which
+overwriting would destroy. If partners should see correction reasons, that is a
+separate decision about what to expose, not a field we should quietly reuse.
 
 ---
 
@@ -226,8 +332,24 @@ a MySQL ENUM needing a migration to widen, and its `customer_id` is a foreign ke
 
 ## 7. Edit window
 
-24h, from the **server's `created_at`**, configurable via `PARTNER_EDIT_WINDOW_HOURS`
-without a code change.
+**Recommendation: raise it to 72 (`PARTNER_EDIT_WINDOW_HOURS=72`).** Config
+only, no deploy of code needed, and reversible.
+
+Your Saturday-backlog case is the right test of the number, and 24h fails it —
+but only slightly, and the fix is not "as long as possible". The window exists
+so the partner's own book stops drifting; every hour it is open is an hour in
+which a figure Okelcor may already have exported can still change underneath.
+72h covers a weekend of catch-up entry, which is the realistic worst case now
+that `PATCH /admin/partner-sales/{id}` exists as the escalation path for
+anything older. Before that endpoint, a longer window was the *only* way to fix
+a mistake, which is what made 24h feel tight.
+
+So: 72h, and tell partners plainly that corrections after that go through
+Okelcor — which is now true rather than a polite way of saying "it can't be
+fixed".
+
+Measured from the **server's `created_at`**, configurable via
+`PARTNER_EDIT_WINDOW_HOURS` without a code change.
 
 Your Monday-authored / Wednesday-synced observation is right and is documented in
 `config/partner.php` as accepted rather than a bug. Note the flip side, which is the

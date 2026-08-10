@@ -1149,6 +1149,43 @@ cheapest way to de-risk it.
 
 See `FRONTEND_NOTE_partner-sales-log.md`.
 
+### Admin correction of partner sales (Session 75)
+
+> **Deploy status:** built and tested, **not yet deployed**. **No migration.**
+> Code-only, deploy-order safe in both directions.
+
+First real partners are live in Ghana and Nigeria. Frontend reported the gap:
+`dispute` records that an entry is wrong, but nothing could make it right —
+past the partner's edit window neither the partner nor an admin could correct a
+figure. In a tool whose output finance relies on, "we know this row is wrong
+and nobody can change it" is the wrong end state.
+
+| Change | Status | Notes |
+|--------|--------|-------|
+| `PATCH /admin/partner-sales/{id}` | 🔧 | `reason` required (min 5), same as `dispute`'s `note`. **No edit window** — the window protects the partner's own book from drift; an admin correcting a known-wrong figure is the escalation it exists to produce. Same shape as DOC-5 order line-item corrections. |
+| Same validation bounds as the partner | 🔧 | `CorrectPartnerSaleRequest` mirrors `StorePartnerSaleRequest` exactly. An admin correction must not be a way around a rule the partner is held to — an unlisted currency or a future `sold_at` is a 422 for both. |
+| `total_amount` always re-derived | 🔧 | Including on a correction that sent only one of quantity/unit_price, where trusting the stored total would leave the line disagreeing with itself. Same rule as the partner PATCH path. |
+| **A correction clears a prior verification** | 🔧 | If the sale was `verified` and anything substantive moves, it returns to `submitted` with `verified_by`/`verified_at` nulled. `verified by X` must never sit in the CSV next to a figure X never saw. **Notes and customer_name do not clear it** — they are not what was signed off. |
+| Numeric comparison on the no-op path | 🔧 | `250.0` sent against a stored `250.00` is unchanged, not a change. Returns 200 `meta.result: unchanged` and writes no audit row, so resaving an untouched form does not litter the trail. Same trap already fixed on the partner path. |
+| A soft-deleted entry is refused | 🔧 | 422 `sale_deleted`. Already excluded from the books and the totals — a right figure on a row nothing reads is not a correction. There is deliberately no restore endpoint. |
+| `partner_sales.correct` permission | 🔧 | Own key rather than reusing `partner_sales.verify`, though the role list is identical today. Rewriting a partner's reported revenue is a stronger act than signing one off; narrowing it later is then one line here. |
+| `PARTNER_EDIT_WINDOW_HOURS` → **72** | ⬜ | Recommended, not applied — config-only, business call. 24h fails the realistic worst case (a partner entering a weekend of paper backlog). 72h covers it. Not longer: every open hour is one where a figure Okelcor may already have exported can still move, and the admin PATCH now exists as the escalation for anything older. |
+| Login response shape corrected in the note | ✅ | **My documentation error cost frontend a deploy cycle.** The note said login returns `{ token, user }`; it returns `{ data: { token, user }, message }` with `default_currency` at `data.user.organisation.default_currency`. They got a 502 on the first successful sign-in and found the real shape by reading `formatUser()`. Note now transcribed from the source, field for field. |
+| Backend tests (10 new) | ✅ | `PartnerSalesLogTest` — **51 passed / 238 assertions**, up from 41. Full suite: **284 passed, 0 failed**, 206 skipped. |
+
+**Still open, unchanged:** the partner sees corrected numbers but not *why*
+they changed — the audit trail is admin-only and `review_note` holds the
+verify/dispute note, which overwriting would destroy. Flagged to frontend as a
+decision about what to expose, not a field to quietly reuse.
+
+**Not a backend issue:** frontend reported a test entry appearing under a newly
+created partner. Cause was their IndexedDB store being keyed per-browser with
+no link to the signed-in partner, so a second partner on the same handset saw
+the first one's rows. Fixed frontend-side. Recorded here only so "sales showing
+under the wrong partner" is not re-investigated against the API — org scoping
+on every query and the `(partner_org_id, client_generated_id)` unique index
+were never in question.
+
 ---
 
 ## Campaign autosave — losing work on tab change (Session 74)

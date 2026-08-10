@@ -108,6 +108,12 @@ class AdminPermissions
         'partner_sales.verify'    => ['super_admin', 'admin', 'order_manager'],
         'partner_sales.export'    => ['super_admin', 'admin', 'order_manager'],
 
+        // Rewriting a figure a partner reported is a stronger act than signing
+        // one off, so it gets its own key even though the role list currently
+        // matches `verify`. Narrowing it later is then a one-line change here
+        // rather than a new permission threaded through routes and tests.
+        'partner_sales.correct'   => ['super_admin', 'admin', 'order_manager'],
+
         'supplier.view'           => ['super_admin', 'admin', 'order_manager'],
 
         // ── Carrier shipment tracking (GLS / DHL / ocean freight) ─────────

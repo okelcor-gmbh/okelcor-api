@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\AdminUser;
 use App\Models\PartnerOrganisation;
 use App\Models\PartnerSale;
+use App\Models\PartnerSaleAudit;
 use App\Models\PartnerUser;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Hash;
@@ -804,6 +805,187 @@ class PartnerSalesLogTest extends TestCase
             ['note' => 'Quantity does not match the paper report.'],
             $this->adminHeaders(),
         )->assertOk()->assertJsonPath('data.status', 'disputed');
+    }
+
+    // ── admin correction, once the partner's window has closed ────────────
+
+    /** A sale the partner can no longer touch — the situation this exists for. */
+    private function lockedSale(): PartnerSale
+    {
+        $this->postJson('/api/v1/partner/sales', $this->salePayload(), $this->partnerHeaders());
+
+        $sale = PartnerSale::first();
+        $sale->forceFill(['created_at' => now()->subDays(3)])->save();
+
+        $this->assertFalse($sale->fresh()->isWithinEditWindow());
+
+        return $sale->fresh();
+    }
+
+    public function test_admin_can_correct_an_entry_the_partner_can_no_longer_edit(): void
+    {
+        $sale = $this->lockedSale();
+
+        // The partner is locked out — that is the whole premise. Their own
+        // error already says "Contact Okelcor to correct it", which until now
+        // pointed at nothing an admin could actually do.
+        $this->patchJson("/api/v1/partner/sales/{$sale->id}", ['quantity' => 6], $this->partnerHeaders())
+            ->assertStatus(422)
+            ->assertJson(['code' => 'edit_window_closed']);
+
+        $this->patchJson("/api/v1/admin/partner-sales/{$sale->id}", [
+            'quantity' => 6,
+            'reason'   => 'Paper report says 6 pieces; 4 was a typing error at entry.',
+        ], $this->adminHeaders())
+            ->assertOk()
+            ->assertJsonPath('data.quantity', 6)
+            // Total re-derived, not trusted: 6 x 250.00.
+            ->assertJsonPath('data.total_amount', '1500.00');
+    }
+
+    public function test_a_correction_must_say_why(): void
+    {
+        $sale = $this->lockedSale();
+
+        $this->patchJson("/api/v1/admin/partner-sales/{$sale->id}", [
+            'quantity' => 6,
+        ], $this->adminHeaders())
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('reason');
+
+        // Unchanged — a rejected correction must not half-apply.
+        $this->assertSame(4, (int) $sale->fresh()->quantity);
+    }
+
+    public function test_the_correction_and_its_reason_land_in_the_audit_trail(): void
+    {
+        $sale = $this->lockedSale();
+
+        $this->patchJson("/api/v1/admin/partner-sales/{$sale->id}", [
+            'quantity' => 6,
+            'reason'   => 'Paper report says 6 pieces; 4 was a typing error at entry.',
+        ], $this->adminHeaders())->assertOk();
+
+        $trail = $this->getJson("/api/v1/admin/partner-sales/{$sale->id}", $this->adminHeaders())
+            ->assertOk()
+            ->json('data.audit_trail');
+
+        $correction = collect($trail)->firstWhere('action', 'admin_corrected');
+
+        $this->assertNotNull($correction, 'the correction is not in the trail');
+        $this->assertSame('admin_user', $correction['actor_type']);
+        $this->assertStringContainsString('typing error', $correction['changes']['reason']);
+        $this->assertSame('4', $correction['changes']['quantity']['from']);
+        $this->assertSame('6', $correction['changes']['quantity']['to']);
+        // The derived figure moved too, and the trail has to show that.
+        $this->assertSame('1500.00', $correction['changes']['total_amount']['to']);
+    }
+
+    public function test_correcting_the_figures_clears_a_verification_they_no_longer_describe(): void
+    {
+        $sale = $this->lockedSale();
+
+        $this->postJson("/api/v1/admin/partner-sales/{$sale->id}/verify", [], $this->adminHeaders())
+            ->assertOk()
+            ->assertJsonPath('data.status', 'verified');
+
+        $this->app['auth']->forgetGuards();
+
+        $this->patchJson("/api/v1/admin/partner-sales/{$sale->id}", [
+            'unit_price' => 300,
+            'reason'     => 'Agreed price was 300, not 250 — confirmed against the invoice.',
+        ], $this->adminHeaders())
+            ->assertOk()
+            // "verified by X" must never sit in the export next to a figure X
+            // never saw. It goes back for a deliberate re-verification.
+            ->assertJsonPath('data.status', 'submitted')
+            ->assertJsonPath('data.verified_by', null)
+            ->assertJsonPath('data.verified_at', null);
+    }
+
+    public function test_correcting_only_a_note_leaves_the_verification_standing(): void
+    {
+        $sale = $this->lockedSale();
+
+        $this->postJson("/api/v1/admin/partner-sales/{$sale->id}/verify", [], $this->adminHeaders())->assertOk();
+
+        $this->app['auth']->forgetGuards();
+
+        // Notes and the customer name are not what was signed off, so tidying
+        // them must not force a whole re-verification.
+        $this->patchJson("/api/v1/admin/partner-sales/{$sale->id}", [
+            'notes'  => 'Collected from the Tema depot.',
+            'reason' => 'Adding the depot the partner told us by phone.',
+        ], $this->adminHeaders())
+            ->assertOk()
+            ->assertJsonPath('data.status', 'verified');
+    }
+
+    public function test_a_correction_that_changes_nothing_writes_nothing(): void
+    {
+        $sale = $this->lockedSale();
+
+        $before = PartnerSaleAudit::where('partner_sale_id', $sale->id)->count();
+
+        $this->patchJson("/api/v1/admin/partner-sales/{$sale->id}", [
+            // Same values, differently formatted — 250.00 stored against 250.0
+            // sent. Reporting that as a change would put an audit row saying
+            // nothing happened next to every save.
+            'quantity'   => 4,
+            'unit_price' => 250.0,
+            'reason'     => 'Re-checked against the paper report.',
+        ], $this->adminHeaders())
+            ->assertOk()
+            ->assertJsonPath('meta.result', 'unchanged');
+
+        $this->assertSame($before, PartnerSaleAudit::where('partner_sale_id', $sale->id)->count());
+    }
+
+    public function test_an_admin_correction_is_held_to_the_same_bounds_as_the_partner(): void
+    {
+        $sale = $this->lockedSale();
+
+        // A currency outside the allowlist, and a future sale date. An admin
+        // correcting a figure must not be a way around a rule the partner is
+        // held to.
+        $this->patchJson("/api/v1/admin/partner-sales/{$sale->id}", [
+            'currency' => 'XYZ',
+            'sold_at'  => now()->addDay()->toDateString(),
+            'reason'   => 'Testing the bounds hold for admins too.',
+        ], $this->adminHeaders())
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['currency', 'sold_at']);
+    }
+
+    public function test_a_removed_entry_is_not_corrected(): void
+    {
+        $this->postJson('/api/v1/partner/sales', $this->salePayload(), $this->partnerHeaders());
+        $sale = PartnerSale::first();
+
+        $this->deleteJson("/api/v1/partner/sales/{$sale->id}", [], $this->partnerHeaders())->assertOk();
+
+        // Already out of the books and out of the totals — a right figure on a
+        // row nothing reads is not a correction.
+        $this->patchJson("/api/v1/admin/partner-sales/{$sale->id}", [
+            'quantity' => 6,
+            'reason'   => 'Trying to correct a removed entry.',
+        ], $this->adminHeaders())
+            ->assertStatus(422)
+            ->assertJson(['code' => 'sale_deleted']);
+    }
+
+    public function test_a_role_without_the_correct_permission_cannot_rewrite_a_figure(): void
+    {
+        $sale = $this->lockedSale();
+
+        $this->app['auth']->forgetGuards();
+
+        $this->patchJson("/api/v1/admin/partner-sales/{$sale->id}", [
+            'quantity' => 6,
+            'reason'   => 'Should not be permitted.',
+        ], $this->adminHeaders('editor'))->assertStatus(403);
+
+        $this->assertSame(4, (int) $sale->fresh()->quantity);
     }
 
     public function test_the_export_streams_real_csv_not_paginated_json(): void

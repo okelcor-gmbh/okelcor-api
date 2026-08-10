@@ -977,6 +977,13 @@ Route::prefix('v1')->group(function () {
             Route::post('partner-sales/{id}/verify', [AdminPartnerSaleController::class, 'verify'])->whereNumber('id');
             Route::post('partner-sales/{id}/dispute', [AdminPartnerSaleController::class, 'dispute'])->whereNumber('id');
         });
+
+        // Correcting a partner's reported figure once their own edit window
+        // has closed. `dispute` records that a row is wrong; this makes it
+        // right. Reason required, written to the same audit trail.
+        Route::middleware('permission:partner_sales.correct')->group(function () {
+            Route::patch('partner-sales/{id}', [AdminPartnerSaleController::class, 'update'])->whereNumber('id');
+        });
     });
 
     // -------------------------------------------------------------------------

@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\CorrectPartnerSaleRequest;
 use App\Models\PartnerOrganisation;
 use App\Models\PartnerSale;
 use App\Models\PartnerSaleAudit;
+use App\Services\PartnerSaleProductMatcher;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -194,6 +196,150 @@ class AdminPartnerSaleController extends Controller
             'data'    => $this->format($sale->fresh(['organisation', 'enteredBy', 'verifier'])),
             'message' => $action === 'verify' ? 'Sale verified.' : 'Sale disputed.',
         ]);
+    }
+
+    /**
+     * PATCH /api/v1/admin/partner-sales/{id}
+     *
+     * Okelcor-side correction of a figure the partner can no longer reach.
+     *
+     * `dispute` records that a row is wrong; this is what makes it right.
+     * Without it the only end state for a known-bad entry was "flagged and
+     * uncorrectable", which in a tool whose output finance relies on is the
+     * wrong place to stop.
+     *
+     * Three deliberate properties:
+     *
+     *   - **No edit window.** The window protects the partner's own book from
+     *     drift; an admin correcting a known-wrong figure is the escalation
+     *     the window exists to produce, so gating it behind the same clock
+     *     would defeat the purpose.
+     *   - **`reason` required**, same as `dispute`.
+     *   - **A prior verification is cleared** when anything substantive moves.
+     *     `verified_by`/`verified_at` attest to specific numbers; leaving them
+     *     against numbers that have since changed would put a name in the CSV
+     *     next to a figure that person never saw. Status returns to
+     *     `submitted` and the entry is re-verified deliberately.
+     *
+     * Same shape as DOC-5 order line-item corrections: locked record,
+     * admin-only revision, reason required, written to the audit trail.
+     */
+    public function update(CorrectPartnerSaleRequest $request, int $id): JsonResponse
+    {
+        $sale = PartnerSale::withTrashed()->find($id);
+
+        if (! $sale) {
+            return response()->json(['message' => 'Sale not found.'], 404);
+        }
+
+        // A removed entry is already out of the books. Correcting one would
+        // produce a right figure on a row nothing reads.
+        if ($sale->trashed()) {
+            return response()->json([
+                'message' => 'This entry was removed by the partner, so it is already excluded from the books and totals. There is nothing to correct.',
+                'code'    => 'sale_deleted',
+            ], 422);
+        }
+
+        $data   = $request->validated();
+        $reason = $data['reason'];
+        unset($data['reason']);
+
+        $admin = $request->user();
+
+        $changes = $this->applyCorrection($sale, $data);
+
+        if ($changes === []) {
+            return response()->json([
+                'data'    => $this->format($sale->fresh(['organisation', 'enteredBy', 'verifier'])),
+                'meta'    => ['result' => 'unchanged'],
+                'message' => 'Nothing changed — the values sent match what is already stored.',
+            ]);
+        }
+
+        DB::transaction(function () use ($sale, $changes, $reason, $admin, $request) {
+            // A correction to the substance of the line invalidates any
+            // sign-off it already carried. Notes and the customer name do not:
+            // they are not what was verified.
+            $substantive = array_diff(array_keys($changes), ['notes', 'customer_name']);
+
+            if ($substantive !== [] && $sale->status === 'verified') {
+                $changes['status'] = ['from' => 'verified', 'to' => 'submitted'];
+
+                $sale->status      = 'submitted';
+                $sale->verified_by = null;
+                $sale->verified_at = null;
+            }
+
+            $sale->save();
+
+            PartnerSaleAudit::record(
+                $sale->id,
+                'admin_corrected',
+                'admin_user',
+                $admin?->id,
+                $admin?->name,
+                ['reason' => $reason] + $changes,
+                $request->ip(),
+            );
+        });
+
+        return response()->json([
+            'data'    => $this->format($sale->fresh(['organisation', 'enteredBy', 'verifier'])),
+            'meta'    => ['result' => 'corrected', 'changed' => array_keys($changes)],
+            'message' => 'Sale corrected.',
+        ]);
+    }
+
+    /**
+     * Applies only the fields that actually moved and re-derives the total.
+     *
+     * Mirrors PartnerSaleController::applyUpdate, including its numeric
+     * comparison: the decimal cast returns "250.00" while a client sending
+     * 250.0 stringifies to "250", and comparing those as text would report a
+     * change on every identical resubmission — an audit row per save saying
+     * nothing happened.
+     *
+     * @return array<string, array{from: string, to: string}>
+     */
+    private function applyCorrection(PartnerSale $sale, array $data): array
+    {
+        $changes = [];
+
+        foreach ($data as $field => $value) {
+            $current = $sale->getAttribute($field);
+
+            $currentComparable = $current instanceof \DateTimeInterface
+                ? $current->format('Y-m-d')
+                : (string) $current;
+
+            $unchanged = is_numeric($currentComparable) && is_numeric($value)
+                ? (float) $currentComparable === (float) $value
+                : $currentComparable === (string) $value;
+
+            if (! $unchanged) {
+                $changes[$field] = ['from' => $currentComparable, 'to' => (string) $value];
+                $sale->setAttribute($field, $value);
+            }
+        }
+
+        // Re-derived from whatever quantity and unit price now stand, including
+        // a correction that sent only one of the two — trusting the stored
+        // total there would leave the line disagreeing with itself.
+        $recomputedTotal = PartnerSale::computeTotal((int) $sale->quantity, $sale->unit_price);
+
+        if ((string) $sale->total_amount !== $recomputedTotal) {
+            $changes['total_amount'] = ['from' => (string) $sale->total_amount, 'to' => $recomputedTotal];
+            $sale->total_amount      = $recomputedTotal;
+        }
+
+        // A corrected size or brand that still points at the old catalogue SKU
+        // would be worse than no link at all.
+        if (isset($changes['size']) || isset($changes['brand'])) {
+            $sale->product_id = PartnerSaleProductMatcher::match($sale->size, $sale->brand);
+        }
+
+        return $changes;
     }
 
     /**
