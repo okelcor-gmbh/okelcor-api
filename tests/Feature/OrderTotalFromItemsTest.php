@@ -290,7 +290,7 @@ class OrderTotalFromItemsTest extends TestCase
 
     public function test_the_repair_command_reports_without_writing_until_told_to_fix(): void
     {
-        $order = $this->order(['subtotal' => 30000, 'total' => 30000]);
+        $order = $this->order(['source' => 'admin_manual', 'subtotal' => 30000, 'total' => 30000]);
         $this->item($order, ['unit_price' => 7.50, 'quantity' => 2000, 'line_total' => 15000]);
 
         $this->artisan('orders:repair-totals')->assertExitCode(0);
@@ -305,12 +305,58 @@ class OrderTotalFromItemsTest extends TestCase
         ]);
     }
 
+    public function test_a_vat_inclusive_import_is_never_rewritten_from_its_items(): void
+    {
+        // The shape every Wix-imported order has: `total` is the gross figure
+        // the customer actually paid, the line items carry net prices. The
+        // total is CORRECT. An earlier version of the repair command treated
+        // this as a fault and would have cut 14 live orders by 19%.
+        $order = $this->order(['source' => 'website', 'subtotal' => 371.88, 'total' => 371.88]);
+        $this->item($order, ['unit_price' => 62.50, 'quantity' => 5, 'line_total' => 312.50]);
+
+        $this->artisan('orders:repair-totals --fix --include-locked')->assertExitCode(0);
+
+        $order->refresh();
+        $this->assertSame(371.88, (float) $order->subtotal);
+        $this->assertSame(371.88, (float) $order->total);
+        $this->assertDatabaseMissing('order_logs', ['order_id' => $order->id, 'action' => 'totals_repaired']);
+    }
+
+    public function test_an_order_whose_items_exceed_its_total_is_reported_not_guessed_at(): void
+    {
+        // Real shape from production (ref 10080): items 816.00 against a
+        // recorded 396.00. Not the double count, and no consistent ratio
+        // across the affected orders — so no rule here can be trusted.
+        $order = $this->order(['source' => 'website', 'subtotal' => 396, 'total' => 396]);
+        $this->item($order, ['unit_price' => 102, 'quantity' => 8, 'line_total' => 816]);
+
+        $this->artisan('orders:repair-totals --fix --include-locked')->assertExitCode(0);
+
+        $this->assertSame(396.0, (float) $order->fresh()->total);
+    }
+
+    public function test_a_website_order_at_exactly_double_is_still_not_repaired(): void
+    {
+        // Only `admin_manual` orders can be recorded as a lump sum with no
+        // items, so only they can carry the double count. A x2 ratio on any
+        // other source is a coincidence, not a diagnosis.
+        $order = $this->order(['source' => 'website', 'subtotal' => 1600, 'total' => 1600]);
+        $this->item($order);
+
+        $this->artisan('orders:repair-totals --fix --include-locked')->assertExitCode(0);
+
+        $this->assertSame(1600.0, (float) $order->fresh()->total);
+    }
+
     public function test_the_repair_command_leaves_locked_orders_alone_by_default(): void
     {
         // A commercial document has been issued carrying the wrong figure —
         // correcting the order silently would leave the customer holding an
         // invoice that no longer matches, so it takes an explicit flag.
-        $order = $this->order(['subtotal' => 30000, 'total' => 30000, 'financials_locked_at' => now()]);
+        $order = $this->order([
+            'source' => 'admin_manual', 'subtotal' => 30000, 'total' => 30000,
+            'financials_locked_at' => now(),
+        ]);
         $this->item($order, ['unit_price' => 7.50, 'quantity' => 2000, 'line_total' => 15000]);
 
         $this->artisan('orders:repair-totals --fix')->assertExitCode(0);
@@ -331,5 +377,96 @@ class OrderTotalFromItemsTest extends TestCase
         $this->assertSame(800.0, (float) $order->subtotal);
         $this->assertSame(950.0, (float) $order->total);
         $this->assertDatabaseMissing('order_logs', ['order_id' => $order->id, 'action' => 'totals_repaired']);
+    }
+
+    public function test_the_survey_of_the_real_production_rows_repairs_only_the_two_lump_sum_orders(): void
+    {
+        // Every row the first production run of this command reported, with
+        // the source it actually carries. 21 orders, and only 2 of them are
+        // the double count — the first version would have rewritten all 21.
+        $rows = [
+            ['10112',     'website',      312.50,   371.88],
+            ['10110',     'website',      444.92,   529.45],
+            ['10108',     'website',       66.59,    79.24],
+            ['10105',     'website',      111.10,   132.21],
+            ['10104',     'website',      114.00,   135.66],
+            ['10101',     'website',      144.68,   172.17],
+            ['10100',     'website',      248.64,   295.88],
+            ['10095',     'website',      118.50,   141.02],
+            ['10094',     'website',       66.65,    79.31],
+            ['10093',     'website',      577.52,   755.98],
+            ['10092',     'website',      577.52,   755.98],
+            ['10091',     'website',      144.68,   172.17],
+            ['10080',     'website',      816.00,   396.00],
+            ['10079',     'website',      590.00,   260.00],
+            ['10077',     'website',      732.00,   312.00],
+            ['10076',     'website',      960.00,   416.00],
+            ['10075',     'website',      928.00,   416.00],
+            ['10042',     'website',      293.32,   349.05],
+            ['10022',     'website',      551.36,   656.12],
+            ['AB-1150',   'admin_manual', 8125.00, 16250.00],
+            ['AB - 1182', 'admin_manual', 15000.00, 30000.00],
+        ];
+
+        foreach ($rows as [$ref, $source, $itemsSum, $stored]) {
+            $order = Order::create([
+                'ref' => $ref, 'source' => $source,
+                'customer_name' => 'Buyer', 'customer_email' => 'b@example.test',
+                'subtotal' => $stored, 'delivery_cost' => 0, 'total' => $stored,
+                'status' => 'confirmed', 'payment_status' => 'paid', 'mode' => 'manual',
+            ]);
+
+            OrderItem::create([
+                'order_id' => $order->id, 'sku' => 'X', 'brand' => 'B', 'name' => 'Tyre',
+                'size' => '', 'unit_price' => $itemsSum, 'quantity' => 1, 'line_total' => $itemsSum,
+            ]);
+        }
+
+        $this->artisan('orders:repair-totals --fix --include-locked')->assertExitCode(0);
+
+        // The two lump-sum orders now agree with their items.
+        $this->assertSame(8125.00,  (float) Order::where('ref', 'AB-1150')->first()->total);
+        $this->assertSame(15000.00, (float) Order::where('ref', 'AB - 1182')->first()->total);
+
+        // Every other order is untouched — including 10112, whose 371.88 the
+        // first version of this command overwrote with 312.50.
+        foreach ($rows as [$ref, $source, $itemsSum, $stored]) {
+            if ($source === 'admin_manual') {
+                continue;
+            }
+            $this->assertSame($stored, (float) Order::where('ref', $ref)->first()->total, "order {$ref} was modified");
+        }
+
+        $this->assertSame(2, \App\Models\OrderLog::where('action', 'totals_repaired')->count());
+    }
+
+    // ── putting back what the first run got wrong ─────────────────────────
+
+    public function test_restore_writes_explicit_figures_and_logs_why(): void
+    {
+        $order = $this->order(['source' => 'website', 'subtotal' => 312.50, 'total' => 312.50]);
+        $this->item($order, ['unit_price' => 62.50, 'quantity' => 5, 'line_total' => 312.50]);
+
+        $this->artisan('orders:restore-total', [
+            'ref' => $order->ref, 'subtotal' => '371.88', 'total' => '371.88',
+            '--reason' => 'Undoing a bad automated correction — VAT-inclusive import.',
+            '--force' => true,
+        ])->assertExitCode(0);
+
+        $order->refresh();
+        $this->assertSame(371.88, (float) $order->subtotal);
+        $this->assertSame(371.88, (float) $order->total);
+        $this->assertDatabaseHas('order_logs', ['order_id' => $order->id, 'action' => 'totals_restored']);
+    }
+
+    public function test_restore_refuses_without_a_reason(): void
+    {
+        $order = $this->order(['subtotal' => 312.50, 'total' => 312.50]);
+
+        $this->artisan('orders:restore-total', [
+            'ref' => $order->ref, 'subtotal' => '371.88', 'total' => '371.88', '--force' => true,
+        ])->assertExitCode(1);
+
+        $this->assertSame(312.50, (float) $order->fresh()->total);
     }
 }

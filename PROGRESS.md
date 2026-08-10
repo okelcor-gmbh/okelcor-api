@@ -1192,8 +1192,9 @@ higher-value half; see `FRONTEND_NOTE_campaign-autosave.md`.
 
 ## Order totals doubling — €15,000 order shown as €30,000 (Session 75)
 
-> **Deploy status:** built and tested, **not yet deployed**. **No migration.**
-> Code-only, deploy-order safe in both directions.
+> **Deploy status:** code deployed; **migration #30 pending**. `orders:repair-totals`
+> and `orders:restore-total` cannot write their audit log until it runs — the
+> `order_logs.action` ENUM rejects the new values. Nothing else depends on it.
 
 An order manager reported an order showing one line — 2,000 tyres at €7.50,
 subtotal €15,000 — under a total of **€30,000**. Exactly double.
@@ -1217,8 +1218,46 @@ to an order that began as a lump sum.
 | Non-line charges preserved, not recomputed | 🔧 | Delivery, tax, discount and whatever an imported order folded in are carried across as `total − subtotal`, rather than rebuilt from columns — that relationship is **not** consistent across the four order sources (website, eBay, Wix, manual). A €150 delivery survives an item price correction instead of being absorbed. |
 | No-op for an order with no items | 🔧 | There the hand-typed total is the only record of what the order is worth; recomputing would zero it. This is also why `store()` must keep writing `subtotal = total` for itemless orders — see the comment there. Setting it to `0` would make the entire order value read as "extras" and reintroduce the double count from the other side. |
 | Same fix in the revision-approval path | 🔧 | `AdminOrderFinancialsController::approveRevision` had the identical delta logic for locked orders and the identical bug. Totals now re-derived once after all item changes. Only when items actually changed — a delivery-fee-only revision must not quietly restate the subtotal of an imported order whose items were never itemised in full. |
-| `php artisan orders:repair-totals` | 🔧 | Finds every order whose stored subtotal disagrees with its items and reports it. Writes only with `--fix`. **Skips orders with locked financials** unless `--include-locked`: a commercial document has already been issued carrying the wrong figure, and correcting the order does not supersede it — the customer may be holding an invoice for the old amount. Every correction writes an `OrderLog` (`totals_repaired`). |
-| Backend tests (10 new) | ✅ | `OrderTotalFromItemsTest` — **10 passed / 36 assertions, actually executed** on the minimal-schema sqlite harness rather than behind the MySQL gate that skips `AdminOrderItemEditingTest`. Verified to fail against the old logic first, reproducing exactly `30000.0`. Full suite: **269 passed, 0 failed**, 206 skipped. |
+| `php artisan orders:repair-totals` | 🔧 | Surveys orders whose stored subtotal disagrees with their items, **classifies them by cause**, and repairs only the double count. Writes only with `--fix`. **Skips orders with locked financials** unless `--include-locked`: a commercial document has already been issued carrying the wrong figure, and correcting the order does not supersede it. Every repair writes an `OrderLog` (`totals_repaired`). |
+| `php artisan orders:restore-total` | 🔧 | Writes explicit figures back onto one named order, with a required `--reason` and a confirmation prompt. Exists to undo a bad automated correction — no detection, no sweep. |
+| ENUM widening (migration #30) | 🔧 | `order_logs.action` is a MySQL ENUM and rejected `totals_repaired`. **The same trap already documented for `admin_users.role` and `security_events.type`, walked into anyway.** Adds `totals_repaired` + `totals_restored`. |
+| Backend tests (16 new) | ✅ | `OrderTotalFromItemsTest` — **16 passed / 73 assertions, actually executed** on the minimal-schema sqlite harness rather than behind the MySQL gate that skips `AdminOrderItemEditingTest`. Verified to fail against the old logic first, reproducing exactly `30000.0`. Includes all 21 real production rows fed through the classifier, asserting only the 2 lump-sum orders are touched. Full suite: **275 passed, 0 failed**, 206 skipped. |
+
+### The first repair command was wrong, and ran against production
+
+`--fix` was run before the ENUM widening existed. It updated order **10112**
+(371.88 → 312.50) and then died on the log insert, leaving one order corrected
+with no record of why and the other 20 untouched. Two separate faults:
+
+**1. No transaction.** The order write and its audit log were separate
+statements, so a failing log left a silently modified order. Both commands now
+write the order and its log in one transaction.
+
+**2. Far worse — the diagnosis was wrong for 19 of the 21 orders.** The command
+treated "subtotal ≠ items sum" as proof of a fault. It is not. The survey it
+produced, read properly:
+
+| Group | Count | Ratio | What it actually is |
+|-------|-------|-------|---------------------|
+| `admin_manual`, exactly ×2.0000 | 2 | 2.0000 | **The real bug.** AB-1150 and AB-1182. |
+| `website`, exactly ×1.19 | 11 | 1.1900 | German 19% VAT. `WixOrderImportService::mapOrder` stores the **gross** figure the customer paid in `total`/`subtotal`; `mapItems` imports the **net** line prices. Totals are correct. |
+| `website`, ×1.3090 | 2 | 1.3090 | Same, plus shipping: `(577.52 + 57.75) × 1.19 = 755.98`. Correct. |
+| `website`, items **exceed** total | 5 | 0.43–0.49 | Inconsistent ratios, cause unknown. Needs a person against what was invoiced. |
+
+Running `--fix` to completion would have **cut 13 live customer orders by 19%**
+and written five more to figures nothing supports. The command now fixes only
+the signature it can positively attribute — source `admin_manual`, no non-line
+extras, stored subtotal exactly twice the items, since `admin_manual` is the
+only source that can record a lump sum with no line items. A ×2 ratio on a
+`website` order is a coincidence, not a diagnosis, and is left alone. VAT-rate
+and items-exceed-total groups are named in the output so the survey says what
+it is looking at rather than calling everything broken.
+
+**The lesson worth keeping: a mismatch is not a fault.** Four order sources
+(website, eBay, Wix, manual) populate these columns on four different
+conventions, and no single rule spans them. Anything sweeping money columns
+across all four has to prove which convention each row follows before it
+writes.
 
 **The audit log was wrong too, in the same direction.** `item_added` recorded
 `order total: X → Y` from the same bad arithmetic, so anyone reconciling from
@@ -1526,6 +1565,8 @@ composer install --no-dev
 29. `2026_08_07_000002_create_campaign_drafts_table` (Session 74 — campaign autosave; creates `campaign_drafts`. One new table, nothing existing read, altered or backfilled. Guarded with `Schema::hasTable`. Proved by `CampaignDraftTest::test_the_migration_applies_against_real_sql_and_is_idempotent`, which runs the migration file itself and re-runs it. The campaign editor's existing send path does not depend on this table, so only the six new draft endpoints are affected while it is unapplied)
 
 Migrations 1–18 verified to apply cleanly on MySQL via CI (`migrate:fresh`) and `LeadFunnelAnalyticsTest`'s `RefreshDatabase`; #16–18 were additionally exercised against sqlite in `BulkEmailCampaignTest`. Applied to production via `artisan migrate --force` as part of the 2026-07-01 deploy (which also shipped Session 51's code-only Media Library fix — no new migrations there). #19–23 are guarded/additive (`Schema::hasColumn` checks) and ready to deploy via the same command — not yet confirmed run against production as of this note. #21 also widens `customer_communications.body` from TEXT to LONGTEXT via raw SQL (no doctrine/dbal in this project). See `DEPLOY_RUNBOOK.md` for the ordered deploy + rollback plan.
+
+30. `2026_08_10_000001_add_totals_repair_actions_to_order_logs_enum` (Session 75 — widens the `order_logs.action` ENUM with `totals_repaired` and `totals_restored`. Same MySQL-ENUM widening pattern as #2026_07_15_000001 and #2026_07_17_120845: `ALTER ... MODIFY COLUMN ENUM(...)` needs the FULL value list every time, not just the addition. Skipped on non-MySQL drivers so the sqlite test harness is unaffected. **Needed before `orders:repair-totals --fix` or `orders:restore-total` can write their audit log** — without it MySQL rejects the insert with "Data truncated for column 'action'". Both commands now write the order and its log in one transaction, so a rejected log rolls the order back rather than leaving it corrected and unexplained)
 
 **#26–27 (Session 72) are pushed but NOT yet applied to production.** Both are
 guarded/additive and each is exercised against real SQL by a test that runs the
