@@ -1,6 +1,33 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-07 | Branch: `main` | Latest commit: `d2f1896` (deployed)
+Last updated: 2026-08-11 | Branch: `main` | Latest commit: `1e08392` (**pushed, not deployed**)
+
+---
+
+## ⚠️ Outstanding on production (as of 2026-08-11)
+
+Sessions 74 and 75 are pushed and tested but **not on the live host**. One item
+below is not a deploy at all — it is live order data left wrong by a command
+that crashed mid-run, and it should be corrected before anything else.
+
+| # | Action | Why it matters |
+|---|--------|----------------|
+| 1 | **Restore order 10112** — `orders:restore-total 10112 371.88 371.88 --reason="undo bad automated repair, Session 75"` | The first `orders:repair-totals --fix` run cut it from **371.88 → 312.50** on a wrong diagnosis, then died before writing the log. It is still at the wrong figure and there is no record of the change. Needs migration #30 applied first so the restore can write its audit row. |
+| 2 | Deploy `1e08392` + `artisan migrate --force` | Applies **#29** (campaign drafts) and **#30** (`order_logs.action` ENUM). #30 gates both totals commands; without it MySQL rejects the log insert. |
+| 3 | Re-run `orders:repair-totals` (survey, no `--fix`) | Confirms the rewritten classifier now flags only the 2 lump-sum orders, not 21. Read the output before step 4. |
+| 4 | `orders:repair-totals --fix` | Corrects **AB-1150** (16,250 → 8,125) and **AB - 1182** (30,000 → 15,000) — the two real double counts. |
+| 5 | *(optional, business call)* `PARTNER_EDIT_WINDOW_HOURS=72` in `.env` before `config:cache` | See Session 75 partner-correction note. Config-only, reversible. |
+| 6 | *(human, not a command)* Reconcile orders **10075, 10076, 10077, 10079, 10080** | Items exceed the stored total on inconsistent ratios. No tooling will fix these — someone has to compare them against what was actually invoiced. Tracked in Known Gaps. |
+
+⚠️ **Verify the deploy path first.** This file records
+`/home/u978121777/domains/okelcor.com/public_html/okelcor-api`, but the
+production database is `okelvaxj_okelcor` and cPanel prefixes database names
+with the account user — which points at `/home/okelvaxj/...` instead. One of
+the two is stale. `pwd` on the host before running anything; do not trust
+either path from this document alone.
+
+`route:cache` must be rebuilt on this deploy (Session 74 adds the draft routes,
+Session 75 adds `PATCH /admin/partner-sales/{id}`).
 
 ---
 
@@ -1229,9 +1256,13 @@ higher-value half; see `FRONTEND_NOTE_campaign-autosave.md`.
 
 ## Order totals doubling — €15,000 order shown as €30,000 (Session 75)
 
-> **Deploy status:** code deployed; **migration #30 pending**. `orders:repair-totals`
-> and `orders:restore-total` cannot write their audit log until it runs — the
-> `order_logs.action` ENUM rejects the new values. Nothing else depends on it.
+> **Deploy status:** the *first* version of this work (`8d141da`) reached
+> production — that is how `orders:repair-totals --fix` came to be run there.
+> **The corrected version (`1e3ae7b`) has not.** Until it is deployed, the
+> command on the live host is still the one that misdiagnoses 19 of 21 orders;
+> do not run it with `--fix`. Migration #30 also pending — both commands update
+> the order and then fail on the audit-log insert without it. See the
+> outstanding-actions table at the top of this file.
 
 An order manager reported an order showing one line — 2,000 tyres at €7.50,
 subtotal €15,000 — under a total of **€30,000**. Exactly double.
@@ -1264,7 +1295,9 @@ to an order that began as a lump sum.
 
 `--fix` was run before the ENUM widening existed. It updated order **10112**
 (371.88 → 312.50) and then died on the log insert, leaving one order corrected
-with no record of why and the other 20 untouched. Two separate faults:
+with no record of why and the other 20 untouched. **10112 is still at the wrong
+figure on production** — restoring it is item 1 in the outstanding-actions table
+at the top of this file. Two separate faults:
 
 **1. No transaction.** The order write and its audit log were separate
 statements, so a failing log left a silently modified order. Both commands now
@@ -1382,6 +1415,7 @@ logs the figure actually written.
 | ~~`storage/logs/laravel.log` doesn't receive writes on production~~ | ~~Medium~~ Resolved | Confirmed resolved in Session 63/70 — used this file repeatedly to diagnose real production issues (Gemini quota errors, Crisp API errors) and it received writes correctly both times |
 | GLS production API access | Low | Currently running on the sandbox host (`api-sandbox.gls-group.net`) for both auth and tracking — verified to return real live data for real parcels, so not urgent, but production access requires a separate GLS approval step if sandbox ever proves unreliable long-term |
 | `admin_users.role` ENUM missing documented roles | **High** | Column only allows `super_admin/admin/editor/order_manager`; `sales_manager`, `support`, `content_manager`, `viewer` are referenced throughout `AdminPermissions.php` and this doc but can't be stored under MySQL strict mode — creating an admin with any of those roles fails outright. Found via CI in Session 52; needs a migration widening the ENUM (or switching to a plain string column) plus a check for any admin accounts already silently affected |
+| 5 orders where line items exceed the stored total | **High** | Orders **10075, 10076, 10077, 10079, 10080** (all `source = website`). Items sum to roughly 2× the recorded total on ratios of 0.43–0.49 — inconsistent, so not one mechanism. Surfaced by `orders:repair-totals` in Session 75 and deliberately **not** repaired: no rule can say which of the two figures is right, and one of them is what the customer was charged. Needs a person to compare each against the issued invoice. Money-facing, and unlike the double count it is not self-evident which direction the error runs |
 | `login_histories` table doesn't exist | Medium | Found in production logs (Session 70 investigation) — viewing a customer's login history in the admin panel throws `PDOException: Table 'login_histories' doesn't exist`. Distinct from the working `admin_login_histories` table (admin-side logins) — this is the customer-portal-side equivalent, apparently never migrated. Not yet fixed — flagged, not investigated further this session |
 | Crisp webhook inactive (free plan) | Low | `POST /webhooks/crisp` is fully built and HMAC-verified but Crisp's free plan doesn't support custom webhooks at all (requires Premium) — mobile polls the conversations list in the meantime. Will "just work" the moment the plan changes, no code change needed |
 | Custom live-chat system unused | Low | Session 66's Pusher-based `live_chat_sessions` system has zero real traffic — Crisp (Session 67) is the actual live chat product. Left in place rather than removed; candidate for deletion once Crisp is confirmed as the permanent choice |
@@ -1622,6 +1656,16 @@ being live ahead of the migration is safe — verified by test, not assumed.
 applied at some earlier point, so only #28 actually ran on the 2026-08-07
 deploy (176ms, after `backup:okelcor` and a `migrate --pretend` review).
 `route:cache` was rebuilt for Session 73's 22 new routes.
+
+**#29 and #30 are pushed but NOT yet applied to production.** #29 creates one
+new table and nothing else reads it, so the code is deploy-order safe — only the
+six campaign-draft endpoints are affected while it is unapplied. #30 is the
+opposite: it is a prerequisite, not an addition. Until it runs, both
+`orders:repair-totals --fix` and `orders:restore-total` will update an order and
+then fail on the audit-log insert. They now wrap both writes in one transaction
+so the order rolls back rather than being left corrected and unexplained — but
+the work simply cannot be done until the ENUM is widened. Apply #30 before
+touching order 10112 or the two lump-sum orders.
 
 ⚠️ Bulk email is deployed but **not yet safe to use for a real send**: `.env`
 still has `QUEUE_CONNECTION=sync`, so `SendBulkEmailCampaignJob` would run
