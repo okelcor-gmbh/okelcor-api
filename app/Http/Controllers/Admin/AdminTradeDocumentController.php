@@ -336,7 +336,72 @@ class AdminTradeDocumentController extends Controller
      * one of the "official" documents below, where having several at once
      * is normal and expected).
      */
-    private const UPLOADABLE_TYPES = ['order_confirmation', 'proforma', 'commercial_invoice', 'packing_list', 'delivery_note', 'shipment_document'];
+    private const UPLOADABLE_TYPES = ['order_confirmation', 'proforma', 'commercial_invoice', 'packing_list', 'delivery_note', 'shipment_document', 'other'];
+
+    /**
+     * The "official" types — the ones the system also generates itself, where
+     * exactly one active version per order is the invariant. Uploading one of
+     * these supersedes the previous. Everything outside this list is a filing
+     * bucket where several documents at once is normal.
+     */
+    private const OFFICIAL_TYPES = ['order_confirmation', 'proforma', 'commercial_invoice', 'packing_list', 'delivery_note'];
+
+    /**
+     * Human labels for the upload dropdown, served rather than hardcoded in the
+     * admin panel so adding a type here does not need a frontend deploy.
+     */
+    private const TYPE_LABELS = [
+        'order_confirmation' => 'Order Confirmation (AB)',
+        'proforma'           => 'Proforma Invoice (PI)',
+        'commercial_invoice' => 'Commercial Invoice (CI)',
+        'packing_list'       => 'Packing List (PL)',
+        'delivery_note'      => 'Delivery Note (DN)',
+        'shipment_document'  => 'Shipment Document (BOL, CMR, …)',
+        'other'              => 'Other — type your own',
+    ];
+
+    /**
+     * GET /api/v1/admin/trade-documents/upload-options
+     *
+     * Feeds both dropdowns on the upload dialog.
+     *
+     * `document_types` is the controlled vocabulary: it drives real behaviour
+     * (supersede, payment gating, what the customer sees), so it stays a fixed
+     * list — but it now ends in 'other', which behaves like a plain filing
+     * bucket and exists so nothing is ever unfileable.
+     *
+     * `file_as_suggestions` is the opposite: `type_label` has always been free
+     * text on this endpoint and the dropdown was a frontend-side list that
+     * could not be typed into. These are the labels this Okelcor has actually
+     * used before, so the field can be a combo box — pick a previous one or
+     * type a new one — instead of a closed list someone has to keep in sync.
+     */
+    public function uploadOptions(Request $request): JsonResponse
+    {
+        $used = TradeDocument::query()
+            ->whereNotNull('type_label')
+            ->where('type_label', '!=', '')
+            ->distinct()
+            ->orderBy('type_label')
+            ->pluck('type_label')
+            ->take(100)
+            ->values();
+
+        return response()->json([
+            'data' => [
+                'document_types' => array_map(fn ($t) => [
+                    'value'       => $t,
+                    'label'       => self::TYPE_LABELS[$t] ?? $t,
+                    'supersedes'  => in_array($t, self::OFFICIAL_TYPES, true),
+                    'custom_label_required' => $t === 'other',
+                ], self::UPLOADABLE_TYPES),
+                'file_as_suggestions' => $used,
+                'file_as_free_text'   => true,
+            ],
+            'meta'    => ['file_as_max_length' => 100],
+            'message' => 'success',
+        ]);
+    }
 
     /**
      * POST /api/v1/admin/orders/{id}/trade-documents/upload
@@ -405,7 +470,12 @@ class AdminTradeDocumentController extends Controller
         // An "official" type replaces whatever was previously issued for
         // it (generated or itself uploaded) — mirrors AdminTradeDocumentController::supersede,
         // just triggered automatically instead of by a separate admin action.
-        if ($type !== 'shipment_document') {
+        //
+        // Tested against OFFICIAL_TYPES rather than `!== 'shipment_document'`:
+        // that older form made every non-shipment type supersede, so the new
+        // 'other' bucket would have had each upload silently retire the last
+        // one — a filing bucket that holds a single document is not a bucket.
+        if (in_array($type, self::OFFICIAL_TYPES, true)) {
             $previous = TradeDocument::where('order_id', $order->id)
                 ->where('type', $type)
                 ->whereIn('status', ['issued', 'sent'])

@@ -43,7 +43,19 @@ class EuDeclarationController extends Controller
             return response()->json(['message' => 'Order not found.'], 404);
         }
 
-        if ($order->payment_status !== 'paid') {
+        // isFullyPaid(), not payment_status, and the difference is the whole
+        // bug. A milestone order settles through payment_stage — deposit_paid,
+        // then balance_paid — and NOTHING on that path ever writes
+        // payment_status, which stays 'pending' for the life of the order.
+        //
+        // So every reverse-charge EU B2B order taken on deposit-and-balance
+        // terms, which is the normal way these orders are paid and exactly the
+        // set of customers who need a Gelangensbestätigung, was permanently
+        // refused here. Paid in full, delivered, and told payment must be
+        // confirmed first. Without the certificate Okelcor cannot evidence the
+        // intra-community supply, so the zero-rating on that invoice is
+        // unsupported in a tax audit.
+        if (! $order->isFullyPaid()) {
             return response()->json([
                 'message' => 'Payment must be confirmed before the EU Entry Certificate can be signed.',
             ], 422);

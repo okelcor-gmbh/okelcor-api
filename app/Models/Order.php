@@ -194,6 +194,21 @@ class Order extends Model
             || in_array($this->payment_stage, ['balance_paid', 'shipment_released'], true);
     }
 
+    /**
+     * True once someone has actually asked the customer for a deposit.
+     *
+     * 'pending_proforma' is the resting state of every order, so it is not a
+     * milestone — it means the ladder has not been started. The customer
+     * portal must not render a deposit/balance schedule before this is true:
+     * a buyer seeing "Deposit Requested — 50%" for money nobody has asked him
+     * for reads it as a demand, and reasonably queries it.
+     */
+    public function paymentMilestonesActive(): bool
+    {
+        return $this->payment_stage !== null
+            && $this->payment_stage !== 'pending_proforma';
+    }
+
     public function items(): HasMany
     {
         return $this->hasMany(OrderItem::class);

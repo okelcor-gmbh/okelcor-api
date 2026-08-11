@@ -13,4 +13,28 @@ return [
         'sepa_note'          => 'EUR transfers within SEPA usually arrive within 1–2 working days.',
         'international_note' => 'International SWIFT transfers usually arrive within 4–5 working days.',
     ],
+
+    'milestones' => [
+        /*
+         * Whether issuing a proforma invoice also starts the deposit ladder
+         * (pending_proforma -> deposit_requested) and emails the customer that
+         * a deposit is due.
+         *
+         * Default false, deliberately. Issuing a document and asking a customer
+         * for money are two different decisions, and the second one belongs to
+         * a person. When this was true the customer saw a deposit request in
+         * the portal that nobody at Okelcor had chosen to send — reported by
+         * the order manager after a buyer queried a payment he had not been
+         * asked for and had not made.
+         *
+         * The deposit/balance amounts are still calculated and stored either
+         * way; only the stage advance and the customer email are gated. Start
+         * the ladder explicitly with
+         * POST /admin/orders/{id}/payment-milestones/request-deposit.
+         */
+        'auto_start_on_proforma' => (bool) env('PAYMENT_MILESTONES_AUTO_START', false),
+
+        /* Deposit percentage used when an order has none of its own. */
+        'default_deposit_percent' => (float) env('PAYMENT_DEPOSIT_PERCENT', 50),
+    ],
 ];

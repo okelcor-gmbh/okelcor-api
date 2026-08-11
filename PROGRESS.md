@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-11 | Branch: `main` | Latest commit: `1e08392` (**pushed, not deployed**)
+Last updated: 2026-08-11 | Branch: `main` | Latest commit: Session 76 (**pushed, not deployed**)
 
 ---
 
@@ -13,7 +13,7 @@ that crashed mid-run, and it should be corrected before anything else.
 | # | Action | Why it matters |
 |---|--------|----------------|
 | 1 | **Restore order 10112** — `orders:restore-total 10112 371.88 371.88 --reason="undo bad automated repair, Session 75"` | The first `orders:repair-totals --fix` run cut it from **371.88 → 312.50** on a wrong diagnosis, then died before writing the log. It is still at the wrong figure and there is no record of the change. Needs migration #30 applied first so the restore can write its audit row. |
-| 2 | Deploy `1e08392` + `artisan migrate --force` | Applies **#29** (campaign drafts) and **#30** (`order_logs.action` ENUM). #30 gates both totals commands; without it MySQL rejects the log insert. |
+| 2 | Deploy latest `main` + `artisan migrate --force` | Applies **#29** (campaign drafts), **#30** (`order_logs.action` ENUM — totals commands) and **#31** (same ENUM, eleven values shipped code already writes and MySQL has been silently rejecting — see Session 76). |
 | 3 | Re-run `orders:repair-totals` (survey, no `--fix`) | Confirms the rewritten classifier now flags only the 2 lump-sum orders, not 21. Read the output before step 4. |
 | 4 | `orders:repair-totals --fix` | Corrects **AB-1150** (16,250 → 8,125) and **AB - 1182** (30,000 → 15,000) — the two real double counts. |
 | 5 | *(optional, business call)* `PARTNER_EDIT_WINDOW_HOURS=72` in `.env` before `config:cache` | See Session 75 partner-correction note. Config-only, reversible. |
@@ -27,7 +27,15 @@ the two is stale. `pwd` on the host before running anything; do not trust
 either path from this document alone.
 
 `route:cache` must be rebuilt on this deploy (Session 74 adds the draft routes,
-Session 75 adds `PATCH /admin/partner-sales/{id}`).
+Session 75 adds `PATCH /admin/partner-sales/{id}`, Session 76 adds
+`POST /admin/orders/{id}/payment-milestones/request-deposit` and
+`GET /admin/trade-documents/upload-options`).
+
+**Session 76 changes live customer-facing behaviour the moment it lands:**
+generating a proforma stops e-mailing the customer a deposit request, and the
+EU entry certificate starts accepting milestone-paid orders that were being
+refused. Both are the fix, not a side effect — but tell the order manager the
+proforma button no longer notifies anyone, or she will assume it still does.
 
 ---
 
@@ -1215,6 +1223,118 @@ were never in question.
 
 ---
 
+## Payment milestones become admin-driven + EU certificate fix (Session 76)
+
+> **Deploy status:** built and tested, **not yet deployed**. Migration **#31**
+> (`order_logs.action` ENUM) unapplied. Deploy-order safe: #31 widens an ENUM
+> that is already being rejected, so the code is strictly better off with it and
+> no worse without it than it is today. `route:cache` must be rebuilt — two new
+> routes.
+
+The order manager called with three complaints about one order. They turned out
+to be three different mechanisms, and chasing them surfaced a fourth thing that
+had been silently broken since the milestone feature shipped.
+
+### "It marked itself paid"
+
+She recorded an order by hand, set it `confirmed`, and it came out paid.
+
+**Cause.** `POST /admin/orders/{id}/mark-paid` required
+`payment_method === 'bank_transfer'`. `AdminOrderController::store()` never sets
+`payment_method`, so it is **NULL on every admin-created order** and the
+endpoint 422'd on all of them. That left ticking "paid" on the creation form as
+the only route to a paid order — i.e. the workflow forced her to declare the
+money received before it was, and then she was blamed for the result.
+
+| Change | Status | Notes |
+|--------|--------|-------|
+| `mark-paid` accepts off-platform payments | 🔧 | Bank transfer, admin-recorded, imported. Only `payment_method === 'stripe'` is refused (`gateway_managed_payment`), because there the gateway is the source of truth and the webhook writes it. The old rule named one payment method and excluded the case the endpoint exists for. |
+| Creation-form default unchanged | 🔧 | `payment_status: 'paid'` → `payment_stage: 'balance_paid'` still holds for **historical** backfill, as `FRONTEND_NOTE_historical-orders-onboarding.md` documents and the frontend depends on. It is correct there and only there; flagged to frontend that a live order must be created `pending`. |
+
+### "The customer saw a deposit request nobody sent"
+
+A buyer opened his portal to `Deposit Requested — 50%`, `Deposit Paid`,
+`Balance Due`, and queried a payment he had not been asked for and had not made.
+
+**Cause, and the one that matters.** `generateProformaForOrder()` called
+`setDepositMilestones()`, which advanced `payment_stage` to `deposit_requested`
+**and emailed the customer that a deposit was due**. Issuing a document sent a
+demand for money. No person decided it.
+
+| Change | Status | Notes |
+|--------|--------|-------|
+| Proforma no longer starts the ladder | 🔧 | The deposit/balance split is still calculated and stored — it is arithmetic on the total and telling nobody costs nothing. Only the stage advance and the customer email are gated. **Issuing a document and asking a customer for money are two decisions, and the second one belongs to a person.** |
+| `PAYMENT_MILESTONES_AUTO_START` | 🔧 | Default `false`. The old behaviour is one `.env` line away if the business disagrees — config-only, reversible, no code change. Proved by a test that flips the flag and asserts the stage advances. |
+| `POST /admin/payment-milestones/request-deposit` | 🔧 | The explicit act. Accepts a percentage **or** an agreed round figure (`deposit_amount` wins and the percentage is derived from it — a deposit is more often a negotiated number than a clean fraction). Refuses a deposit above the order total, and refuses to start a ladder twice. |
+| `notify_customer` defaults to **false** | 🔧 | The common case is an order manager bringing the record in line with a phone call that already happened. A duplicate "your deposit is due" is worse than silence — and sending one unasked is the exact complaint being fixed. Opt-in, not opt-out. |
+| `deposit-paid` accepts `pending_proforma` too | 🔧 | Money arrives against a quote, or after a call, without anyone pressing "request deposit" first. Refusing to record a payment that is already in the bank because of the order the buttons were pressed in helps nobody. The split is backfilled when it was never set. |
+| `payment_milestones_active` on every payload | 🔧 | `pending_proforma` is the resting state of every order, not a milestone. The portal gates the whole panel on this now. Without it the frontend has to infer "not started" from a stage name, which is what produced a payment schedule for an order at stage zero. |
+
+### "Check the EU entry certificate still works"
+
+She was right to ask, and it did not.
+
+**`EuDeclarationController::sign()` gated on `payment_status === 'paid'`.** A
+milestone order settles through `payment_stage` — `deposit_paid`, then
+`balance_paid` — and **nothing on that path ever writes `payment_status`**,
+which stays `pending` for the life of the order.
+
+So every reverse-charge EU B2B order taken on deposit-and-balance terms — the
+normal way these are paid, and exactly the customers who need a
+Gelangensbestätigung — was permanently refused. Paid in full, delivered, and
+told payment must be confirmed first. **Money-facing in the worst way: without
+the certificate Okelcor cannot evidence the intra-community supply, so the
+zero-rating on that invoice is unsupported in a tax audit.**
+
+| Change | Status | Notes |
+|--------|--------|-------|
+| Gated on `Order::isFullyPaid()` | 🔧 | The predicate already existed and covers both conventions. It was written for this and simply not used here. |
+| `declaration_can_sign` on the customer payload | 🔧 | Derived from the same three conditions the endpoint enforces, so the portal's Sign button cannot offer an action that 422s — nor hide one that would succeed. Any client recomputing this from `payment_status` reproduces the bug, so the field exists to stop that happening again. |
+
+### The milestone audit trail never existed (found on the way)
+
+Adding `deposit_requested` as a log action meant checking the `order_logs.action`
+ENUM. The four milestone actions beside it — `deposit_paid`, `balance_due`,
+`balance_paid`, `shipment_released` — **had never been in it either.**
+
+Every one of those writes sits behind a `try/catch` that logs a warning and
+carries on, so MySQL has been rejecting them since the feature shipped and
+nobody noticed. **The payment milestone history — the record of who confirmed a
+customer's money had arrived — does not exist on production for any order.**
+Those rows are not recoverable.
+
+Eleven values in total are written by shipped code and rejected by the column:
+the five milestone actions, `payment_milestone_email_sent`/`_failed`,
+`declaration_acknowledged`, `document_superseded`,
+`document_generation_blocked_payment_stage` and `proforma_signed_returned`.
+
+**Third time this trap has been walked into** — after `security_events.type`
+(Session 73) and `order_logs.action` itself (Session 75, which added two values
+without auditing the rest of the column). The lesson that keeps not sticking:
+**a `try/catch` around an audit write converts a schema error into silence.**
+The catch is right — a failed log must not fail the user's action — but nothing
+was reading the warnings. Migration #31 adds all eleven, and its `down()`
+refuses to run if any row uses one of them rather than truncating an append-only
+trail.
+
+### Document upload — nothing should be unfileable
+
+| Change | Status | Notes |
+|--------|--------|-------|
+| `type: 'other'` catch-all | 🔧 | `type` drives real behaviour (supersede, payment gating, customer visibility) so it stays a controlled vocabulary rather than becoming free text — but it now ends in a plain filing bucket, so there is always somewhere to put an unusual document. |
+| Supersede tested against `OFFICIAL_TYPES` | 🔧 | Was `$type !== 'shipment_document'`, which would have made every `other` upload silently retire the previous one — **a filing bucket that holds one document is not a bucket.** Caught by writing the test for it, not by reading the diff. |
+| `GET /admin/trade-documents/upload-options` | 🔧 | Serves both dropdowns. `type_label` ("File as") has **always** been free text on the API, max 100 chars, no allowlist — the closed dropdown was purely frontend, so her request needed no backend change at all except to say so. The endpoint also returns previously-used labels so the field can be a combo box instead of a list someone has to keep in sync. |
+| Registered before `trade-documents/{id}/download` | 🔧 | Otherwise `upload-options` is captured as an `{id}`. |
+| Backend tests (21 new) | ✅ | `PaymentMilestoneControlTest` — **21 passed / 74 assertions, actually executed** on the minimal-schema sqlite harness. Full suite: **305 passed, 0 failed**, 206 skipped (pre-existing gate), up from 284. |
+
+**Still open:** the five stages render in the portal with a `Resend` control
+under each, including stages the order has never reached — a stage that has not
+happened has no email to resend. Flagged to frontend as presentation, not API.
+
+See `FRONTEND_NOTE_payment-milestone-control.md`.
+
+---
+
 ## Campaign autosave — losing work on tab change (Session 74)
 
 > **Deploy status:** built and tested, **not yet deployed**. Migration #29
@@ -1416,6 +1536,8 @@ logs the figure actually written.
 | GLS production API access | Low | Currently running on the sandbox host (`api-sandbox.gls-group.net`) for both auth and tracking — verified to return real live data for real parcels, so not urgent, but production access requires a separate GLS approval step if sandbox ever proves unreliable long-term |
 | `admin_users.role` ENUM missing documented roles | **High** | Column only allows `super_admin/admin/editor/order_manager`; `sales_manager`, `support`, `content_manager`, `viewer` are referenced throughout `AdminPermissions.php` and this doc but can't be stored under MySQL strict mode — creating an admin with any of those roles fails outright. Found via CI in Session 52; needs a migration widening the ENUM (or switching to a plain string column) plus a check for any admin accounts already silently affected |
 | 5 orders where line items exceed the stored total | **High** | Orders **10075, 10076, 10077, 10079, 10080** (all `source = website`). Items sum to roughly 2× the recorded total on ratios of 0.43–0.49 — inconsistent, so not one mechanism. Surfaced by `orders:repair-totals` in Session 75 and deliberately **not** repaired: no rule can say which of the two figures is right, and one of them is what the customer was charged. Needs a person to compare each against the issued invoice. Money-facing, and unlike the double count it is not self-evident which direction the error runs |
+| Payment milestone history missing for all pre-#31 orders | Medium | `order_logs.action` never accepted the milestone values, and the writes are wrapped in a `try/catch` that only logs a warning — so no order on production has a record of who confirmed its deposit or balance. Migration #31 fixes it going forward; the lost rows cannot be reconstructed. If any order's payment confirmation is ever disputed, `storage/logs/laravel.log` warnings are the only trace, and only for as long as that file is retained |
+| Audit-log writes fail silently across the codebase | **High** | Not the ENUM itself — the pattern. Every `OrderLog` write is inside a `try/catch` that logs a warning and continues, which is right (a failed log must not fail the user's action) but means a schema mismatch is invisible until someone reads the column definition. Three separate instances found this way now (`security_events.type` Session 73, `order_logs.action` Sessions 75 and 76). Wants a test asserting every action string written in `app/` is accepted by the column, or a CI check — otherwise there will be a fourth |
 | `login_histories` table doesn't exist | Medium | Found in production logs (Session 70 investigation) — viewing a customer's login history in the admin panel throws `PDOException: Table 'login_histories' doesn't exist`. Distinct from the working `admin_login_histories` table (admin-side logins) — this is the customer-portal-side equivalent, apparently never migrated. Not yet fixed — flagged, not investigated further this session |
 | Crisp webhook inactive (free plan) | Low | `POST /webhooks/crisp` is fully built and HMAC-verified but Crisp's free plan doesn't support custom webhooks at all (requires Premium) — mobile polls the conversations list in the meantime. Will "just work" the moment the plan changes, no code change needed |
 | Custom live-chat system unused | Low | Session 66's Pusher-based `live_chat_sessions` system has zero real traffic — Crisp (Session 67) is the actual live chat product. Left in place rather than removed; candidate for deletion once Crisp is confirmed as the permanent choice |
@@ -1587,6 +1709,17 @@ PARTNER_MAX_BACKDATE_DAYS=730    # how far back a sale may be dated (paper backl
 PARTNER_TOKEN_TTL_DAYS=90        # long by design — the app must work offline,
                                  # and a partner who can't reach the network
                                  # also can't re-authenticate
+
+# Payment milestones (Session 76) — OPTIONAL, defaults in config/payment.php.
+# Leave AUTO_START unset/false: true restores the old behaviour where issuing a
+# proforma silently advanced the order to deposit_requested AND e-mailed the
+# customer that a deposit was due, with no admin deciding it. That is the bug
+# the order manager reported — a buyer queried a payment he'd never been asked
+# for. The deposit/balance amounts are calculated either way; only the stage
+# advance and the customer e-mail are gated. Start the ladder explicitly with
+# POST /admin/orders/{id}/payment-milestones/request-deposit.
+PAYMENT_MILESTONES_AUTO_START=false
+PAYMENT_DEPOSIT_PERCENT=50       # used when an order carries no percentage of its own
 ```
 
 ---
@@ -1657,7 +1790,9 @@ applied at some earlier point, so only #28 actually ran on the 2026-08-07
 deploy (176ms, after `backup:okelcor` and a `migrate --pretend` review).
 `route:cache` was rebuilt for Session 73's 22 new routes.
 
-**#29 and #30 are pushed but NOT yet applied to production.** #29 creates one
+31. `2026_08_11_000001_add_milestone_and_document_actions_to_order_logs_enum` (Session 76 — widens `order_logs.action` with **eleven values shipped code already writes and MySQL has been rejecting all along**: `deposit_requested`, `deposit_paid`, `balance_due`, `balance_paid`, `shipment_released`, `payment_milestone_email_sent`, `payment_milestone_email_failed`, `declaration_acknowledged`, `document_superseded`, `document_generation_blocked_payment_stage`, `proforma_signed_returned`. Every one of those writes sits behind a `try/catch` that logs a warning and continues, so the failures were invisible — the payment milestone history does not exist on production for any order and those rows are not recoverable. This is a backlog fix, not a new feature. Same `ALTER ... MODIFY COLUMN ENUM(...)` full-list pattern as #22, #30 and `2026_07_17_120845`; skipped on non-MySQL drivers. `down()` **throws** rather than running if any row uses one of the added values, since reverting the ENUM would truncate an append-only audit trail)
+
+**#29, #30 and #31 are pushed but NOT yet applied to production.** #29 creates one
 new table and nothing else reads it, so the code is deploy-order safe — only the
 six campaign-draft endpoints are affected while it is unapplied. #30 is the
 opposite: it is a prerequisite, not an addition. Until it runs, both

@@ -569,6 +569,7 @@ Route::prefix('v1')->group(function () {
         // Payment milestones — payments.mark_paid (super_admin, admin, order_manager)
         // -----------------------------------------------------------------
         Route::middleware('permission:payments.mark_paid')->prefix('orders/{id}/payment-milestones')->group(function () {
+            Route::post('request-deposit',  [AdminOrderPaymentMilestoneController::class, 'requestDeposit']);
             Route::post('deposit-paid',     [AdminOrderPaymentMilestoneController::class, 'markDepositPaid']);
             Route::post('balance-due',      [AdminOrderPaymentMilestoneController::class, 'markBalanceDue']);
             Route::post('balance-paid',     [AdminOrderPaymentMilestoneController::class, 'markBalancePaid']);
@@ -727,6 +728,9 @@ Route::prefix('v1')->group(function () {
             Route::post('orders/{id}/generate-commercial-invoice', [AdminTradeDocumentController::class, 'generateCommercialInvoice']);
             Route::post('orders/{id}/generate-packing-list', [AdminTradeDocumentController::class, 'generatePackingList']);
             Route::post('orders/{id}/generate-delivery-note', [AdminTradeDocumentController::class, 'generateDeliveryNote']);
+            // Static route registered before 'trade-documents/{id}/download' so
+            // 'upload-options' is never captured as an {id}.
+            Route::get('trade-documents/upload-options', [AdminTradeDocumentController::class, 'uploadOptions']);
             Route::post('orders/{id}/trade-documents/upload', [AdminTradeDocumentController::class, 'uploadShipmentDocument']);
             Route::get('orders/{id}/trade-documents', [AdminTradeDocumentController::class, 'indexForOrder']);
             Route::post('orders/{orderId}/trade-documents/{documentId}/supersede', [AdminTradeDocumentController::class, 'supersede']);

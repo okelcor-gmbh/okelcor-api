@@ -15,6 +15,97 @@ class AdminOrderPaymentMilestoneController extends Controller
     public function __construct(private PaymentMilestoneEmailService $emailService) {}
 
     /**
+     * POST /api/v1/admin/orders/{id}/payment-milestones/request-deposit
+     *
+     * Start the payment ladder deliberately: record what deposit is being
+     * asked for and move the order to 'deposit_requested'.
+     *
+     * This used to happen on its own the moment a proforma was generated,
+     * which meant a customer could open his portal and find a deposit request
+     * nobody had decided to send him. Issuing a document and asking for money
+     * are now two separate acts, and this is the second one.
+     *
+     * The customer is emailed ONLY if notify_customer is true. It defaults to
+     * false: the common case is an order manager bringing the record in line
+     * with a conversation that already happened by phone or e-mail, and a
+     * duplicate "your deposit is due" is worse than silence.
+     */
+    public function requestDeposit(Request $request, int $id): JsonResponse
+    {
+        $request->validate([
+            'deposit_percent' => ['sometimes', 'nullable', 'numeric', 'min:0.01', 'max:100'],
+            'deposit_amount'  => ['sometimes', 'nullable', 'numeric', 'min:0.01'],
+            'notify_customer' => ['sometimes', 'boolean'],
+            'notes'           => ['sometimes', 'nullable', 'string', 'max:500'],
+        ]);
+
+        $order = Order::findOrFail($id);
+
+        if ($order->payment_stage !== 'pending_proforma') {
+            return response()->json([
+                'message'       => "The payment ladder has already been started on this order. Current stage: {$order->payment_stage}",
+                'code'          => 'invalid_payment_stage',
+                'payment_stage' => $order->payment_stage,
+            ], 409);
+        }
+
+        $total = round((float) $order->total, 2);
+
+        if ($total <= 0) {
+            return response()->json([
+                'message' => 'This order has no total to take a deposit against.',
+                'code'    => 'order_total_missing',
+            ], 422);
+        }
+
+        // An explicit amount wins over a percentage — a deposit is often a
+        // round figure agreed with the buyer rather than a clean fraction.
+        if ($request->filled('deposit_amount')) {
+            $depositAmount  = round((float) $request->input('deposit_amount'), 2);
+            $depositPercent = round($depositAmount / $total * 100, 2);
+        } else {
+            $depositPercent = (float) ($request->input('deposit_percent')
+                ?: $order->deposit_percent
+                ?: config('payment.milestones.default_deposit_percent', 50));
+            $depositAmount = round($total * $depositPercent / 100, 2);
+        }
+
+        if ($depositAmount > $total) {
+            return response()->json([
+                'message' => 'The deposit cannot be more than the order total.',
+                'code'    => 'deposit_exceeds_total',
+            ], 422);
+        }
+
+        $order->update([
+            'payment_stage'   => 'deposit_requested',
+            'deposit_percent' => $depositPercent,
+            'deposit_amount'  => $depositAmount,
+            'balance_amount'  => round($total - $depositAmount, 2),
+        ]);
+
+        $notify    = $request->boolean('notify_customer');
+        $emailSent = $notify ? $this->emailService->send($order, 'deposit_requested') : false;
+
+        $this->log($request, $order, 'deposit_requested', [
+            'old_value' => 'pending_proforma',
+            'new_value' => 'deposit_requested',
+            'notes'     => implode(' | ', array_filter([
+                $request->filled('notes') ? $request->notes : null,
+                "Deposit requested: {$depositAmount} ({$depositPercent}%).",
+                $notify ? 'Customer notified by e-mail.' : 'Customer not notified.',
+            ])),
+        ]);
+
+        return response()->json([
+            'data'          => $this->formatMilestones($order->fresh()),
+            'message'       => 'Deposit requested. The payment milestones are now visible to the customer.',
+            'email_sent'    => $emailSent,
+            'email_warning' => (! $notify || $emailSent) ? null : 'Customer notification email could not be sent.',
+        ]);
+    }
+
+    /**
      * POST /api/v1/admin/orders/{id}/payment-milestones/deposit-paid
      *
      * Confirm the customer's deposit has arrived. Unlocks CI, PL, and
@@ -30,12 +121,30 @@ class AdminOrderPaymentMilestoneController extends Controller
         $order = Order::findOrFail($id);
         $admin = $request->user();
 
-        if ($order->payment_stage !== 'deposit_requested') {
+        // 'pending_proforma' is accepted as well as 'deposit_requested'.
+        // Money sometimes simply arrives — against a quote, or after a phone
+        // call — without anyone having pressed "request deposit" first, and
+        // refusing to record a payment that is already in the bank because of
+        // the order the buttons were pressed in helps nobody.
+        if (! in_array($order->payment_stage, ['pending_proforma', 'deposit_requested'], true)) {
             return response()->json([
-                'message'       => "Deposit can only be confirmed when payment stage is 'deposit_requested'. Current: {$order->payment_stage}",
+                'message'       => "Deposit can only be confirmed from 'pending_proforma' or 'deposit_requested'. Current: {$order->payment_stage}",
                 'code'          => 'invalid_payment_stage',
                 'payment_stage' => $order->payment_stage,
             ], 409);
+        }
+
+        // Recorded straight from pending_proforma, so the split was never set.
+        if ($order->deposit_amount === null && (float) $order->total > 0) {
+            $total          = round((float) $order->total, 2);
+            $depositPercent = (float) ($order->deposit_percent ?: config('payment.milestones.default_deposit_percent', 50));
+            $depositAmount  = round($total * $depositPercent / 100, 2);
+
+            $order->update([
+                'deposit_percent' => $depositPercent,
+                'deposit_amount'  => $depositAmount,
+                'balance_amount'  => round($total - $depositAmount, 2),
+            ]);
         }
 
         $order->update([
@@ -250,6 +359,7 @@ class AdminOrderPaymentMilestoneController extends Controller
             'id'                                   => $order->id,
             'order_ref'                            => $order->ref,
             'payment_stage'                        => $order->payment_stage,
+            'payment_milestones_active'            => $order->paymentMilestonesActive(),
             'deposit_percent'                      => (float) $order->deposit_percent,
             'deposit_amount'                       => $order->deposit_amount !== null ? (float) $order->deposit_amount : null,
             'deposit_paid_at'                      => $order->deposit_paid_at?->toIso8601String(),

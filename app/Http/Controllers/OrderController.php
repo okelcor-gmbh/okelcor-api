@@ -112,8 +112,13 @@ class OrderController extends Controller
             'customer_acceptance_status' => $o->customer_acceptance_status ?? 'pending',
             'customer_accepted_at'       => $o->customer_accepted_at?->toIso8601String(),
 
-            // Payment milestones — customer-visible progress
-            'payment_stage'        => $o->payment_stage ?? 'pending_proforma',
+            // Payment milestones — customer-visible progress.
+            // Render the schedule only when payment_milestones_active is true.
+            // Until an admin requests a deposit there is nothing to show, and
+            // showing it anyway tells the customer he owes money nobody asked
+            // him for.
+            'payment_stage'             => $o->payment_stage ?? 'pending_proforma',
+            'payment_milestones_active' => $o->paymentMilestonesActive(),
             'deposit_amount'       => $o->deposit_amount !== null ? (float) $o->deposit_amount : null,
             'deposit_paid_at'      => $o->deposit_paid_at?->toIso8601String(),
             'balance_amount'       => $o->balance_amount !== null ? (float) $o->balance_amount : null,
@@ -121,6 +126,16 @@ class OrderController extends Controller
 
             // EU entry certificate — customer-visible status + download availability
             'declaration_required'           => $o->is_reverse_charge === true,
+            // Whether POST .../declaration would be accepted right now. Derived
+            // from the same three conditions the endpoint enforces, so the
+            // portal's Sign button can never offer an action that 422s — and,
+            // more to the point, can never hide one that would succeed. Do not
+            // recompute this from payment_status on the client: a milestone
+            // order is paid in full with payment_status still 'pending'.
+            'declaration_can_sign'           => $o->is_reverse_charge === true
+                && $o->isFullyPaid()
+                && $o->status === 'delivered'
+                && (! $o->relationLoaded('euDeclaration') || ($o->euDeclaration?->status ?? 'pending') === 'pending'),
             'declaration_status'             => $o->relationLoaded('euDeclaration') ? $o->euDeclaration?->status : null,
             'declaration_signed_at'          => $o->relationLoaded('euDeclaration') ? $o->euDeclaration?->signed_at?->toIso8601String() : null,
             'declaration_signed_name'        => $o->relationLoaded('euDeclaration') ? $o->euDeclaration?->signed_name : null,

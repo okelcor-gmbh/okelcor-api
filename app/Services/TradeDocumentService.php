@@ -433,7 +433,22 @@ class TradeDocumentService
     /**
      * Calculate and persist deposit/balance amounts when proforma is first issued.
      * No-op if milestones are already set (idempotent).
-     * Sends deposit_requested customer email after advancing the stage.
+     *
+     * The amounts are always computed — they are arithmetic on the order total
+     * and telling nobody costs nothing. What is NOT done here any more is
+     * advancing payment_stage to 'deposit_requested' and emailing the customer
+     * that a deposit is due. Issuing a proforma is a document action; asking a
+     * customer for money is a decision, and it belongs to whoever is handling
+     * the account.
+     *
+     * Reported by the order manager: a buyer saw a deposit request and a
+     * payment ladder in his portal for an order nobody had asked him to pay
+     * for yet, and queried it. Nothing had gone wrong at his end — generating
+     * the proforma had sent it.
+     *
+     * Set PAYMENT_MILESTONES_AUTO_START=true to restore the old behaviour
+     * without a code change. To start the ladder deliberately, call
+     * POST /admin/orders/{id}/payment-milestones/request-deposit.
      */
     private function setDepositMilestones(Order $order): void
     {
@@ -442,16 +457,24 @@ class TradeDocumentService
         }
 
         try {
-            $depositPercent = (float) ($order->deposit_percent ?? 50);
+            $depositPercent = (float) ($order->deposit_percent ?: config('payment.milestones.default_deposit_percent', 50));
             $total          = (float) $order->total;
             $depositAmount  = round($total * $depositPercent / 100, 2);
             $balanceAmount  = round($total - $depositAmount, 2);
 
-            $order->update([
-                'payment_stage'  => 'deposit_requested',
+            $changes = [
                 'deposit_amount' => $depositAmount,
                 'balance_amount' => $balanceAmount,
-            ]);
+            ];
+
+            if (! config('payment.milestones.auto_start_on_proforma', false)) {
+                // Amounts recorded, ladder not started, customer not emailed.
+                $order->update($changes);
+
+                return;
+            }
+
+            $order->update($changes + ['payment_stage' => 'deposit_requested']);
 
             // Notify customer that a deposit is now due
             app(PaymentMilestoneEmailService::class)->send($order, 'deposit_requested');

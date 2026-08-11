@@ -141,6 +141,13 @@ class AdminOrderController extends Controller
         // stage so document upload / visibility (both gated on payment_stage)
         // isn't blocked behind a milestone that no longer applies to something
         // that already happened. Admin can override for an order still mid-flight.
+        //
+        // This fires only on an explicit payment_status of 'paid', which now
+        // means what it says: the money is already in. A live order still
+        // awaiting payment is created 'pending' and confirmed later through
+        // POST /admin/orders/{id}/mark-paid, which works for manual orders as
+        // of Session 76 — before that it 422'd and this form was the only way
+        // to reach 'paid' at all.
         $paymentStage = $data['payment_stage'] ?? match ($data['payment_status']) {
             'paid'  => 'balance_paid',
             default => 'pending_proforma',
@@ -354,9 +361,21 @@ class AdminOrderController extends Controller
 
         $order = Order::with('items')->findOrFail($id);
 
-        if ($order->payment_method !== 'bank_transfer') {
+        // Only a gateway-owned payment is off-limits: Stripe decides when a
+        // Stripe order is paid, and the webhook writes it. Everything else —
+        // bank transfer, an admin-recorded order (payment_method is NULL on
+        // those), an import — is settled off-platform, so a human confirming
+        // receipt is the ONLY thing that can mark it paid.
+        //
+        // This used to demand payment_method === 'bank_transfer', which no
+        // admin-created order has. The endpoint 422'd on every one of them,
+        // leaving "tick paid on the creation form" as the only route to a
+        // paid order — i.e. declaring payment received before it was. That is
+        // the order manager's report: the order marked itself paid.
+        if ($order->payment_method === 'stripe') {
             return response()->json([
-                'message' => 'Only bank_transfer orders can be manually confirmed.',
+                'message' => 'This order is paid through Stripe. Its payment status is set by the gateway, not by hand.',
+                'code'    => 'gateway_managed_payment',
             ], 422);
         }
 
@@ -423,7 +442,7 @@ class AdminOrderController extends Controller
         $this->writeLog($request, $fresh, 'payment_status_changed', [
             'old_value' => 'pending',
             'new_value' => 'paid',
-            'notes'     => implode(' | ', $noteParts) ?: 'Bank transfer payment confirmed by admin.',
+            'notes'     => implode(' | ', $noteParts) ?: 'Payment receipt confirmed by admin.',
         ]);
 
         return response()->json([
@@ -820,6 +839,7 @@ class AdminOrderController extends Controller
 
             // Payment milestones
             'payment_stage'                        => $o->payment_stage ?? 'pending_proforma',
+            'payment_milestones_active'            => $o->paymentMilestonesActive(),
             'deposit_percent'                      => (float) ($o->deposit_percent ?? 50),
             'deposit_amount'                       => $o->deposit_amount !== null ? (float) $o->deposit_amount : null,
             'deposit_paid_at'                      => $o->deposit_paid_at?->toIso8601String(),
