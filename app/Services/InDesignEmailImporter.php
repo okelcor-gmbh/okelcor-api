@@ -1,0 +1,1155 @@
+<?php
+
+namespace App\Services;
+
+use App\Models\Media;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Str;
+use RuntimeException;
+
+/**
+ * Turns an InDesign "Publish Online / HTML5" export into campaign BLOCKS.
+ *
+ * The marketing team designs in InDesign because that is where they can make
+ * something that actually looks good, then exports HTML. What comes out is not
+ * an email and cannot be made into one by pasting it:
+ *
+ *   - the whole publication is an <iframe> inside a shell page with prev/next
+ *     arrows, on a fixed 595 x 1089px canvas;
+ *   - every element is `position:absolute` with a CSS `transform:translate()`;
+ *   - every WORD is its own <span> at an exact `left:` offset inside a wrapper
+ *     scaled by 0.05, so the type is really set at 420px and shrunk;
+ *   - the fonts are @font-face TTFs shipped alongside.
+ *
+ * Outlook's rendering engine supports none of that — no absolute positioning,
+ * no transforms, no webfonts — and Gmail strips most of it too. Sent as-is the
+ * design does not degrade, it collapses into an unreadable pile of words.
+ *
+ * So this class does not embed the export. It RECOVERS it:
+ *
+ *   1. the copy, by grouping the positioned spans back into lines (same `top`,
+ *      ordered by `left`) and lines back into paragraphs (one <p> = one
+ *      paragraph, its several `top` values are just its visual line breaks);
+ *   2. the real photographs, into the Media Library, so they get permanent
+ *      absolute URLs and are reusable in any future campaign;
+ *   3. the reading order, from each container's `transform:translate(x,y)` —
+ *      document order in the export is InDesign's stacking order, not the
+ *      order a person reads;
+ *   4. the palette, from the generated stylesheet.
+ *
+ * The output is a normal block list, so it renders through CampaignBlockRenderer
+ * exactly like a hand-built campaign: table-based, inline-styled, Outlook-safe,
+ * with the merge tags and the unsubscribe footer the send job depends on.
+ *
+ * WHAT THIS DOES NOT DO, and cannot: reproduce the InDesign layout pixel for
+ * pixel. Overlapping text on a full-bleed photo, exact leading and letter
+ * spacing, the display typeface — none of that survives in email, by any method.
+ * What survives is the imagery, the words, the order and the colours. The
+ * import is deliberately a STARTING POINT the marketer then edits in the
+ * campaign editor, which is also why a mis-grouped list or a heading read as a
+ * paragraph is a five-second fix rather than a failed import.
+ */
+class InDesignEmailImporter
+{
+    /** Hard ceilings on the archive, checked before anything is written to disk. */
+    private const MAX_ENTRIES        = 400;
+    private const MAX_UNCOMPRESSED   = 120 * 1024 * 1024;
+    private const MAX_IMAGES         = 40;
+
+    /**
+     * Images smaller than this on their long side are InDesign furniture —
+     * rules, bullet glyphs, the 1px gradient strips it emits as PNGs — not
+     * content. Importing them would fill the Media Library with slivers and put
+     * meaningless full-width bars in the email.
+     */
+    private const MIN_IMAGE_LONG_SIDE  = 200;
+    private const MIN_IMAGE_SHORT_SIDE = 40;
+
+    /** A run of at least this many consecutive short paragraphs reads as a list. */
+    private const LIST_MIN_ITEMS  = 3;
+    private const LIST_MAX_LENGTH = 140;
+
+    /**
+     * A long, thin graphic is a rule — InDesign draws the gold hairlines under
+     * its headings as PNGs. Rendered as an email image it becomes a full-width
+     * bar; as a divider block it is the thing it was drawn to be. Both bounds
+     * are needed: the ratio alone would catch a legitimate wide banner.
+     */
+    private const RULE_MIN_RATIO      = 6.0;
+    private const RULE_MAX_SHORT_SIDE = 80;
+
+    /** Only these ever leave the archive. Fonts and scripts are useless in email. */
+    private const ALLOWED_EXTENSIONS = ['html', 'htm', 'xhtml', 'css', 'png', 'jpg', 'jpeg', 'gif', 'webp'];
+
+    private const IMPORTABLE_IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp'];
+
+    public function __construct(private MediaLibraryService $mediaLibrary)
+    {
+    }
+
+    /**
+     * @return array{
+     *     blocks: array<int, array<string, mixed>>,
+     *     theme: array<string, mixed>,
+     *     media: array<int, array<string, mixed>>,
+     *     warnings: array<int, string>,
+     *     source: array<string, mixed>
+     * }
+     *
+     * @throws RuntimeException when the archive is not a usable InDesign export
+     */
+    public function import(UploadedFile $zip, ?int $uploadedBy = null, string $collection = 'campaigns'): array
+    {
+        $workspace = $this->extract($zip);
+
+        try {
+            return $this->convert($workspace, $uploadedBy, $collection);
+        } finally {
+            // The extracted copy is scratch. The images that matter are already
+            // in the Media Library on the public disk by this point.
+            File::deleteDirectory($workspace);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Extraction
+    // -------------------------------------------------------------------------
+
+    /**
+     * Unpacks the archive into a fresh temporary directory.
+     *
+     * An admin uploading a ZIP is still an untrusted archive: this rejects
+     * path traversal ("zip slip") and refuses an archive that would decompress
+     * to an absurd size, rather than trusting that a marketer's export is
+     * well-formed.
+     */
+    private function extract(UploadedFile $zip): string
+    {
+        $archive = new \ZipArchive();
+
+        if ($archive->open($zip->getRealPath()) !== true) {
+            throw new RuntimeException('That file could not be opened as a ZIP archive.');
+        }
+
+        if ($archive->numFiles > self::MAX_ENTRIES) {
+            $archive->close();
+            throw new RuntimeException('That archive contains too many files to be an InDesign export.');
+        }
+
+        $workspace = storage_path('app/indesign-import/' . Str::uuid());
+        File::ensureDirectoryExists($workspace);
+
+        $total = 0;
+
+        for ($i = 0; $i < $archive->numFiles; $i++) {
+            $stat = $archive->statIndex($i);
+
+            if ($stat === false) {
+                continue;
+            }
+
+            $name = $stat['name'];
+
+            // Directories are recreated implicitly by the files inside them.
+            if (str_ends_with($name, '/')) {
+                continue;
+            }
+
+            // macOS zips carry a __MACOSX shadow tree of AppleDouble files.
+            if (str_starts_with($name, '__MACOSX/') || str_contains($name, '/._') || basename($name) === '.DS_Store') {
+                continue;
+            }
+
+            if (! in_array(strtolower(pathinfo($name, PATHINFO_EXTENSION)), self::ALLOWED_EXTENSIONS, true)) {
+                continue;
+            }
+
+            $total += (int) $stat['size'];
+
+            if ($total > self::MAX_UNCOMPRESSED) {
+                $archive->close();
+                File::deleteDirectory($workspace);
+                throw new RuntimeException('That archive is too large once unpacked.');
+            }
+
+            // Zip slip: resolve the destination against the workspace and refuse
+            // anything that climbs out of it. Checked on the concatenated path
+            // BEFORE creating any directory, so a traversal never causes a write.
+            $destination = $this->resolveInside($workspace, $name);
+
+            if ($destination === null) {
+                $archive->close();
+                File::deleteDirectory($workspace);
+                throw new RuntimeException('That archive contains an unsafe file path.');
+            }
+
+            $contents = $archive->getFromIndex($i);
+
+            if ($contents === false) {
+                continue;
+            }
+
+            File::ensureDirectoryExists(dirname($destination));
+            file_put_contents($destination, $contents);
+        }
+
+        $archive->close();
+
+        return $workspace;
+    }
+
+    /**
+     * Returns the absolute destination for an archive entry, or null if it would
+     * land outside the workspace. Purely lexical — the file does not exist yet,
+     * so realpath() is not available on the destination itself.
+     */
+    private function resolveInside(string $workspace, string $entry): ?string
+    {
+        $entry = str_replace('\\', '/', $entry);
+
+        if (str_starts_with($entry, '/') || preg_match('#^[A-Za-z]:#', $entry)) {
+            return null;
+        }
+
+        $segments = [];
+
+        foreach (explode('/', $entry) as $segment) {
+            if ($segment === '' || $segment === '.') {
+                continue;
+            }
+
+            if ($segment === '..') {
+                // Refuse rather than pop: an entry that needs to climb at all is
+                // not something a legitimate export produces.
+                return null;
+            }
+
+            $segments[] = $segment;
+        }
+
+        return $segments === [] ? null : $workspace . '/' . implode('/', $segments);
+    }
+
+    // -------------------------------------------------------------------------
+    // Conversion
+    // -------------------------------------------------------------------------
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function convert(string $workspace, ?int $uploadedBy, string $collection): array
+    {
+        $documentPath = $this->locateDocument($workspace);
+
+        if ($documentPath === null) {
+            throw new RuntimeException('No InDesign page could be found in that archive. Export from InDesign with File → Publish Online (HTML), and upload the whole exported folder zipped.');
+        }
+
+        $css        = $this->loadStylesheets($documentPath);
+        $containers = $this->parseContainerPositions($css);
+        $charStyles = $this->parseCharacterStyles($css);
+
+        $document = $this->loadHtml(file_get_contents($documentPath));
+
+        $warnings = [];
+        $items    = [];
+
+        $body = $document->getElementsByTagName('body')->item(0);
+
+        if ($body instanceof \DOMElement) {
+            $this->collect($body, $containers, $charStyles, dirname($documentPath), 0.0, 1.0, $items, $warnings);
+        }
+
+        if ($items === []) {
+            throw new RuntimeException('That export contained no text or images this could read. If it was produced by something other than InDesign, build the campaign in the editor instead.');
+        }
+
+        // Reading order, not stacking order. InDesign emits containers in the
+        // order the designer created them; `y` is where they actually sit.
+        usort($items, fn ($a, $b) => [$a['y'], $a['x']] <=> [$b['y'], $b['x']]);
+
+        $rules  = [];
+        $media  = $this->importImages($items, $uploadedBy, $collection, $warnings, $rules);
+        $theme  = $this->deriveTheme($items, $css, $warnings);
+        $blocks = $this->buildBlocks($items, $media, $rules, $warnings);
+
+        return [
+            'blocks'   => $blocks,
+            'theme'    => $theme,
+            'media'    => array_values($media),
+            'warnings' => $warnings,
+            'source'   => [
+                'document'    => basename($documentPath),
+                'text_frames' => count(array_filter($items, fn ($i) => $i['kind'] === 'text')),
+                'images_seen' => count(array_filter($items, fn ($i) => $i['kind'] === 'image')),
+            ],
+        ];
+    }
+
+    /**
+     * Finds the page document. `index.html` at the root of an InDesign export is
+     * the iframe shell — navigation arrows and nothing else — so the real page
+     * is whichever HTML file carries the content.
+     */
+    private function locateDocument(string $workspace): ?string
+    {
+        $candidates = [];
+
+        foreach (File::allFiles($workspace) as $file) {
+            if (! in_array(strtolower($file->getExtension()), ['html', 'htm', 'xhtml'], true)) {
+                continue;
+            }
+
+            $contents = file_get_contents($file->getPathname());
+
+            // The shell is recognisable, and small: it points at the page via an
+            // iframe and holds no content of its own.
+            if (str_contains($contents, '<iframe') && ! str_contains($contents, '_idContainer')) {
+                continue;
+            }
+
+            $candidates[$file->getPathname()] = substr_count($contents, '_idContainer') * 1000 + strlen($contents);
+        }
+
+        if ($candidates === []) {
+            return null;
+        }
+
+        arsort($candidates);
+
+        return array_key_first($candidates);
+    }
+
+    /** Concatenates every stylesheet the document links, plus any inline <style>. */
+    private function loadStylesheets(string $documentPath): string
+    {
+        $html = file_get_contents($documentPath);
+        $dir  = dirname($documentPath);
+        $css  = '';
+
+        if (preg_match_all('/<link[^>]+href=["\']([^"\']+\.css)["\']/i', $html, $matches)) {
+            foreach ($matches[1] as $href) {
+                $path = realpath($dir . '/' . $href);
+
+                if ($path !== false && is_file($path)) {
+                    $css .= file_get_contents($path) . "\n";
+                }
+            }
+        }
+
+        if (preg_match_all('/<style[^>]*>(.*?)<\/style>/is', $html, $matches)) {
+            $css .= implode("\n", $matches[1]);
+        }
+
+        return $css;
+    }
+
+    /**
+     * `#_idContainer007 { transform: translate(199.098px, 108.083px) ... }` —
+     * where each container actually sits on the page.
+     *
+     * @return array<string, array{x: float, y: float}>
+     */
+    private function parseContainerPositions(string $css): array
+    {
+        $positions = [];
+
+        if (! preg_match_all('/#(_idContainer\d+)\s*\{([^}]*)\}/', $css, $matches, PREG_SET_ORDER)) {
+            return $positions;
+        }
+
+        foreach ($matches as $match) {
+            [$x, $y] = $this->readTranslate($match[2]);
+
+            $positions[$match[1]] = ['x' => $x, 'y' => $y];
+        }
+
+        return $positions;
+    }
+
+    /**
+     * `span.CharOverride-3 { font-size:260px; font-weight:bold; ... }` — the
+     * typographic weight of each run, which is what separates a heading from a
+     * paragraph once the layout is gone.
+     *
+     * @return array<string, array{size: float, bold: bool, color: ?string, upper: bool}>
+     */
+    private function parseCharacterStyles(string $css): array
+    {
+        $styles = [];
+
+        if (! preg_match_all('/span\.(CharOverride-\d+)\s*\{([^}]*)\}/', $css, $matches, PREG_SET_ORDER)) {
+            return $styles;
+        }
+
+        foreach ($matches as $match) {
+            $declarations = [];
+
+            if (preg_match_all('/([a-z-]+)\s*:\s*([^;]+);/i', $match[2], $pairs, PREG_SET_ORDER)) {
+                foreach ($pairs as $pair) {
+                    $declarations[strtolower(trim($pair[1]))] = trim($pair[2]);
+                }
+            }
+
+            $weight = strtolower($declarations['font-weight'] ?? 'normal');
+
+            $styles[$match[1]] = [
+                'size'  => (float) ($declarations['font-size'] ?? 0),
+                'bold'  => $weight === 'bold' || (is_numeric($weight) && (int) $weight >= 600),
+                'color' => $this->normaliseColour($declarations['color'] ?? null),
+                'upper' => strtolower($declarations['text-transform'] ?? '') === 'uppercase',
+            ];
+        }
+
+        return $styles;
+    }
+
+    /**
+     * Walks the tree accumulating each element's translate/scale, so a nested
+     * container's position is absolute on the page rather than relative to a
+     * parent this output no longer has.
+     *
+     * @param  array<string, array{x: float, y: float}>  $containers
+     * @param  array<string, array{size: float, bold: bool, color: ?string, upper: bool}>  $charStyles
+     * @param  array<int, array<string, mixed>>  $items
+     * @param  array<int, string>  $warnings
+     */
+    private function collect(
+        \DOMElement $element,
+        array $containers,
+        array $charStyles,
+        string $baseDir,
+        float $offsetY,
+        float $scale,
+        array &$items,
+        array &$warnings,
+        float $offsetX = 0.0
+    ): void {
+        foreach ($element->childNodes as $child) {
+            if (! $child instanceof \DOMElement) {
+                continue;
+            }
+
+            $x = $offsetX;
+            $y = $offsetY;
+            $s = $scale;
+
+            $id = $child->getAttribute('id');
+
+            if ($id !== '' && isset($containers[$id])) {
+                $x += $containers[$id]['x'];
+                $y += $containers[$id]['y'];
+            }
+
+            $style = $child->getAttribute('style');
+
+            if ($style !== '') {
+                [$dx, $dy] = $this->readTranslate($style);
+                $x += $dx;
+                $y += $dy;
+
+                if (preg_match('/scale\(\s*([\d.]+)/', $style, $m)) {
+                    $s *= (float) $m[1];
+                }
+
+                // A frame can also be placed with plain left/top.
+                if (preg_match('/(?<![a-z-])left\s*:\s*(-?[\d.]+)px/i', $style, $m)) {
+                    $x += (float) $m[1];
+                }
+                if (preg_match('/(?<![a-z-])top\s*:\s*(-?[\d.]+)px/i', $style, $m)) {
+                    $y += (float) $m[1];
+                }
+            }
+
+            if (strtolower($child->tagName) === 'img') {
+                $items[] = [
+                    'kind' => 'image',
+                    'x'    => $x,
+                    'y'    => $y,
+                    'src'  => $child->getAttribute('src'),
+                    'alt'  => $child->getAttribute('alt'),
+                    'path' => $baseDir,
+                ];
+
+                continue;
+            }
+
+            if (strtolower($child->tagName) === 'p') {
+                $paragraph = $this->readParagraph($child, $charStyles, $s);
+
+                if ($paragraph !== null) {
+                    $items[] = $paragraph + ['x' => $x, 'y' => $y + $paragraph['offset']];
+                }
+
+                continue;
+            }
+
+            $this->collect($child, $containers, $charStyles, $baseDir, $y, $s, $items, $warnings, $x);
+        }
+    }
+
+    /**
+     * Reassembles one paragraph.
+     *
+     * Each word is its own absolutely-positioned span. Spans sharing a `top` are
+     * one visual line; ordered by `left` they are that line's words. The lines
+     * are then joined with a space, because a line break inside a paragraph is
+     * InDesign's justification, not the author's intent — hard-wrapping it into
+     * the email would produce ragged text at every other width.
+     *
+     * @param  array<string, array{size: float, bold: bool, color: ?string, upper: bool}>  $charStyles
+     * @return array<string, mixed>|null
+     */
+    private function readParagraph(\DOMElement $paragraph, array $charStyles, float $scale): ?array
+    {
+        $lines   = [];
+        $weights = [];
+        $first   = null;
+
+        foreach ($paragraph->getElementsByTagName('span') as $span) {
+            $text = $span->textContent;
+
+            if ($text === '') {
+                continue;
+            }
+
+            $style = $span->getAttribute('style');
+
+            $top  = preg_match('/(?<![a-z-])top\s*:\s*(-?[\d.]+)px/i', $style, $m) ? (float) $m[1] : 0.0;
+            $left = preg_match('/(?<![a-z-])left\s*:\s*(-?[\d.]+)px/i', $style, $m) ? (float) $m[1] : 0.0;
+
+            // Round the line key: InDesign emits sub-pixel `top` values that are
+            // visually one line but differ in the third decimal.
+            $key = (string) round($top, 1);
+
+            $lines[$key][] = ['left' => $left, 'text' => $text];
+
+            $first ??= $top;
+
+            // Attribute the paragraph's weight to whichever character style
+            // covers the most of it, so one stray styled word cannot promote a
+            // paragraph to a heading.
+            foreach (preg_split('/\s+/', $span->getAttribute('class')) ?: [] as $class) {
+                if (isset($charStyles[$class])) {
+                    $weights[$class] = ($weights[$class] ?? 0) + mb_strlen($text);
+                }
+            }
+        }
+
+        if ($lines === []) {
+            // A paragraph can hold bare text with no spans.
+            $text = $this->tidy($paragraph->textContent);
+
+            return $text === '' ? null : [
+                'kind'   => 'text',
+                'text'   => $text,
+                'size'   => 0.0,
+                'bold'   => false,
+                'color'  => null,
+                'upper'  => false,
+                'offset' => 0.0,
+            ];
+        }
+
+        uksort($lines, fn ($a, $b) => (float) $a <=> (float) $b);
+
+        $assembled = [];
+
+        foreach ($lines as $line) {
+            usort($line, fn ($a, $b) => $a['left'] <=> $b['left']);
+
+            $assembled[] = $this->tidy(implode('', array_column($line, 'text')));
+        }
+
+        $text = $this->tidy(implode(' ', array_filter($assembled, fn ($l) => $l !== '')));
+
+        if ($text === '') {
+            return null;
+        }
+
+        arsort($weights);
+        $dominant = array_key_first($weights);
+        $style    = $dominant !== null ? $charStyles[$dominant] : ['size' => 0.0, 'bold' => false, 'color' => null, 'upper' => false];
+
+        return [
+            'kind'  => 'text',
+            'text'  => $text,
+            // The declared size is pre-scale: the wrapper shrinks the whole
+            // frame, so 420px at scale 0.05 is 21px on the page.
+            'size'  => $style['size'] * $scale,
+            'bold'  => $style['bold'],
+            'color' => $style['color'],
+            'upper' => $style['upper'],
+            // Sort by where the paragraph starts, not where its frame does —
+            // one frame can hold a dozen paragraphs.
+            'offset' => ($first ?? 0.0) * $scale,
+        ];
+    }
+
+    // -------------------------------------------------------------------------
+    // Images
+    // -------------------------------------------------------------------------
+
+    /**
+     * Registers the real photographs in the Media Library and drops InDesign's
+     * furniture.
+     *
+     * Going through MediaLibraryService rather than storing files directly is
+     * the whole "reuse" half of this: the pictures land in the same library the
+     * campaign editor already browses, so the next campaign can pick them up
+     * without another import.
+     *
+     * @param  array<int, array<string, mixed>>  $items
+     * @param  array<int, string>  $warnings
+     * @param  array<string, true>  $rules  filled with the srcs that are hairlines
+     * @return array<string, array<string, mixed>>  keyed by the src it came from
+     */
+    private function importImages(array $items, ?int $uploadedBy, string $collection, array &$warnings, array &$rules): array
+    {
+        $imported = [];
+        $skipped  = 0;
+
+        foreach ($items as $item) {
+            if ($item['kind'] !== 'image') {
+                continue;
+            }
+
+            $src = $item['src'];
+
+            if ($src === '' || isset($imported[$src])) {
+                continue;
+            }
+
+            if (count($imported) >= self::MAX_IMAGES) {
+                $warnings[] = 'Only the first ' . self::MAX_IMAGES . ' images were imported.';
+                break;
+            }
+
+            [$binary, $filename] = $this->readImage($src, $item['path'] ?? null);
+
+            if ($binary === null) {
+                continue;
+            }
+
+            $size = @getimagesizefromstring($binary);
+
+            if ($size === false) {
+                continue;
+            }
+
+            [$width, $height] = $size;
+
+            $long  = max($width, $height);
+            $short = max(1, min($width, $height));
+
+            // Bullet glyphs and gradient slivers — real in the print layout,
+            // meaningless as a standalone email image.
+            if ($long < self::MIN_IMAGE_LONG_SIDE || $short < self::MIN_IMAGE_SHORT_SIDE) {
+                $skipped++;
+                continue;
+            }
+
+            // A hairline under a heading. Recorded, not imported: it comes back
+            // as a divider block, which is what it was drawn to be.
+            if ($long / $short >= self::RULE_MIN_RATIO && $short <= self::RULE_MAX_SHORT_SIDE) {
+                $rules[$src] = true;
+                continue;
+            }
+
+            $temporary = tempnam(sys_get_temp_dir(), 'idml');
+            file_put_contents($temporary, $binary);
+
+            try {
+                $upload = new UploadedFile(
+                    $temporary,
+                    $filename,
+                    $size['mime'] ?? 'image/png',
+                    null,
+                    true
+                );
+
+                $media = $this->mediaLibrary->store($upload, $collection, null, $uploadedBy);
+
+                $imported[$src] = [
+                    'media_id' => $media->id,
+                    'url'      => $media->url,
+                    'width'    => $media->width,
+                    'height'   => $media->height,
+                    'filename' => $media->original_name,
+                ];
+            } catch (\Throwable $e) {
+                $warnings[] = 'One image could not be imported (' . $filename . ').';
+            } finally {
+                @unlink($temporary);
+            }
+        }
+
+        if ($skipped > 0) {
+            $warnings[] = $skipped . ' decorative graphic' . ($skipped === 1 ? '' : 's')
+                . ' (rules, bullet marks) were left out — they only mean something in the print layout.';
+        }
+
+        return $imported;
+    }
+
+    /**
+     * @return array{0: ?string, 1: string}  raw bytes and a filename
+     */
+    private function readImage(string $src, ?string $baseDir): array
+    {
+        if (str_starts_with($src, 'data:')) {
+            if (! preg_match('#^data:image/([a-z0-9.+-]+);base64,(.*)$#is', $src, $m)) {
+                return [null, ''];
+            }
+
+            $binary = base64_decode($m[2], true);
+
+            return [$binary === false ? null : $binary, 'embedded.' . strtolower($m[1])];
+        }
+
+        // Remote references are not fetched: an import must not turn into an
+        // outbound request to an address inside the archive.
+        if (preg_match('#^[a-z][a-z0-9+.-]*://#i', $src) || str_starts_with($src, '//')) {
+            return [null, ''];
+        }
+
+        if ($baseDir === null) {
+            return [null, ''];
+        }
+
+        $path = realpath($baseDir . '/' . rawurldecode($src));
+
+        if ($path === false || ! is_file($path)) {
+            return [null, ''];
+        }
+
+        if (! in_array(strtolower(pathinfo($path, PATHINFO_EXTENSION)), self::IMPORTABLE_IMAGE_EXTENSIONS, true)) {
+            return [null, ''];
+        }
+
+        return [file_get_contents($path), basename($path)];
+    }
+
+    // -------------------------------------------------------------------------
+    // Theme
+    // -------------------------------------------------------------------------
+
+    /**
+     * Derives the palette from the export, then checks it is actually legible.
+     *
+     * The check matters more than the derivation. InDesign sets this deck's type
+     * in white because it sits on a full-bleed dark photograph — a background
+     * this import cannot carry across. Taking the colours at face value would
+     * produce white text on the white page colour: an email that arrives blank.
+     * When the recovered pair does not have enough contrast, the house preset
+     * wins and the marketer is told why.
+     *
+     * @param  array<int, array<string, mixed>>  $items
+     * @param  array<int, string>  $warnings
+     * @return array<string, mixed>
+     */
+    private function deriveTheme(array $items, string $css, array &$warnings): array
+    {
+        $byColour = [];
+
+        foreach ($items as $item) {
+            if ($item['kind'] !== 'text' || $item['color'] === null) {
+                continue;
+            }
+
+            $byColour[$item['color']] = ($byColour[$item['color']] ?? 0) + mb_strlen($item['text']);
+        }
+
+        arsort($byColour);
+
+        $text   = array_key_first($byColour);
+        $accent = $this->accentColour($byColour, $text);
+        $page   = $this->pageColour($css);
+
+        $theme = ['preset' => CampaignBlockRenderer::DEFAULT_THEME];
+
+        if ($text === null || $page === null) {
+            $warnings[] = 'No usable colours were found in the export, so the Okelcor house theme was applied.';
+
+            return $theme;
+        }
+
+        if ($this->contrast($text, $page) < 4.5) {
+            // The commonest real case, and the one worth naming: light type that
+            // only worked because it sat on a photograph.
+            $warnings[] = 'The design sets its type in ' . $text . ' against ' . $page
+                . ', which is unreadable once the background artwork is gone. The Okelcor house theme was applied instead — change it in the editor if you want different colours.';
+
+            return $theme;
+        }
+
+        $theme['background']      = $page;
+        $theme['card_background'] = $page;
+        $theme['text_color']      = $text;
+        $theme['heading_color']   = $accent ?? $text;
+
+        if ($accent !== null) {
+            $theme['button_background'] = $accent;
+            $theme['button_text_color'] = $this->luminance($accent) > 0.5 ? '#000000' : '#FFFFFF';
+        }
+
+        return $theme;
+    }
+
+    /**
+     * The colour used for emphasis rather than body copy — least text, but
+     * present. In this deck that is the gold the display heading is set in.
+     *
+     * @param  array<string, int>  $byColour
+     */
+    private function accentColour(array $byColour, ?string $text): ?string
+    {
+        foreach (array_reverse(array_keys($byColour)) as $colour) {
+            if ($colour !== $text) {
+                return $colour;
+            }
+        }
+
+        return null;
+    }
+
+    private function pageColour(string $css): ?string
+    {
+        if (preg_match('/background-color\s*:\s*(#[0-9a-f]{3,8}|white|black)/i', $css, $m)) {
+            return $this->normaliseColour($m[1]);
+        }
+
+        return '#FFFFFF';
+    }
+
+    /** WCAG relative-contrast ratio, used only to decide legible vs not. */
+    private function contrast(string $a, string $b): float
+    {
+        $la = $this->luminance($a);
+        $lb = $this->luminance($b);
+
+        return (max($la, $lb) + 0.05) / (min($la, $lb) + 0.05);
+    }
+
+    private function luminance(string $hex): float
+    {
+        [$r, $g, $b] = $this->rgb($hex);
+
+        $channel = function (float $c): float {
+            $c /= 255;
+
+            return $c <= 0.03928 ? $c / 12.92 : (($c + 0.055) / 1.055) ** 2.4;
+        };
+
+        return 0.2126 * $channel($r) + 0.7152 * $channel($g) + 0.0722 * $channel($b);
+    }
+
+    /** @return array{0: float, 1: float, 2: float} */
+    private function rgb(string $hex): array
+    {
+        $hex = ltrim($hex, '#');
+
+        if (strlen($hex) === 3) {
+            $hex = $hex[0] . $hex[0] . $hex[1] . $hex[1] . $hex[2] . $hex[2];
+        }
+
+        return [
+            (float) hexdec(substr($hex, 0, 2)),
+            (float) hexdec(substr($hex, 2, 2)),
+            (float) hexdec(substr($hex, 4, 2)),
+        ];
+    }
+
+    private function normaliseColour(?string $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $value = strtolower(trim($value));
+
+        $named = ['white' => '#FFFFFF', 'black' => '#000000'];
+
+        if (isset($named[$value])) {
+            return $named[$value];
+        }
+
+        if (preg_match('/^#([0-9a-f]{3}|[0-9a-f]{6})$/', $value)) {
+            return strtoupper($value);
+        }
+
+        return null;
+    }
+
+    // -------------------------------------------------------------------------
+    // Blocks
+    // -------------------------------------------------------------------------
+
+    /**
+     * Turns the ordered items into blocks.
+     *
+     * @param  array<int, array<string, mixed>>  $items
+     * @param  array<string, array<string, mixed>>  $media
+     * @param  array<string, true>  $rules
+     * @param  array<int, string>  $warnings
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildBlocks(array $items, array $media, array $rules, array &$warnings): array
+    {
+        $body      = $this->bodySize($items);
+        $headings  = $this->headingSizes($items, $body);
+        $blocks    = [];
+        $paragraph = [];
+
+        $flush = function () use (&$paragraph, &$blocks): void {
+            if ($paragraph === []) {
+                return;
+            }
+
+            // A run of short paragraphs is a bulleted list in the original.
+            // InDesign draws the bullet marks as separate images, so length is
+            // the only thing left to recognise them by.
+            //
+            // The run is scanned for stretches of short paragraphs rather than
+            // being judged as a whole: a list is usually introduced by a
+            // sentence longer than its items ("…is designed for a wide range of
+            // engines:"), and testing the whole run would let that one sentence
+            // turn ten bullets back into ten loose paragraphs.
+            $pending = [];
+
+            $emit = function () use (&$pending, &$blocks): void {
+                if ($pending === []) {
+                    return;
+                }
+
+                if (count($pending) >= self::LIST_MIN_ITEMS) {
+                    $blocks[] = ['type' => 'list', 'items' => array_values($pending)];
+                } else {
+                    foreach ($pending as $text) {
+                        $blocks[] = ['type' => 'text', 'text' => $text, 'align' => 'left'];
+                    }
+                }
+
+                $pending = [];
+            };
+
+            foreach ($paragraph as $text) {
+                if (mb_strlen($text) <= self::LIST_MAX_LENGTH) {
+                    $pending[] = $text;
+                    continue;
+                }
+
+                $emit();
+                $blocks[] = ['type' => 'text', 'text' => $text, 'align' => 'left'];
+            }
+
+            $emit();
+
+            $paragraph = [];
+        };
+
+        foreach ($items as $item) {
+            if ($item['kind'] === 'image') {
+                if (isset($rules[$item['src']])) {
+                    $flush();
+
+                    // The same hairline art is reused throughout the deck, and
+                    // InDesign stacks several to draw one line — collapse them,
+                    // and never open the email on one.
+                    if ($blocks !== [] && end($blocks)['type'] !== 'divider') {
+                        $blocks[] = ['type' => 'divider'];
+                    }
+
+                    continue;
+                }
+
+                if (! isset($media[$item['src']])) {
+                    continue;
+                }
+
+                $flush();
+
+                $blocks[] = [
+                    'type' => 'image',
+                    'url'  => $media[$item['src']]['url'],
+                    'alt'  => $this->tidy((string) $item['alt']),
+                ];
+
+                continue;
+            }
+
+            $level = $this->headingLevel($item, $body, $headings);
+
+            if ($level !== null) {
+                $flush();
+
+                $blocks[] = [
+                    'type'  => 'heading',
+                    'text'  => $item['text'],
+                    'level' => $level,
+                    'align' => 'center',
+                ];
+
+                continue;
+            }
+
+            $paragraph[] = $item['text'];
+        }
+
+        $flush();
+
+        if ($blocks === []) {
+            throw new RuntimeException('Nothing in that export could be turned into email content.');
+        }
+
+        // The team's own sign-off, and the unsubscribe line the send job needs
+        // is added by the renderer regardless.
+        $blocks[] = [
+            'type'          => 'footer',
+            'address_lines' => ['Okelcor'],
+            'site_label'    => 'Visit okelcor.com',
+            'site_url'      => rtrim(config('app.frontend_url', 'https://okelcor.com'), '/'),
+        ];
+
+        if (! array_filter($blocks, fn ($b) => $b['type'] === 'button')) {
+            $warnings[] = 'The design has no call-to-action button — InDesign exports carry no links. Add one in the editor before sending.';
+        }
+
+        return $blocks;
+    }
+
+    /**
+     * The size the body copy is set in: the one carrying the most characters.
+     * Using the mode rather than an average keeps a single huge display line
+     * from dragging the baseline up and demoting every real heading.
+     *
+     * @param  array<int, array<string, mixed>>  $items
+     */
+    private function bodySize(array $items): float
+    {
+        $bySize = [];
+
+        foreach ($items as $item) {
+            if ($item['kind'] !== 'text' || $item['size'] <= 0) {
+                continue;
+            }
+
+            $key          = (string) round($item['size'], 1);
+            $bySize[$key] = ($bySize[$key] ?? 0) + mb_strlen($item['text']);
+        }
+
+        if ($bySize === []) {
+            return 0.0;
+        }
+
+        arsort($bySize);
+
+        return (float) array_key_first($bySize);
+    }
+
+    /**
+     * Distinct sizes above the body baseline, largest first — the document's own
+     * heading hierarchy, whatever point sizes it happens to use.
+     *
+     * @param  array<int, array<string, mixed>>  $items
+     * @return array<int, float>
+     */
+    private function headingSizes(array $items, float $body): array
+    {
+        if ($body <= 0) {
+            return [];
+        }
+
+        $sizes = [];
+
+        foreach ($items as $item) {
+            if ($item['kind'] === 'text' && $item['size'] > $body * 1.15) {
+                $sizes[(string) round($item['size'], 1)] = round($item['size'], 1);
+            }
+        }
+
+        $sizes = array_values($sizes);
+        rsort($sizes);
+
+        return $sizes;
+    }
+
+    /**
+     * @param  array<string, mixed>  $item
+     * @param  array<int, float>  $headings
+     */
+    private function headingLevel(array $item, float $body, array $headings): ?string
+    {
+        if ($body <= 0 || $item['size'] <= 0) {
+            return null;
+        }
+
+        // A long line is a paragraph however it is set. Without this a
+        // large-type pull quote becomes a heading the width of the email.
+        if (mb_strlen($item['text']) > 120) {
+            return null;
+        }
+
+        $rank = array_search(round($item['size'], 1), $headings, true);
+
+        if ($rank === false) {
+            // Not larger than the body, but set in bold caps on its own short
+            // line — a section label.
+            return $item['bold'] && $item['upper'] && mb_strlen($item['text']) <= 60 ? 'small' : null;
+        }
+
+        return match ($rank) {
+            0       => 'large',
+            1       => 'medium',
+            default => 'small',
+        };
+    }
+
+    // -------------------------------------------------------------------------
+
+    /**
+     * Reads the x/y out of a `transform: translate(...)`, in whichever of the
+     * four vendor spellings InDesign emitted. Percentages are ignored — the
+     * export only ever uses pixels, and a percentage of an unknown box is not
+     * something to guess at.
+     *
+     * @return array{0: float, 1: float}
+     */
+    private function readTranslate(string $declarations): array
+    {
+        if (! preg_match('/(?:^|[^-a-z])transform\s*:[^;]*?translate\(\s*(-?[\d.]+)px\s*,\s*(-?[\d.]+)px/i', $declarations, $m)) {
+            return [0.0, 0.0];
+        }
+
+        return [(float) $m[1], (float) $m[2]];
+    }
+
+    private function loadHtml(string $html): \DOMDocument
+    {
+        $document = new \DOMDocument();
+
+        // InDesign's output is XHTML-flavoured and libxml complains about it;
+        // none of those complaints affect what is read back out.
+        $previous = libxml_use_internal_errors(true);
+
+        $document->loadHTML(
+            '<?xml encoding="utf-8" ?>' . $html,
+            LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING
+        );
+
+        libxml_clear_errors();
+        libxml_use_internal_errors($previous);
+
+        return $document;
+    }
+
+    /** Collapses InDesign's soft hyphens, non-breaking spaces and runs of space. */
+    private function tidy(string $text): string
+    {
+        $text = str_replace(["\xC2\xAD", "\xC2\xA0"], ['', ' '], $text);
+        $text = preg_replace('/\s+/u', ' ', $text) ?? $text;
+
+        return trim($text);
+    }
+}

@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-11 | Branch: `main` | Latest commit: Session 76 (**pushed, not deployed**)
+Last updated: 2026-08-12 | Branch: `main` | Latest commit: Session 77 (**pushed, not deployed**)
 
 ---
 
@@ -29,7 +29,8 @@ either path from this document alone.
 `route:cache` must be rebuilt on this deploy (Session 74 adds the draft routes,
 Session 75 adds `PATCH /admin/partner-sales/{id}`, Session 76 adds
 `POST /admin/orders/{id}/payment-milestones/request-deposit` and
-`GET /admin/trade-documents/upload-options`).
+`GET /admin/trade-documents/upload-options`, Session 77 adds
+`POST /admin/campaign-templates/import`).
 
 **Session 76 changes live customer-facing behaviour the moment it lands:**
 generating a proforma stops e-mailing the customer a deposit request, and the
@@ -1453,6 +1454,62 @@ writes.
 `order total: X → Y` from the same bad arithmetic, so anyone reconciling from
 the log would have been sent after a €30,000 order that never existed. Now
 logs the figure actually written.
+
+---
+
+## InDesign design import — campaigns without a developer (Session 77)
+
+> **Deploy status:** built and tested, **not yet deployed**. **No migration** —
+> reuses `campaign_templates` and `media`. Deploy-order safe in both directions:
+> the endpoint 404s until the code lands and nothing else is affected.
+> `route:cache` must be rebuilt — one new route.
+
+The marketers design in InDesign, because that is where they can produce
+something that looks good, and export **HTML5 (Publish Online)**. Each export
+was then handed over to be turned into a campaign by hand — so every new design
+was a backend job. The ask was to stop that: the system should take the folder.
+
+**An InDesign HTML5 export is not an email, and no amount of pasting makes it
+one.** It is an `<iframe>` on a fixed 595×1089px print canvas; every element is
+`position:absolute` under a CSS `transform`; **every individual word is its own
+`<span>` at an exact pixel offset** inside a wrapper scaled by 0.05, so the type
+is really set at 420px and shrunk; the fonts are `@font-face` TTFs. Outlook
+supports none of that and Gmail strips most of it. Sent as-is the design does
+not degrade — it collapses into an unreadable pile of words.
+
+So the importer does not embed the export. It **recovers** it into the existing
+block model, which `CampaignBlockRenderer` already renders Outlook-safe.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `InDesignEmailImporter` (new) | 🔧 | ZIP → `blocks[]` + `theme` + Media Library rows. No new storage concept: the output is an ordinary campaign template, so the editor, the preview, the queue and the send job are all untouched. |
+| Copy reassembled from per-word spans | 🔧 | Spans sharing a `top` are one visual line, ordered by `left`; one `<p>` is one paragraph, its several `top` values are just where InDesign broke the column. Lines are rejoined **with a space** — a break inside a paragraph is justification, not the author's intent, and hard-wrapping it would give ragged text at every other width. |
+| Reading order from the page, not the markup | 🔧 | Document order in the export is InDesign's **stacking** order. Position comes from each container's `transform:translate(x,y)` in the generated stylesheet, accumulated down the tree so a nested frame is absolute on the page. Without this the email opens on whatever the designer drew first. |
+| Photographs → Media Library | 🔧 | Through `MediaLibraryService`, so they are browsable and reusable from the existing picker — the "reuse" half of the ask. The next campaign needs no import at all. |
+| Hairlines → `divider` blocks, not images | 🔧 | InDesign draws the gold rules under its headings as PNGs. Imported as images they become full-width bars in the email and permanent junk in the Media Library. Recognised by shape (ratio ≥ 6:1 **and** short side ≤ 80px — the ratio alone would catch a legitimate wide banner) and emitted as the divider they were drawn to be. Consecutive ones collapse; an email never opens on one. |
+| Bullet glyphs and slivers dropped | 🔧 | Below 200px long / 40px short is furniture, not content. Counted back in `warnings` rather than silently discarded. |
+| Bulleted runs recovered as one `list` | 🔧 | InDesign draws bullet marks as separate images, so length is the only signal left. The run is scanned for **stretches** of short paragraphs rather than judged as a whole — a list is normally introduced by a sentence longer than its items, and testing the whole run turned ten bullets back into ten loose paragraphs. Caught by the probe against the real export, not by reading the diff. |
+| Heading hierarchy from the document's own type scale | 🔧 | Body size = the size carrying the most characters (mode, not mean — one huge display line would otherwise drag the baseline up and demote every real heading). Distinct larger sizes rank large/medium/small. A line over 120 chars stays a paragraph however it is set, so a large-type pull quote does not become a heading the width of the email. |
+| **Colour is checked, not just copied** | 🔧 | The failure this prevents is worth naming: InDesign sets this deck's type in white because it sits on a full-bleed photograph, and that background cannot carry into email. Taking the colours at face value sends **white text on the white page colour** — an email that arrives blank and passes every check that isn't a person looking at it. Below WCAG 4.5:1 the house theme wins and the marketer is told why. |
+| `POST /admin/campaign-templates/import` | 🔧 | `marketing.manage`. Multipart ZIP + `name`, or `dry_run: true` to convert and return **without saving anything** — the review step, and it costs nothing. Returns blocks, theme, media, warnings and `preview_html` (the real rendered email) in one call, so the editor needs no second round-trip to find out whether the import was any good. Registered **before** `campaign-templates/{id}`, which has no numeric constraint — the same trap as `trade-documents/upload-options` in Session 76. |
+| An admin upload is still an untrusted archive | 🔧 | Zip-slip refused lexically **before any directory is created**, so a traversal never causes a write; entry count, uncompressed size and per-extension filters applied during extraction. Scripts and fonts are never written to disk at all. Remote `src` attributes are skipped, not fetched — an import must not become an outbound request to an address chosen inside the archive. Workspace deleted in a `finally`. |
+| Produced blocks pass the same gate a hand-built template does | 🔧 | `validateBlocks()` before saving. A template that cannot render is not worth a row, and finding that out at send time is far more expensive. |
+| Backend tests (20 new) | ✅ | `InDesignCampaignImportTest` — **20 passed / 73 assertions, actually executed** on the minimal-schema sqlite harness. Includes an end-to-end conversion of **the marketers' real export**, which skips cleanly where the folder is absent (it is 2MB of marketing source and deliberately not committed). The synthetic fixture reconstructs a real InDesign export down to the 0.05 scale wrapper rather than checking in a large binary. Full suite: **325 passed, 0 failed**, 206 skipped (pre-existing gate), up from 305. |
+
+**The honest limit, carried into the frontend note:** pixel-perfect InDesign
+fidelity is not achievable in email by any method. What survives is the
+imagery, the words, the order and the colours. The import is a **starting
+point** the marketer finishes in the editor — which is also why a mis-grouped
+list or a heading read one level too small is a five-second fix rather than a
+failed import. The frontend was told to frame it as *"Design imported. Review
+it before sending."*; framed as *"your InDesign design, converted"*, the first
+person to compare it side-by-side with InDesign reports it as broken.
+
+**Always true of these exports: there is no call-to-action button.** InDesign
+carries no links, so every import warns about it. Someone has to add one before
+the campaign goes out.
+
+See `FRONTEND_NOTE_indesign-campaign-import.md`.
 
 ---
 

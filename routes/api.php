@@ -28,6 +28,7 @@ use App\Http\Controllers\Admin\AdminArticleController;
 use App\Http\Controllers\Admin\AdminBrandController;
 use App\Http\Controllers\Admin\AdminCategoryController;
 use App\Http\Controllers\Admin\AdminBulkEmailController;
+use App\Http\Controllers\Admin\AdminCampaignImportController;
 use App\Http\Controllers\Admin\AdminCampaignTemplateController;
 use App\Http\Controllers\Admin\AdminContactController;
 use App\Http\Controllers\Admin\AdminHeroSlideController;
@@ -796,6 +797,9 @@ Route::prefix('v1')->group(function () {
             Route::get('campaign-design', [AdminCampaignTemplateController::class, 'design']);
             Route::get('campaign-templates', [AdminCampaignTemplateController::class, 'index']);
             Route::get('campaign-templates/starters', [AdminCampaignTemplateController::class, 'starters']);
+            // Before `{id}`, or it is swallowed as one — the same trap as
+            // trade-documents/upload-options.
+            Route::post('campaign-templates/import', [AdminCampaignImportController::class, 'store']);
             Route::get('campaign-templates/{id}', [AdminCampaignTemplateController::class, 'show']);
             Route::post('campaign-templates', [AdminCampaignTemplateController::class, 'store']);
             Route::patch('campaign-templates/{id}', [AdminCampaignTemplateController::class, 'update']);
