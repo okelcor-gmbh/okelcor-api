@@ -26,6 +26,14 @@ Content-Type: multipart/form-data
 | `description` | no | Max 500. Defaults to "Imported from an InDesign export." |
 | `dry_run` | no | `true` converts and returns the result **without saving anything** |
 
+`dry_run` accepts `true` / `false` / `1` / `0` / `on` / `off` / `yes` / `no`,
+in any case, as either a string or a real boolean. **Send it however `FormData`
+gives it to you.** The first production upload returned *"The dry run field
+must be true or false"* — a backend bug: multipart carries every field as a
+string, and Laravel's `boolean` rule accepts only `1`/`0`/`"1"`/`"0"`. Fixed;
+no frontend change needed. A value that is genuinely uninterpretable still
+422s rather than being read as `false`, because `false` means *save*.
+
 **201** on save, **200** on a dry run:
 
 ```jsonc
