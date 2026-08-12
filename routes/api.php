@@ -27,6 +27,7 @@ use App\Http\Controllers\SettingController;
 use App\Http\Controllers\Admin\AdminArticleController;
 use App\Http\Controllers\Admin\AdminBrandController;
 use App\Http\Controllers\Admin\AdminCategoryController;
+use App\Http\Controllers\Admin\AdminBehaviourAnalyticsController;
 use App\Http\Controllers\Admin\AdminBulkEmailController;
 use App\Http\Controllers\Admin\AdminCampaignImportController;
 use App\Http\Controllers\Admin\AdminCampaignTemplateController;
@@ -386,6 +387,11 @@ Route::prefix('v1')->group(function () {
 
         // AI-generated dashboard insights — all authenticated admin roles
         Route::get('insights', [AdminInsightController::class, 'index']);
+
+        // Customer behaviour — what people search for and cannot find.
+        Route::middleware('permission:analytics.view')->group(function () {
+            Route::get('analytics/behaviour', [AdminBehaviourAnalyticsController::class, 'index']);
+        });
 
         // Auth — all authenticated admin users
         Route::post('logout', [AuthController::class, 'logout']);

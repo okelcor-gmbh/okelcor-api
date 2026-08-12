@@ -11,6 +11,7 @@ use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\QuoteRequest;
 use Carbon\Carbon;
+use App\Services\CustomerBehaviourService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -39,7 +40,7 @@ use Illuminate\Support\Facades\Log;
  */
 class AdminInsightsService
 {
-    private const CATEGORIES    = ['revenue', 'orders', 'inventory', 'security', 'quotes'];
+    private const CATEGORIES    = ['revenue', 'orders', 'inventory', 'security', 'quotes', 'behaviour'];
     private const SEVERITIES    = ['positive', 'info', 'warning', 'critical'];
     private const MAX_INSIGHTS  = 4;
     private const RETENTION_DAYS = 30;
@@ -78,6 +79,11 @@ class AdminInsightsService
             'inventory'          => $this->inventorySnapshot(),
             'security'           => $this->securitySnapshot(),
             'quotes'             => $this->quotesSnapshot(),
+            // What customers looked for, computed in SQL and handed over as
+            // facts to restate — the same rule the stockout forecast follows.
+            // Absent entirely until search recording is live, so the model is
+            // never asked to comment on a period it has no data for.
+            'customer_behaviour' => app(CustomerBehaviourService::class)->snapshotForInsights(),
         ];
     }
 
@@ -258,19 +264,30 @@ class AdminInsightsService
         return <<<PROMPT
             You are summarizing internal business metrics for a B2B tyre wholesale
             company's admin dashboard. Below is a JSON snapshot of real aggregate
-            numbers (revenue, orders, inventory, security, quotes) for the current
-            period. Turn this into 2 to 4 short, plain-English observations an
-            admin would find genuinely useful at a glance — not a restatement of
-            every number, just what actually stands out.
+            numbers (revenue, orders, inventory, security, quotes, and what
+            customers searched the catalogue for) for the current period. Turn
+            this into 2 to 4 short, plain-English observations an admin would
+            find genuinely useful at a glance — not a restatement of every
+            number, just what actually stands out.
 
             Rules:
             - Use ONLY the numbers given below. Never invent, estimate, or round
               a number yourself beyond what is already provided — if a figure
               like "days_to_stockout" is given, restate it as-is.
             - Each observation needs: category (one of: revenue, orders,
-              inventory, security, quotes), severity (positive, info, warning,
-              or critical), a short headline (under 12 words), and one sentence
-              of detail giving the concrete numbers behind it.
+              inventory, security, quotes, behaviour), severity (positive, info,
+              warning, or critical), a short headline (under 12 words), and one
+              sentence of detail giving the concrete numbers behind it.
+            - For "behaviour", the useful observation is almost always about
+              demand that is NOT being met: a term under
+              "searched_but_never_found", a brand under
+              "brands_in_demand_without_stock", or a high
+              "no_result_rate_pct". Say what was searched for and how often, so
+              the reader can act on it. Search terms are what customers typed
+              and may be quoted; they are not personal data.
+            - If "customer_behaviour.available" is false, say nothing at all
+              about behaviour — it means recording is not live yet, which is
+              not the same as customers not searching.
             - Rank observations most-important-first.
             - If nothing in a category stands out, omit that category entirely
               rather than forcing an observation.

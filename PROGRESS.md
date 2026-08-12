@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-12 | Branch: `main` | Latest commit: Session 78 (**pushed, not deployed**)
+Last updated: 2026-08-12 | Branch: `main` | Latest commit: Session 79 (**pushed, not deployed**)
 
 ---
 
@@ -1667,6 +1667,54 @@ See `FRONTEND_NOTE_indesign-campaign-import.md`.
 
 ---
 
+## Customer behaviour analytics — what people look for (Session 79)
+
+> **Deploy status:** built and tested, **not yet deployed**. Migration **#32**
+> (`search_events`) unapplied. **Deploy-order safe in both directions** — the
+> recorder checks for the table and skips when it is absent, so a catalogue
+> search never fails because a reporting table has not been created yet, and
+> the report says "not active yet" rather than "no demand". `route:cache` must
+> be rebuilt — one new route.
+
+The AI insights tool summarises how the business is doing. The ask was for the
+other question: what are customers *looking for*, what do they search most, so
+the platform, the range and the UX can be improved on evidence.
+
+**The blocker was that nothing recorded a search.** The catalogue accepts a rich
+filter set — term, type, brand, season, size, width/height/rim, price, stock —
+and threw every one of them away after answering. So "what do they search for"
+was not a query anyone could run; it was data that did not exist. Sessions 63
+and 71 had both noted analytics live entirely frontend-side, and this is the
+part of it the API is actually in a position to see.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `search_events` table (migration #32) | 🔧 | One row per catalogue query: normalised term, the filters as sent, the individual dimensions worth grouping lifted out and indexed, the result count, and **whether anything was found**. Deliberately not a general event table — page views and click paths never reach this API, and a table shaped to hold them would imply they were being collected. |
+| Recording on the public catalogue | 🔧 | Fires after the count is known, so "searched fifty times, found nothing" is answerable. **No frontend change needed** — the frontend already calls this endpoint with these filters, so collection starts the moment it deploys. |
+| Page 2 is not a second search | 🔧 | Counting pagination again would make a result someone had to scroll through look more popular than one they found immediately, which is the opposite of the truth. |
+| **No personal data stored** | 🔧 | No IP, no user agent, no referrer. `visitor_hash` is a salted HMAC that **includes the date**, so a day's visitors can be counted and the same person cannot be followed across days — "unique visitors today" is answerable, "everything this person ever searched" is not. Asserted by test, not just intended. The frontend may optionally send `X-Okelcor-Visitor` for accurate counts (every request otherwise carries the Next proxy's address); optional because storing an id in a browser is a consent question in the EU and that is not a decision to make on the customer's behalf. |
+| `GET /admin/analytics/behaviour` | 🔧 | `analytics.view`. Chart-ready: a gap-free daily series, top searches, **unmet demand**, demand-vs-stock, brand/size/category/season/country demand, saved-fitment demand, a funnel and the signed-in share. Counts already computed so the client plots rather than aggregates. |
+| **Unmet demand — the point of the whole thing** | 🔧 | Terms searched repeatedly that returned nothing every time. Each row is either a product to stock or a word the catalogue does not recognise for something already sold. Nothing below 2 occurrences is reported: one person searching once is not a pattern, and presenting it as one sends someone off to stock a product nobody asked for. |
+| **Demand vs stock** | 🔧 | Brands people search for, against whether they can actually be bought — `not_stocked` / `all_out_of_stock` / `available`. Sales figures cannot show this: a product nobody could buy sold nothing, which looks identical to a product nobody wanted. |
+| Behaviour added to the AI insights | 🔧 | New `behaviour` category, fed the same aggregates **as facts to restate** — the rule the stockout forecast already follows, so a business decision is never a hallucination. The prompt is explicit that if recording is not live the model must say nothing about behaviour, because silence and "no demand" are different statements. |
+| Funnel is honest about what it is not | 🔧 | Searches are anonymous and orders are not, so no row is joined to another. Three counts of three populations over one period, with a `note` in the payload saying exactly that. A funnel implying individual progression from data that cannot support it would be a more confident lie than no funnel. |
+| Backend tests (22) | ✅ | `CustomerBehaviourAnalyticsTest` — **22 passed / 140 assertions, actually executed**, including the real migration file. Covers recording, pagination, the no-PII guarantee, the digest not surviving a day change, every aggregation, the empty state, and the AI snapshot. Full suite **377 passed, 0 failed**, 206 skipped, up from 355. |
+
+**What this cannot see, said plainly and returned in `meta.not_covered`:** page
+views, scroll depth, click paths, time on page, and which product cards were
+looked at but not clicked. None of it reaches the API. That is a frontend
+analytics product's job, and claiming it here would mean inventing it.
+
+**It will be empty on day one.** The table starts empty and fills as customers
+use the catalogue; a week is the first point at which "top searches" means
+anything and "unmet demand" is worth acting on. The report says `available:
+false` before the migration runs rather than reporting zeros, because zero
+searches and no recording are different claims.
+
+See `FRONTEND_NOTE_behaviour-analytics.md`.
+
+---
+
 ## eBay Integration (Sessions 15–25)
 
 | Phase | Feature | Status |
@@ -1805,6 +1853,7 @@ See `FRONTEND_NOTE_indesign-campaign-import.md`.
 | `failed_jobs` | Laravel queue failures |
 | `saved_fitments` | Customer-saved size/brand profiles ("My Garage") |
 | `admin_insights` | AI-generated dashboard insights, one row per insight per generation batch |
+| `search_events` | One row per public catalogue query — term, filters, result count, and whether anything was found. No IP or user agent; the visitor digest rotates daily 🔧 |
 | `admin_push_tokens` | Expo push tokens for the admin/ops mobile app, one row per device |
 | `live_chat_sessions` / `live_chat_messages` | Custom live-chat system — built, dormant (Crisp is the real product; see Session 66/67) |
 | `partner_organisations` | Partner distributors selling Okelcor product in other markets. Market is derived from `country`, not stored 🔧 |
@@ -2018,3 +2067,5 @@ still has `QUEUE_CONNECTION=sync`, so `SendBulkEmailCampaignJob` would run
 inline during the HTTP request. Set `QUEUE_CONNECTION=database` and run a
 queue worker before the order manager sends to the full contact list — see
 Session 50 note above.
+
+32. `2026_08_12_000001_create_search_events_table` (Session 79 — customer behaviour analytics; creates `search_events`. One new table: nothing existing is read, altered or backfilled, so this cannot affect a live row. Guarded with `Schema::hasTable`. Proved by `CustomerBehaviourAnalyticsTest`, which runs the real migration file in its own setup. **Deploy-order safe in both directions, unlike #28** — `SearchEventRecorder` checks for the table and skips when it is absent, so the public catalogue never fails because a reporting table has not been created yet, and the report returns `available: false` rather than reporting zeros. The consequence of code-before-migration is only that nothing is recorded until it runs)

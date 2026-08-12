@@ -88,6 +88,13 @@ class AdminPermissions
         // ── Marketing contacts / bulk email ────────────────────────────────
         'marketing.manage'        => ['super_admin', 'admin', 'order_manager'],
 
+        // ── Customer behaviour analytics ──────────────────────────────────
+        // What customers search for and cannot find. Granted to the roles that
+        // actually exist in the admin_users.role ENUM — `sales_manager` is the
+        // natural fourth and cannot be stored (see Known Gaps); add it in the
+        // same change that widens the ENUM.
+        'analytics.view'          => ['super_admin', 'admin', 'order_manager', 'editor'],
+
         // ── Customers ─────────────────────────────────────────────────────
         'customers.view'          => ['super_admin', 'admin', 'support'],
         'customers.create'        => ['super_admin', 'admin', 'sales_manager'],

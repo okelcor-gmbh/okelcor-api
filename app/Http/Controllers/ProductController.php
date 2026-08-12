@@ -5,13 +5,14 @@ namespace App\Http\Controllers;
 use App\Models\Brand;
 use App\Models\Product;
 use App\Models\SiteSetting;
+use App\Services\SearchEventRecorder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 
 class ProductController extends Controller
 {
-    public function index(Request $request): JsonResponse
+    public function index(Request $request, SearchEventRecorder $recorder): JsonResponse
     {
         $hasFilter = $request->filled('search')
             || $request->filled('q')
@@ -99,6 +100,11 @@ class ProductController extends Controller
 
         $data = $paginated->map(fn ($p) => $this->formatProduct($p));
 
+        // What was looked for, and whether it was found. Recorded after the
+        // count is known, because "searched fifty times, found nothing" is the
+        // half of this the dashboard could never answer.
+        $recorder->record($request, $this->searchFilters($request), $paginated->total());
+
         return response()->json([
             'data'    => $data,
             'meta'    => [
@@ -110,6 +116,34 @@ class ProductController extends Controller
             'filters' => $filters,
             'message' => 'success',
         ])->withHeaders(['Cache-Control' => 'no-store, no-cache, must-revalidate']);
+    }
+
+    /**
+     * The filters actually applied to this query, for the search record.
+     *
+     * Reads the request rather than being threaded out of the query building
+     * above, so a filter added there without being added here is missing from
+     * reporting — never wrongly reported. `width`/`height`/`rim` are accepted
+     * here because the frontend's size pickers send them even though the
+     * catalogue currently narrows on the combined `size` string.
+     *
+     * @return array<string, string>
+     */
+    private function searchFilters(Request $request): array
+    {
+        $filters = [];
+
+        foreach (['type', 'brand', 'season', 'size', 'width', 'height', 'rim', 'customer_type', 'price_min', 'price_max'] as $key) {
+            if ($request->filled($key)) {
+                $filters[$key] = (string) $request->input($key);
+            }
+        }
+
+        if ($request->has('in_stock')) {
+            $filters['in_stock'] = $request->boolean('in_stock') ? '1' : '0';
+        }
+
+        return $filters;
     }
 
     public function specs(): JsonResponse
