@@ -1635,6 +1635,34 @@ export.** Same for the hero band — text over a full-bleed photograph has no
 email equivalent, and frontend's recommendation stands: flatten that one region
 to a single image with strong alt text, hero only, never body copy.
 
+### Reopening a design showed a different design
+
+The import rendered correctly, then "use this design" showed the previous
+stacked-and-gold layout again.
+
+**Two renderers, one set of blocks.** The post-upload preview shows the
+`preview_html` this backend rendered. The editor preview was drawing the blocks
+itself, and had no rendering for `image_row` or `section_header`, so it fell
+back to stacked images and plain headings. Only one of the two was what would
+actually be sent.
+
+**Not a bug to fix once.** This is where new block types arrive, so the client
+being one deploy behind the block vocabulary is the normal, permanent state. A
+preview that depends on the client knowing every type breaks again with the
+next one — which is the same shape as the campaign-list-vs-detail asymmetry
+that produced the empty-preview report a session earlier.
+
+| Change | Status | Notes |
+|--------|--------|-------|
+| `preview_html` + `preview_text` on `GET /admin/campaign-templates/{id}` | 🔧 | Rendered from the stored blocks by the same renderer the import used. A test asserts it is **byte-identical** to the import response's, so "same as it looked on upload" is a guarantee rather than a hope. |
+| `preview_html` on `GET /admin/campaign-templates/starters` | 🔧 | Same reason — "use this design" applies to the built-in starters too. |
+| Cache keyed on the converter, not just the archive | ✅ | Found while diagnosing this: the conversion cache used the uploaded archive's hash alone, so for two hours after a deploy that changes how a design is read, re-uploading the same file returned the **previous** reading. Indistinguishable from the deploy not having happened — and re-uploading is the first thing anyone does to check. Now keyed on a fingerprint of the converting source files, derived rather than a constant someone must remember to bump. |
+| Backend tests (2 new) | ✅ | A reopened design renders identically to its import, and the cache key carries a version segment. Full suite **355 passed, 0 failed**, 206 skipped. |
+
+**Left to frontend, and deliberately:** the editor's *block list* still shows
+"can't edit here, will still send" for unknown types, which is correct and
+should stay until `group_list` lands. It just must not drive the preview.
+
 See `FRONTEND_NOTE_indesign-campaign-import.md`.
 
 ---

@@ -437,6 +437,55 @@ list with bold lead-ins → footer. Theme `fet_green`, selected automatically.
 
 ---
 
+---
+
+## "Use this design" showed the old layout — read this before touching anything
+
+Reported: the design was correct after upload, then saving it and clicking
+**Use this design** showed the previous stacked-and-gold version again.
+
+**Cause: two different renderers.** The post-upload preview shows
+`data.preview_html`, which the backend rendered. The editor preview was drawing
+the blocks itself — and it has no rendering for `image_row` or `section_header`,
+so it fell back to stacked images and plain headings. Same blocks, two
+renderings, and only one of them is what gets sent.
+
+**That is not a bug to fix once.** This endpoint is where new block types
+arrive, so the client being one deploy behind the block vocabulary is the normal
+and permanent state. A preview that depends on the client knowing every block
+type will break again with the next one.
+
+**So the rendered HTML now comes with the template:**
+
+```jsonc
+// GET /admin/campaign-templates/{id}
+{ "data": {
+    "id": 12, "name": "Fuel Eco Tech", "blocks": [ … ], "theme": { … },
+    "preview_html": "<!DOCTYPE …>",   // NEW — byte-identical to the import's
+    "preview_text": "THE FUTURE OF …" // NEW — the plain-text part
+} }
+```
+
+`GET /admin/campaign-templates/starters` carries `preview_html` too, for the
+same reason.
+
+**What to change:** point the preview pane at `preview_html` from the template
+detail endpoint, exactly as the import screen already points at `preview_html`
+from the import response. There is a test asserting the two are byte-identical,
+so "same as it looked on upload" is now a guarantee rather than a hope.
+
+For **live** editing — after the marketer changes a block — keep calling
+`POST /admin/bulk-emails/preview` with the current blocks and theme. Same
+renderer, so it stays consistent. What the editor should not do is render the
+email itself; that is the thing that produced this report.
+
+The **block list** in the editor is a separate question and unchanged: your
+"can't edit here, will still send" notice for unknown types is the right
+behaviour and should stay until `group_list` and the new blocks are wired up.
+It just should not drive the preview.
+
+---
+
 ## Contract summary
 
 | | |

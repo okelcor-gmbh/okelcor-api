@@ -83,9 +83,18 @@ class AdminCampaignTemplateController extends Controller
     // Built-in designs, always available. Read-only: "use" one by copying its
     // blocks into a new campaign client-side, or save it as your own template.
     // -------------------------------------------------------------------------
-    public function starters(): JsonResponse
+    public function starters(CampaignBlockRenderer $renderer): JsonResponse
     {
-        return response()->json(['data' => CampaignStarterTemplates::all()]);
+        // Rendered here for the same reason the saved templates are: "use this
+        // design" must show what will actually be sent, not the client's own
+        // approximation of it.
+        $starters = array_map(function (array $starter) use ($renderer) {
+            $starter['preview_html'] = $renderer->render($starter['blocks'], $starter['theme'] ?? []);
+
+            return $starter;
+        }, CampaignStarterTemplates::all());
+
+        return response()->json(['data' => $starters]);
     }
 
     // -------------------------------------------------------------------------
@@ -105,11 +114,11 @@ class AdminCampaignTemplateController extends Controller
     // -------------------------------------------------------------------------
     // GET /api/v1/admin/campaign-templates/{id} — marketing.manage
     // -------------------------------------------------------------------------
-    public function show(int $id): JsonResponse
+    public function show(int $id, CampaignBlockRenderer $renderer): JsonResponse
     {
         $template = CampaignTemplate::with('creator:id,name')->findOrFail($id);
 
-        return response()->json(['data' => $this->format($template, withBlocks: true)]);
+        return response()->json(['data' => $this->format($template, withBlocks: true, renderer: $renderer)]);
     }
 
     // -------------------------------------------------------------------------
@@ -196,7 +205,7 @@ class AdminCampaignTemplateController extends Controller
         ], 422);
     }
 
-    private function format(CampaignTemplate $t, bool $withBlocks = false): array
+    private function format(CampaignTemplate $t, bool $withBlocks = false, ?CampaignBlockRenderer $renderer = null): array
     {
         $data = [
             'id'          => $t->id,
@@ -212,6 +221,20 @@ class AdminCampaignTemplateController extends Controller
         // The list endpoint stays small; the detail endpoint carries the design.
         if ($withBlocks) {
             $data['blocks'] = $t->blocks;
+        }
+
+        // …and the design as it will actually be sent.
+        //
+        // Reopening a saved template was showing something different from what
+        // the same design showed when it was imported, because the two were
+        // rendered by different code: the import returns HTML from this
+        // renderer, while the editor was drawing the blocks itself and had no
+        // rendering for the block types it did not know. A block type the
+        // client has never heard of is normal and permanent — this is where new
+        // ones arrive — so the preview cannot depend on the client knowing them.
+        if ($withBlocks && $renderer !== null && is_array($t->blocks)) {
+            $data['preview_html'] = $renderer->render($t->blocks, is_array($t->theme) ? $t->theme : []);
+            $data['preview_text'] = $renderer->renderText($t->blocks);
         }
 
         return $data;

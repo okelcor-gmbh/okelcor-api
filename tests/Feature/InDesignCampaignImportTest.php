@@ -714,6 +714,14 @@ class InDesignCampaignImportTest extends TestCase
         // read it as empty.
         $this->assertSame(range(0, count($blocks) - 1), array_keys($blocks));
 
+        // The design as it will actually be sent, rendered by the same code the
+        // import used. Reopening a template was showing something different
+        // from what that design showed on import, because the editor was
+        // drawing the blocks itself and had no rendering for the types it did
+        // not know — and new block types arriving is the normal case here.
+        $this->assertSame($imported->json('data.preview_html'), $reloaded->json('data.preview_html'));
+        $this->assertNotEmpty($reloaded->json('data.preview_text'));
+
         // 2. And the preview endpoint renders exactly what came back.
         $preview = $this->withHeaders($this->headers())->postJson('/api/v1/admin/bulk-emails/preview', [
             'blocks' => $blocks,
@@ -824,6 +832,40 @@ class InDesignCampaignImportTest extends TestCase
         // It is drawn by the header that sits on it. Left in as well, the email
         // gets an empty coloured bar above every section title.
         $this->assertNotContains('divider', array_column($this->layoutBlocks(), 'type'));
+    }
+
+    public function test_a_reopened_design_looks_exactly_as_it_did_on_import(): void
+    {
+        // The reported symptom: the design was right after upload, then "use
+        // this design" showed the old stacked-and-gold version. The two were
+        // rendered by different code — one by this renderer, one by the editor,
+        // which had no rendering for image_row or section_header and fell back
+        // to stacked images and plain headings.
+        $imported = $this->withHeaders($this->headers())->post('/api/v1/admin/campaign-templates/import', [
+            'file' => $this->layoutExport(),
+            'name' => 'Reopen me',
+        ])->assertStatus(201);
+
+        $reopened = $this->withHeaders($this->headers())
+            ->getJson('/api/v1/admin/campaign-templates/' . $imported->json('data.template_id'))
+            ->assertOk();
+
+        $html = $reopened->json('data.preview_html');
+
+        $this->assertSame($imported->json('data.preview_html'), $html);
+
+        // And it is the new layout, not the old one it kept reverting to.
+        $this->assertStringContainsString('bgcolor="#1F8A5B"', $html);
+
+        $document = new \DOMDocument();
+        libxml_use_internal_errors(true);
+        $document->loadHTML($html);
+        libxml_clear_errors();
+
+        // Three pictures in ONE row — the thing that kept coming back stacked.
+        $rows = (new \DOMXPath($document))->query('//tr[count(td/img) = 3]');
+
+        $this->assertSame(1, $rows->length);
     }
 
     public function test_the_bands_colour_selects_the_matching_preset(): void
