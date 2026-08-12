@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 /**
@@ -571,6 +572,57 @@ class InDesignCampaignImportTest extends TestCase
             collect($first)->firstWhere('type', 'image')['url'],
             collect($second)->firstWhere('type', 'image')['url']
         );
+    }
+
+    /**
+     * Reported from production: "The dry run field must be true or false."
+     *
+     * This endpoint is multipart/form-data and multipart carries every field as
+     * a STRING, so the browser's FormData sends "true" — which Laravel's
+     * `boolean` rule rejects, accepting only 1/0/"1"/"0". Every test here had
+     * passed a real PHP bool, which never crosses the wire the way a browser
+     * does, so the suite was green against a request shape no client sends.
+     */
+    #[DataProvider('truthyStrings')]
+    public function test_dry_run_is_accepted_in_the_spelling_a_browser_actually_sends(string $sent): void
+    {
+        $this->withHeaders($this->headers())->post('/api/v1/admin/campaign-templates/import', [
+            'file'    => $this->export(),
+            'dry_run' => $sent,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.saved', false);
+
+        $this->assertSame(0, CampaignTemplate::count());
+    }
+
+    public static function truthyStrings(): array
+    {
+        return [['true'], ['1'], ['on']];
+    }
+
+    public function test_a_string_false_still_saves_rather_than_previewing(): void
+    {
+        $this->withHeaders($this->headers())->post('/api/v1/admin/campaign-templates/import', [
+            'file'    => $this->export(),
+            'dry_run' => 'false',
+            'name'    => 'Sent as a string',
+        ])
+            ->assertStatus(201)
+            ->assertJsonPath('data.saved', true);
+    }
+
+    public function test_an_unrecognisable_dry_run_is_refused_not_read_as_save(): void
+    {
+        // false means "write a template". A value nobody can interpret must not
+        // be quietly read as the option that creates a row.
+        $this->withHeaders($this->headers())->post('/api/v1/admin/campaign-templates/import', [
+            'file'    => $this->export(),
+            'dry_run' => 'banana',
+            'name'    => 'Garbage flag',
+        ])->assertStatus(422)->assertJsonValidationErrors('dry_run');
+
+        $this->assertSame(0, CampaignTemplate::count());
     }
 
     public function test_a_name_is_required_unless_it_is_a_dry_run(): void

@@ -1529,6 +1529,32 @@ picker, `dry_run` review, then save) and came back with two things.
 | **Reviewing duplicated the images** | 🔧 fixed | Reviewing one export three times before saving left three copies of its photographs in the Media Library, and the save added a fourth. Reviewing is precisely what a dry run is *for*, so the feature working as intended was filling the library up. Conversions are now keyed on the **archive's own content hash**, cached two hours: same bytes → same conversion and the same media rows, whoever uploads them; edited bytes → a fresh conversion, so an edit is never served a stale design; media since deleted → the reuse is dropped rather than returning blocks pointing at dead URLs. Keyed by content rather than by uploader or name deliberately. A checksum column on `media` would be the more general fix but is a migration on a live table for a problem confined to this one flow. |
 | **`invalid_blocks` was missing from my note** | ✅ | My documentation error, found by them reading the controller rather than the note. The endpoint returns two 422 codes and the note described one. Fixed — and it is the second time in three sessions a frontend deploy has been shaped by this note being written from memory instead of from the source (cf. the partner login response shape, Session 75). |
 
+### `dry_run` rejected in production on the first real upload
+
+The marketer zipped the export, clicked *Read the design* and got
+**"The dry run field must be true or false."** A 422 on the very first real
+use, from a validation rule of mine.
+
+**Cause.** The endpoint is `multipart/form-data`, and multipart carries every
+field as a **string** — so the browser's `FormData` sends `"true"`. Laravel's
+`boolean` rule accepts `1`, `0`, `"1"` and `"0"` and nothing else, so it
+refused. `$request->boolean()` — used for the actual logic — has always
+accepted `"true"`, so only the rule was wrong; the feature underneath was
+correct the whole time.
+
+**Why the suite did not catch it, which is the part worth keeping.** Every
+existing test passed `'dry_run' => true` as a real PHP bool. Laravel's test
+client puts that straight into the parameter bag, so it never becomes a string
+the way an actual multipart request does. **28 passing tests against a request
+shape no browser can send.** A multipart endpoint has to be tested with
+multipart values, or the suite is agreeing with itself.
+
+| Change | Status | Notes |
+|--------|--------|-------|
+| Recognised spellings normalised before validation | ✅ fixed | `filter_var(..., FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE)` covers `true/false/1/0/on/off/yes/no` in either case. |
+| An unrecognisable value still 422s | ✅ | It becomes `null` and fails the rule rather than being read as `false` — and `false` means *save*. A typo must not quietly write a template the marketer was only previewing. |
+| Tests sending the browser's actual wire format (5 new) | ✅ | `"true"`, `"1"`, `"on"` via a data provider; `"false"` still saves; `"banana"` is refused and writes nothing. Full suite **333 passed, 0 failed**, 206 skipped. |
+
 **Upload ceiling — 50MB on the API, 4.5MB in production.** Frontend
 established, against Vercel's own docs, that the upload crosses a Next.js route
 handler and Vercel caps Function request bodies at 4.5MB with a 413 before any

@@ -44,6 +44,20 @@ class AdminCampaignImportController extends Controller
     // -------------------------------------------------------------------------
     public function store(Request $request, InDesignEmailImporter $importer, CampaignBlockRenderer $renderer): JsonResponse
     {
+        // This endpoint is multipart/form-data, and multipart carries every
+        // field as a STRING — so a checkbox arrives as "true", which Laravel's
+        // `boolean` rule rejects outright (it accepts 1/0/"1"/"0" and nothing
+        // else). Normalise the recognised spellings to a real boolean first.
+        //
+        // Anything unrecognised becomes null and still fails validation, rather
+        // than being quietly read as false: false means "save it", and a typo
+        // must not silently write a template the marketer was only previewing.
+        if (is_string($raw = $request->input('dry_run'))) {
+            $request->merge([
+                'dry_run' => filter_var($raw, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE),
+            ]);
+        }
+
         $dryRun = $request->boolean('dry_run');
 
         $data = $request->validate([
