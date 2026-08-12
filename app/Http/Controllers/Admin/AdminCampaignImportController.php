@@ -166,11 +166,18 @@ class AdminCampaignImportController extends Controller
      * A content hash on `media` would be the more general fix, but that is a
      * migration on a live table to solve a problem confined to this one flow.
      *
+     * The key covers the CONVERSION as well as the archive. Without that, a
+     * deploy that changes how a design is read keeps serving the previous
+     * reading for two hours to anyone re-uploading the same file — which is
+     * indistinguishable from the deploy not having happened, and is the first
+     * thing someone does to check whether it worked.
+     *
      * @return array<string, mixed>
      */
     private function convert(UploadedFile $file, InDesignEmailImporter $importer, int $adminId): array
     {
-        $key = 'indesign_import:' . hash_file('sha256', $file->getRealPath());
+        $key = 'indesign_import:' . $this->conversionVersion()
+            . ':' . hash_file('sha256', $file->getRealPath());
 
         $cached = Cache::get($key);
 
@@ -186,6 +193,35 @@ class AdminCampaignImportController extends Controller
         Cache::put($key, $result, now()->addHours(2));
 
         return $result;
+    }
+
+    /**
+     * A fingerprint of the code that does the converting.
+     *
+     * Derived from the source files rather than a constant someone has to
+     * remember to bump — this codebase has a documented history of exactly that
+     * kind of "remember to also update X" step being missed, and a stale
+     * conversion after a deploy looks identical to a failed deploy.
+     */
+    private function conversionVersion(): string
+    {
+        static $version = null;
+
+        if ($version !== null) {
+            return $version;
+        }
+
+        $fingerprint = '';
+
+        foreach ([InDesignEmailImporter::class, CampaignBlockRenderer::class] as $class) {
+            $path = (new \ReflectionClass($class))->getFileName();
+
+            if ($path !== false && is_readable($path)) {
+                $fingerprint .= hash_file('xxh128', $path);
+            }
+        }
+
+        return $version = substr(hash('xxh128', $fingerprint), 0, 12);
     }
 
     /** @param array<string, mixed> $result */

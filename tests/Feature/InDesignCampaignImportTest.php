@@ -558,6 +558,32 @@ class InDesignCampaignImportTest extends TestCase
         $this->assertSame(2, Media::count());
     }
 
+    public function test_a_conversion_is_not_reused_across_a_change_to_the_converter(): void
+    {
+        $this->importBlocks();
+
+        // What a deploy does. Without the converter's own fingerprint in the
+        // key, re-uploading the same file after a deploy serves the PREVIOUS
+        // reading for two hours — indistinguishable from the deploy not having
+        // happened, and re-uploading is the first thing anyone does to check.
+        $keys = array_keys(\Illuminate\Support\Facades\Cache::getStore() instanceof \Illuminate\Cache\ArrayStore
+            ? \Illuminate\Support\Facades\Cache::getStore()->all()
+            : []);
+
+        $this->assertNotEmpty($keys, 'The conversion should be cached at all.');
+
+        foreach ($keys as $key) {
+            if (str_starts_with($key, 'indesign_import:')) {
+                // version segment + archive hash
+                $this->assertCount(3, explode(':', $key));
+
+                return;
+            }
+        }
+
+        $this->fail('No conversion cache entry was written.');
+    }
+
     public function test_a_reused_conversion_is_dropped_when_its_media_has_been_deleted(): void
     {
         $first = $this->importBlocks();
