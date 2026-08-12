@@ -4,6 +4,39 @@ Last updated: 2026-08-12 | Branch: `main` | Latest commit: Session 80 (**pushed,
 
 ---
 
+## 🔧 Sessions 78–80 pushed, NOT deployed
+
+Tip is `d7b63a7`. One unapplied migration.
+
+| Session | What it is | Migration | Routes |
+|---|---|---|---|
+| **78** | Campaign blocks that hold two things side by side (`image_row`, `section_header`, `cards`, `fet_green`) + importer inference | none | none |
+| **79** | Customer behaviour analytics — what people search for and cannot find | **#32** `search_events` | **1 new** (`GET /admin/analytics/behaviour`) |
+| **80** | Campaign email on small screens | none | none |
+
+```bash
+cd /home/okelvaxj/domains/okelcor.com/public_html/okelcor-api
+git fetch origin && git reset --hard origin/main
+composer install --no-dev
+/opt/alt/php83/usr/bin/php artisan backup:okelcor
+/opt/alt/php83/usr/bin/php artisan migrate --force
+/opt/alt/php83/usr/bin/php artisan config:clear && /opt/alt/php83/usr/bin/php artisan config:cache
+/opt/alt/php83/usr/bin/php artisan route:cache
+/opt/alt/php83/usr/bin/php artisan view:clear && /opt/alt/php83/usr/bin/php artisan cache:clear
+```
+
+`route:cache` is required (Session 79 adds a route). `cache:clear` matters
+because the InDesign conversion cache is keyed on a fingerprint of the
+converting code — stale entries expire on their own, but clearing removes the
+two-hour window in which a re-upload looks like the deploy did not happen.
+
+**Nothing here changes customer-facing behaviour.** Session 79 starts recording
+catalogue searches — no PII, and the report is empty until traffic accumulates.
+Sessions 78 and 80 change how campaign emails render; no campaign sends on
+deploy.
+
+---
+
 ## ✅ Sessions 74–77 deployed to production (2026-08-12)
 
 Deployed as `35d8e12`. All three pending migrations applied and verified via
@@ -37,7 +70,8 @@ notifies anyone**, or she will assume it still does.
 
 ## ⚠️ Outstanding on production (as of 2026-08-12)
 
-Nothing here is a deploy. These are live data and configuration items.
+Besides the pending deploy above, these are live data and configuration items —
+none of them is fixed by shipping code.
 
 | # | Action | Why it matters |
 |---|--------|----------------|
@@ -1667,38 +1701,6 @@ See `FRONTEND_NOTE_indesign-campaign-import.md`.
 
 ---
 
-## Campaign email on small screens (Session 80)
-
-> **Deploy status:** built and tested, **not yet deployed**. No migration, no
-> new route, no contract change. Affects the rendered HTML of every campaign.
-
-The imported design was reported as "still wrong" three times before the actual
-condition surfaced: **it reads correctly on a desktop and badly on a phone.**
-Every earlier round was chasing a layout that had been right since Session 78.
-
-Three real defects, all mine, all introduced by making `card_width` variable in
-Session 78 without moving what depended on it.
-
-| Change | Status | Notes |
-|--------|--------|-------|
-| **Breakpoint derived from `card_width`** | 🔧 | It was hardcoded at `620px` while `card_width` became a per-theme setting reaching 800 — and `fet_green`, the preset the imported deck selects, is **680**. So every viewport between 621 and 680 kept the full-width card and scrolled sideways instead of collapsing. Now `card_width + 40`, with a test asserting the breakpoint exceeds the card width **for every preset**, so a future preset cannot reintroduce it. |
-| **Spacer cells hidden instead of stacked** | 🔧 | `cards` pads a short final row with empty cells so its tiles keep their width on a wide screen. Those cells carried `ok-stack`, so on a phone they became empty full-width blocks — stray gaps in the middle of the grid. New `ok-hide-sm` removes them below the breakpoint. |
-| **Full-width images sized to the card** | 🔧 | The image block hardcoded `width="552"`, correct for a 620px card and 60px too narrow in a 680px one, leaving a visible margin down one side of every picture. Derived from `card_width` now. |
-| **`full_bleed` bands are now actually full bleed** | 🔧 | Not a mobile bug, found while fixing them, and the most visible one. Every block shared a single cell padded 34px each side, so a band named *full bleed* was inset by 34px — which is the one thing the name promises. `render()` now emits one row per block and a block declares whether it sits inside the card's padding. The source deck's green bars run edge to edge; ours did not. |
-| `img { max-width: 100% }` on small screens | 🔧 | A picture wider than the viewport is the commonest cause of an email that scrolls sideways, and an imported photograph is whatever size InDesign exported it at. |
-| Backend tests (7 new) | ✅ | `CampaignBuilderTest` — breakpoint vs card width across **every** preset and a custom width, full-bleed placement, spacer hiding, image sizing, and a sweep asserting **every percentage-width cell in any block either stacks or hides**. That last one is the general guard: a column that never collapses is a column squeezed into a third of a phone screen, and it would otherwise be found the same way this was. Full suite **384 passed, 0 failed**, 206 skipped. |
-
-**Worth recording about the diagnosis, not the code.** Three rounds were spent
-on "the preview shows the old layout" — a stale deploy, then a client-side
-renderer, then a saved template — and the actual condition was never in any of
-those. Nobody said which screen size until the fourth report. The preview has a
-desktop/mobile toggle; **the first question about a rendering complaint should
-be which of the two it was.**
-
-See `FRONTEND_NOTE_indesign-campaign-import.md`.
-
----
-
 ## Customer behaviour analytics — what people look for (Session 79)
 
 > **Deploy status:** built and tested, **not yet deployed**. Migration **#32**
@@ -1744,6 +1746,38 @@ false` before the migration runs rather than reporting zeros, because zero
 searches and no recording are different claims.
 
 See `FRONTEND_NOTE_behaviour-analytics.md`.
+
+---
+
+## Campaign email on small screens (Session 80)
+
+> **Deploy status:** built and tested, **not yet deployed**. No migration, no
+> new route, no contract change. Affects the rendered HTML of every campaign.
+
+The imported design was reported as "still wrong" three times before the actual
+condition surfaced: **it reads correctly on a desktop and badly on a phone.**
+Every earlier round was chasing a layout that had been right since Session 78.
+
+Three real defects, all mine, all introduced by making `card_width` variable in
+Session 78 without moving what depended on it.
+
+| Change | Status | Notes |
+|--------|--------|-------|
+| **Breakpoint derived from `card_width`** | 🔧 | It was hardcoded at `620px` while `card_width` became a per-theme setting reaching 800 — and `fet_green`, the preset the imported deck selects, is **680**. So every viewport between 621 and 680 kept the full-width card and scrolled sideways instead of collapsing. Now `card_width + 40`, with a test asserting the breakpoint exceeds the card width **for every preset**, so a future preset cannot reintroduce it. |
+| **Spacer cells hidden instead of stacked** | 🔧 | `cards` pads a short final row with empty cells so its tiles keep their width on a wide screen. Those cells carried `ok-stack`, so on a phone they became empty full-width blocks — stray gaps in the middle of the grid. New `ok-hide-sm` removes them below the breakpoint. |
+| **Full-width images sized to the card** | 🔧 | The image block hardcoded `width="552"`, correct for a 620px card and 60px too narrow in a 680px one, leaving a visible margin down one side of every picture. Derived from `card_width` now. |
+| **`full_bleed` bands are now actually full bleed** | 🔧 | Not a mobile bug, found while fixing them, and the most visible one. Every block shared a single cell padded 34px each side, so a band named *full bleed* was inset by 34px — which is the one thing the name promises. `render()` now emits one row per block and a block declares whether it sits inside the card's padding. The source deck's green bars run edge to edge; ours did not. |
+| `img { max-width: 100% }` on small screens | 🔧 | A picture wider than the viewport is the commonest cause of an email that scrolls sideways, and an imported photograph is whatever size InDesign exported it at. |
+| Backend tests (7 new) | ✅ | `CampaignBuilderTest` — breakpoint vs card width across **every** preset and a custom width, full-bleed placement, spacer hiding, image sizing, and a sweep asserting **every percentage-width cell in any block either stacks or hides**. That last one is the general guard: a column that never collapses is a column squeezed into a third of a phone screen, and it would otherwise be found the same way this was. Full suite **384 passed, 0 failed**, 206 skipped. |
+
+**Worth recording about the diagnosis, not the code.** Three rounds were spent
+on "the preview shows the old layout" — a stale deploy, then a client-side
+renderer, then a saved template — and the actual condition was never in any of
+those. Nobody said which screen size until the fourth report. The preview has a
+desktop/mobile toggle; **the first question about a rendering complaint should
+be which of the two it was.**
+
+See `FRONTEND_NOTE_indesign-campaign-import.md`.
 
 ---
 
@@ -1825,7 +1859,7 @@ See `FRONTEND_NOTE_behaviour-analytics.md`.
 | eBay production credentials rotation | **High** | `EBAY_CLIENT_SECRET` was exposed in a prior session — must rotate in eBay Developer Portal before listing live products |
 | ~~`storage/logs/laravel.log` doesn't receive writes on production~~ | ~~Medium~~ Resolved | Confirmed resolved in Session 63/70 — used this file repeatedly to diagnose real production issues (Gemini quota errors, Crisp API errors) and it received writes correctly both times |
 | GLS production API access | Low | Currently running on the sandbox host (`api-sandbox.gls-group.net`) for both auth and tracking — verified to return real live data for real parcels, so not urgent, but production access requires a separate GLS approval step if sandbox ever proves unreliable long-term |
-| `admin_users.role` ENUM missing documented roles | **High** | Column only allows `super_admin/admin/editor/order_manager`; `sales_manager`, `support`, `content_manager`, `viewer` are referenced throughout `AdminPermissions.php` and this doc but can't be stored under MySQL strict mode — creating an admin with any of those roles fails outright. Found via CI in Session 52; needs a migration widening the ENUM (or switching to a plain string column) plus a check for any admin accounts already silently affected |
+| `admin_users.role` ENUM missing documented roles | **High** | Column only allows `super_admin/admin/editor/order_manager`; `sales_manager`, `support`, `content_manager`, `viewer` are referenced throughout `AdminPermissions.php` and this doc but can't be stored under MySQL strict mode — creating an admin with any of those roles fails outright. Found via CI in Session 52; needs a migration widening the ENUM (or switching to a plain string column) plus a check for any admin accounts already silently affected. **Now shaping new work rather than just blocking old**: `partner_sales.verify` (Session 73) and `analytics.view` (Session 79) were both granted to a narrower role list than they should have, with a comment on each saying to add `sales_manager` in the same change that widens the ENUM. Every session that adds a permission pays this again |
 | 5 orders where line items exceed the stored total | **High** | Orders **10075, 10076, 10077, 10079, 10080** (all `source = website`). Items sum to roughly 2× the recorded total on ratios of 0.43–0.49 — inconsistent, so not one mechanism. Surfaced by `orders:repair-totals` in Session 75 and deliberately **not** repaired: no rule can say which of the two figures is right, and one of them is what the customer was charged. Needs a person to compare each against the issued invoice. Money-facing, and unlike the double count it is not self-evident which direction the error runs |
 | Payment milestone history missing for all pre-#31 orders | Medium | `order_logs.action` never accepted the milestone values, and the writes are wrapped in a `try/catch` that only logs a warning — so no order on production has a record of who confirmed its deposit or balance. Migration #31 fixes it going forward; the lost rows cannot be reconstructed. If any order's payment confirmation is ever disputed, `storage/logs/laravel.log` warnings are the only trace, and only for as long as that file is retained |
 | Audit-log writes fail silently across the codebase | **High** | Not the ENUM itself — the pattern. Every `OrderLog` write is inside a `try/catch` that logs a warning and continues, which is right (a failed log must not fail the user's action) but means a schema mismatch is invisible until someone reads the column definition. Three separate instances found this way now (`security_events.type` Session 73, `order_logs.action` Sessions 75 and 76). Wants a test asserting every action string written in `app/` is accepted by the column, or a CI check — otherwise there will be a fourth |
