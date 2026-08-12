@@ -1,42 +1,52 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-12 | Branch: `main` | Latest commit: Session 77 (**pushed, not deployed**)
+Last updated: 2026-08-12 | Branch: `main` | Latest commit: Session 77 (**deployed**)
 
 ---
 
-## ⚠️ Outstanding on production (as of 2026-08-11)
+## ✅ Sessions 74–77 deployed to production (2026-08-12)
 
-Sessions 74 and 75 are pushed and tested but **not on the live host**. One item
-below is not a deploy at all — it is live order data left wrong by a command
-that crashed mid-run, and it should be corrected before anything else.
+Deployed as `35d8e12`. All three pending migrations applied and verified via
+`migrate:status`:
+
+| Migration | Batch |
+|---|---|
+| **#29** `2026_08_07_000002_create_campaign_drafts_table` | 99 |
+| **#30** `2026_08_10_000001_add_totals_repair_actions_to_order_logs_enum` | 100 |
+| **#31** `2026_08_11_000001_add_milestone_and_document_actions_to_order_logs_enum` | 101 |
+
+`route:cache` rebuilt. Verified live: `POST /api/v1/admin/campaign-templates/import`
+returns Laravel's own `401 {"message":"Unauthenticated."}` with
+`content-type: application/json`, so the Session 77 route is registered and
+reachable rather than 404ing from a stale route cache.
+
+**Deploy path — the account is `okelvaxj`**, confirmed from the shell prompt
+during this deploy (`[okelvaxj@business194 okelcor-api]$`), which matches the
+production database prefix `okelvaxj_okelcor`. The
+`/home/u978121777/domains/okelcor.com/public_html/okelcor-api` path recorded in
+earlier revisions of this file is the stale one. Still worth a `pwd` before a
+deploy, but do not start from the `u978121777` path.
+
+**Live behaviour that changed on this deploy** (Session 76 — both are the fix,
+not a side effect): generating a proforma no longer e-mails the customer a
+deposit request, and the EU entry certificate now accepts milestone-paid orders
+it was refusing. **Tell the order manager the proforma button no longer
+notifies anyone**, or she will assume it still does.
+
+---
+
+## ⚠️ Outstanding on production (as of 2026-08-12)
+
+Nothing here is a deploy. These are live data and configuration items.
 
 | # | Action | Why it matters |
 |---|--------|----------------|
-| 1 | **Restore order 10112** — `orders:restore-total 10112 371.88 371.88 --reason="undo bad automated repair, Session 75"` | The first `orders:repair-totals --fix` run cut it from **371.88 → 312.50** on a wrong diagnosis, then died before writing the log. It is still at the wrong figure and there is no record of the change. Needs migration #30 applied first so the restore can write its audit row. |
-| 2 | Deploy latest `main` + `artisan migrate --force` | Applies **#29** (campaign drafts), **#30** (`order_logs.action` ENUM — totals commands) and **#31** (same ENUM, eleven values shipped code already writes and MySQL has been silently rejecting — see Session 76). |
-| 3 | Re-run `orders:repair-totals` (survey, no `--fix`) | Confirms the rewritten classifier now flags only the 2 lump-sum orders, not 21. Read the output before step 4. |
-| 4 | `orders:repair-totals --fix` | Corrects **AB-1150** (16,250 → 8,125) and **AB - 1182** (30,000 → 15,000) — the two real double counts. |
+| 1 | **Restore order 10112** — `orders:restore-total 10112 371.88 371.88 --reason="undo bad automated repair, Session 75"` | The first `orders:repair-totals --fix` run cut it from **371.88 → 312.50** on a wrong diagnosis, then died before writing the log. It is still at the wrong figure and there is no record of the change. Migration #30 is now applied, so the restore can write its audit row — this is unblocked. |
+| 2 | Re-run `orders:repair-totals` (survey, no `--fix`) | Confirms the rewritten classifier now flags only the 2 lump-sum orders, not 21. Read the output before step 3. |
+| 3 | `orders:repair-totals --fix` | Corrects **AB-1150** (16,250 → 8,125) and **AB - 1182** (30,000 → 15,000) — the two real double counts. |
+| 4 | **`QUEUE_CONNECTION=database`** + a queue worker under Supervisor | Still `sync`. A campaign sent to the full contact list would run `SendBulkEmailCampaignJob` inline in the HTTP request and time out. Blocks any real use of bulk email — including the InDesign import shipped in Session 77. |
 | 5 | *(optional, business call)* `PARTNER_EDIT_WINDOW_HOURS=72` in `.env` before `config:cache` | See Session 75 partner-correction note. Config-only, reversible. |
 | 6 | *(human, not a command)* Reconcile orders **10075, 10076, 10077, 10079, 10080** | Items exceed the stored total on inconsistent ratios. No tooling will fix these — someone has to compare them against what was actually invoiced. Tracked in Known Gaps. |
-
-⚠️ **Verify the deploy path first.** This file records
-`/home/u978121777/domains/okelcor.com/public_html/okelcor-api`, but the
-production database is `okelvaxj_okelcor` and cPanel prefixes database names
-with the account user — which points at `/home/okelvaxj/...` instead. One of
-the two is stale. `pwd` on the host before running anything; do not trust
-either path from this document alone.
-
-`route:cache` must be rebuilt on this deploy (Session 74 adds the draft routes,
-Session 75 adds `PATCH /admin/partner-sales/{id}`, Session 76 adds
-`POST /admin/orders/{id}/payment-milestones/request-deposit` and
-`GET /admin/trade-documents/upload-options`, Session 77 adds
-`POST /admin/campaign-templates/import`).
-
-**Session 76 changes live customer-facing behaviour the moment it lands:**
-generating a proforma stops e-mailing the customer a deposit request, and the
-EU entry certificate starts accepting milestone-paid orders that were being
-refused. Both are the fix, not a side effect — but tell the order manager the
-proforma button no longer notifies anyone, or she will assume it still does.
 
 ---
 
