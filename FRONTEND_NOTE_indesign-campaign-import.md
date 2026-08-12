@@ -171,6 +171,53 @@ A count of what was filtered comes back in `warnings`.
 
 ---
 
+## Empty preview after saving — check which endpoint you reloaded from
+
+Reported: an imported design saved fine, the editor listed its 20 blocks, but
+the preview pane showed "add a block to see your email here".
+
+**The API round trip is proven, so the blocks are not being lost on this side.**
+`InDesignCampaignImportTest::test_a_saved_import_reloads_and_previews_through_the_campaign_endpoints`
+walks the exact chain — import → save → `GET /admin/campaign-templates/{id}` →
+`POST /admin/bulk-emails/preview` — and asserts the blocks come back identical,
+as a sequential array, and render. Two likely causes on your side:
+
+**1. The list endpoint does not carry `blocks`. Only the detail endpoint does.**
+This is deliberate (the list stays light) but it is an asymmetry I failed to
+document, and it produces exactly this symptom:
+
+| Endpoint | Returns |
+|---|---|
+| `GET /admin/campaign-templates` | `block_count` — **no `blocks`** |
+| `GET /admin/campaign-templates/{id}` | `block_count` **and** `blocks` |
+
+If the editor holds the blocks it already had from the import response while
+the preview refetches from the **list**, the preview sees `blocks: undefined`
+and renders its empty state while the block list still shows 20. Fetch the
+detail endpoint by id.
+
+**2. `theme` is always an object, never a bare preset string.** An imported
+theme carries the preset *plus* the colours derived from the design:
+
+```json
+{ "preset": "okelcor_dark", "background": "#FFFFFF", "card_background": "#FFFFFF",
+  "text_color": "#000000", "heading_color": "#C4B07C",
+  "button_background": "#C4B07C", "button_text_color": "#FFFFFF" }
+```
+
+That is the real theme from the Fuel Eco Tech export — test `themeToKey()`
+against it directly. `preset` is always present and always one of
+`okelcor_dark` / `light`, so keying off `theme.preset` is safe. If
+`themeToKey()` returns undefined for an unrecognised *whole object* and the
+preview guards on a valid theme, it will bail to the empty state. The overrides
+are meant to be passed through to `POST /admin/bulk-emails/preview` verbatim —
+the renderer applies them on top of the preset and ignores any key it does not
+recognise, so there is nothing to strip.
+
+Quickest way to localise it: post the saved template's blocks straight to
+`POST /admin/bulk-emails/preview` from the network tab. If HTML comes back, the
+gap is between your editor state and your preview component.
+
 ## Upload size — the API says 50MB, Vercel delivers 4.5MB
 
 Frontend established this and it is correct: the upload crosses a Next.js route

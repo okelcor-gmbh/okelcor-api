@@ -653,6 +653,51 @@ class InDesignCampaignImportTest extends TestCase
             ->assertStatus(201);
     }
 
+    /**
+     * The whole chain the editor actually walks, in one test.
+     *
+     * Reported from production: an imported design saved fine and the editor
+     * listed its 20 blocks, but the preview pane showed its empty state. That
+     * can only be one of two things — the blocks not surviving the round trip
+     * through the template, or the preview endpoint refusing them — so this
+     * walks both rather than reasoning about which.
+     */
+    public function test_a_saved_import_reloads_and_previews_through_the_campaign_endpoints(): void
+    {
+        $imported = $this->withHeaders($this->headers())->post('/api/v1/admin/campaign-templates/import', [
+            'file' => $this->export(),
+            'name' => 'Round trip',
+        ])->assertStatus(201);
+
+        $id = $imported->json('data.template_id');
+
+        // 1. Reopening the template hands back the blocks, not a count of them.
+        $reloaded = $this->withHeaders($this->headers())
+            ->getJson('/api/v1/admin/campaign-templates/' . $id)
+            ->assertOk();
+
+        $blocks = $reloaded->json('data.blocks');
+        $theme  = $reloaded->json('data.theme');
+
+        $this->assertIsArray($blocks);
+        $this->assertNotEmpty($blocks, 'The saved template must reload with its blocks.');
+        $this->assertSame($imported->json('data.blocks'), $blocks);
+
+        // Sequential keys, not an object — a JSON object here would arrive in
+        // JavaScript as {"0":…} and every .length / .map in the editor would
+        // read it as empty.
+        $this->assertSame(range(0, count($blocks) - 1), array_keys($blocks));
+
+        // 2. And the preview endpoint renders exactly what came back.
+        $preview = $this->withHeaders($this->headers())->postJson('/api/v1/admin/bulk-emails/preview', [
+            'blocks' => $blocks,
+            'theme'  => $theme,
+        ])->assertOk();
+
+        $this->assertStringContainsString('The Future of Fuel Savings', $preview->json('data.html'));
+        $this->assertNotEmpty($preview->json('data.text'));
+    }
+
     // ── the real export the marketing team actually produced ───────────────
 
     public function test_the_real_marketing_export_converts_end_to_end(): void
