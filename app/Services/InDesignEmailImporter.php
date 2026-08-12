@@ -79,10 +79,24 @@ class InDesignEmailImporter
     private const RULE_MIN_RATIO      = 6.0;
     private const RULE_MAX_SHORT_SIDE = 80;
 
+    /**
+     * A rule of one flat colour, with a heading sitting on it, is not a rule at
+     * all — it is the coloured band behind a section title. Sampled at the
+     * centre and confirmed flat, so a photograph that happens to be band-shaped
+     * is not mistaken for one.
+     */
+    private const BAND_FLATNESS_SAMPLES = 24;
+
+    /** How far apart two images' tops may be and still read as one row. */
+    private const ROW_Y_TOLERANCE = 24.0;
+
     /** Only these ever leave the archive. Fonts and scripts are useless in email. */
     private const ALLOWED_EXTENSIONS = ['html', 'htm', 'xhtml', 'css', 'png', 'jpg', 'jpeg', 'gif', 'webp'];
 
     private const IMPORTABLE_IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp'];
+
+    /** The InDesign page width, used to tell a full-bleed band from an inset one. */
+    private float $pageWidth = 595.0;
 
     public function __construct(private MediaLibraryService $mediaLibrary)
     {
@@ -257,6 +271,10 @@ class InDesignEmailImporter
 
         $body = $document->getElementsByTagName('body')->item(0);
 
+        if ($body instanceof \DOMElement && preg_match('/(?<![a-z-])width\s*:\s*([\d.]+)px/i', $body->getAttribute('style'), $m)) {
+            $this->pageWidth = max(1.0, (float) $m[1]);
+        }
+
         if ($body instanceof \DOMElement) {
             $this->collect($body, $containers, $charStyles, dirname($documentPath), 0.0, 1.0, $items, $warnings);
         }
@@ -271,7 +289,7 @@ class InDesignEmailImporter
 
         $rules  = [];
         $media  = $this->importImages($items, $uploadedBy, $collection, $warnings, $rules);
-        $theme  = $this->deriveTheme($items, $css, $warnings);
+        $theme  = $this->deriveTheme($items, $css, $warnings, $this->bands($items, $rules)['colour']);
         $blocks = $this->buildBlocks($items, $media, $rules, $warnings);
 
         return [
@@ -362,7 +380,14 @@ class InDesignEmailImporter
         foreach ($matches as $match) {
             [$x, $y] = $this->readTranslate($match[2]);
 
-            $positions[$match[1]] = ['x' => $x, 'y' => $y];
+            $positions[$match[1]] = [
+                'x'      => $x,
+                'y'      => $y,
+                // The box matters as well as the corner: a band's width is what
+                // says whether it runs the full page or is an inset pill.
+                'width'  => preg_match('/(?<![a-z-])width\s*:\s*([\d.]+)px/i', $match[2], $m) ? (float) $m[1] : 0.0,
+                'height' => preg_match('/(?<![a-z-])height\s*:\s*([\d.]+)px/i', $match[2], $m) ? (float) $m[1] : 0.0,
+            ];
         }
 
         return $positions;
@@ -424,7 +449,8 @@ class InDesignEmailImporter
         float $scale,
         array &$items,
         array &$warnings,
-        float $offsetX = 0.0
+        float $offsetX = 0.0,
+        array $box = ['width' => 0.0, 'height' => 0.0]
     ): void {
         foreach ($element->childNodes as $child) {
             if (! $child instanceof \DOMElement) {
@@ -434,12 +460,17 @@ class InDesignEmailImporter
             $x = $offsetX;
             $y = $offsetY;
             $s = $scale;
+            $b = $box;
 
             $id = $child->getAttribute('id');
 
             if ($id !== '' && isset($containers[$id])) {
                 $x += $containers[$id]['x'];
                 $y += $containers[$id]['y'];
+
+                // Remembered for any <img> inside: the picture fills its frame,
+                // so the frame's box is the picture's box on the page.
+                $b = ['width' => $containers[$id]['width'], 'height' => $containers[$id]['height']];
             }
 
             $style = $child->getAttribute('style');
@@ -464,12 +495,14 @@ class InDesignEmailImporter
 
             if (strtolower($child->tagName) === 'img') {
                 $items[] = [
-                    'kind' => 'image',
-                    'x'    => $x,
-                    'y'    => $y,
-                    'src'  => $child->getAttribute('src'),
-                    'alt'  => $child->getAttribute('alt'),
-                    'path' => $baseDir,
+                    'kind'   => 'image',
+                    'x'      => $x,
+                    'y'      => $y,
+                    'width'  => $b['width'],
+                    'height' => $b['height'],
+                    'src'    => $child->getAttribute('src'),
+                    'alt'    => $child->getAttribute('alt'),
+                    'path'   => $baseDir,
                 ];
 
                 continue;
@@ -485,7 +518,7 @@ class InDesignEmailImporter
                 continue;
             }
 
-            $this->collect($child, $containers, $charStyles, $baseDir, $y, $s, $items, $warnings, $x);
+            $this->collect($child, $containers, $charStyles, $baseDir, $y, $s, $items, $warnings, $x, $b);
         }
     }
 
@@ -523,7 +556,15 @@ class InDesignEmailImporter
             // visually one line but differ in the third decimal.
             $key = (string) round($top, 1);
 
-            $lines[$key][] = ['left' => $left, 'text' => $text];
+            $bold = false;
+
+            foreach (preg_split('/\s+/', $span->getAttribute('class')) ?: [] as $class) {
+                if (($charStyles[$class]['bold'] ?? false) === true) {
+                    $bold = true;
+                }
+            }
+
+            $lines[$key][] = ['left' => $left, 'text' => $text, 'bold' => $bold];
 
             $first ??= $top;
 
@@ -556,10 +597,20 @@ class InDesignEmailImporter
 
         $assembled = [];
 
+        arsort($weights);
+        $dominant = array_key_first($weights);
+        $style    = $dominant !== null ? $charStyles[$dominant] : ['size' => 0.0, 'bold' => false, 'color' => null, 'upper' => false];
+
         foreach ($lines as $line) {
             usort($line, fn ($a, $b) => $a['left'] <=> $b['left']);
 
-            $assembled[] = $this->tidy(implode('', array_column($line, 'text')));
+            // Bold runs inside a paragraph — "**Fuel Eco Tech (FET)** offers…",
+            // "**Marine** – Boats, ships…" — are real emphasis the designer
+            // applied, and taking only the paragraph's dominant style threw
+            // them away. Re-expressed in the inline syntax the renderer already
+            // understands, which escapes everything and then reintroduces only
+            // the markup it generates itself.
+            $assembled[] = $this->tidy($this->emphasise($line, (bool) $style['bold']));
         }
 
         $text = $this->tidy(implode(' ', array_filter($assembled, fn ($l) => $l !== '')));
@@ -567,10 +618,6 @@ class InDesignEmailImporter
         if ($text === '') {
             return null;
         }
-
-        arsort($weights);
-        $dominant = array_key_first($weights);
-        $style    = $dominant !== null ? $charStyles[$dominant] : ['size' => 0.0, 'bold' => false, 'color' => null, 'upper' => false];
 
         return [
             'kind'  => 'text',
@@ -585,6 +632,58 @@ class InDesignEmailImporter
             // one frame can hold a dozen paragraphs.
             'offset' => ($first ?? 0.0) * $scale,
         ];
+    }
+
+    /**
+     * Joins one visual line's spans, wrapping runs that are bolder than the
+     * paragraph in `**`.
+     *
+     * Only marks a run when it differs from the paragraph's own weight — a
+     * heading set entirely in bold is already bold, and wrapping all of it
+     * would put literal asterisks in front of a marketer who never typed one.
+     *
+     * @param  array<int, array{left: float, text: string, bold: bool}>  $line
+     */
+    private function emphasise(array $line, bool $paragraphIsBold): string
+    {
+        // Merge neighbouring spans of the same weight first. Each word is its
+        // own span, so without this a five-word bold run would be wrapped five
+        // times over.
+        $runs = [];
+
+        foreach ($line as $span) {
+            $bold = $span['bold'] && ! $paragraphIsBold;
+            // An asterisk in the source would otherwise pair with the ones added
+            // here and swallow the text between them.
+            $text = str_replace('*', '', $span['text']);
+
+            if ($runs !== [] && $runs[count($runs) - 1]['bold'] === $bold) {
+                $runs[count($runs) - 1]['text'] .= $text;
+                continue;
+            }
+
+            $runs[] = ['bold' => $bold, 'text' => $text];
+        }
+
+        $out = '';
+
+        foreach ($runs as $run) {
+            if (! $run['bold'] || trim($run['text']) === '') {
+                $out .= $run['text'];
+                continue;
+            }
+
+            // The spaces around a run belong OUTSIDE its markers. InDesign puts
+            // the trailing space inside the styled span, so marking the span
+            // verbatim yields "of** 15%–35%**" — which renders as a literal
+            // asterisk pair, because the syntax needs the marker against the
+            // word.
+            preg_match('/^(\s*)(.*?)(\s*)$/su', $run['text'], $m);
+
+            $out .= $m[1] . '**' . $m[2] . '**' . $m[3];
+        }
+
+        return $out;
     }
 
     // -------------------------------------------------------------------------
@@ -602,7 +701,9 @@ class InDesignEmailImporter
      *
      * @param  array<int, array<string, mixed>>  $items
      * @param  array<int, string>  $warnings
-     * @param  array<string, true>  $rules  filled with the srcs that are hairlines
+     * @param  array<string, ?string>  $rules  srcs that are hairlines, mapped to
+     *                                         their fill colour when they are a
+     *                                         flat band rather than a rule
      * @return array<string, array<string, mixed>>  keyed by the src it came from
      */
     private function importImages(array $items, ?int $uploadedBy, string $collection, array &$warnings, array &$rules): array
@@ -651,9 +752,11 @@ class InDesignEmailImporter
             }
 
             // A hairline under a heading. Recorded, not imported: it comes back
-            // as a divider block, which is what it was drawn to be.
+            // as a divider block, which is what it was drawn to be — unless it
+            // is one flat colour, in which case it is the band behind a section
+            // title and its colour is worth keeping.
             if ($long / $short >= self::RULE_MIN_RATIO && $short <= self::RULE_MAX_SHORT_SIDE) {
-                $rules[$src] = true;
+                $rules[$src] = $this->flatColour($binary);
                 continue;
             }
 
@@ -691,6 +794,57 @@ class InDesignEmailImporter
         }
 
         return $imported;
+    }
+
+    /**
+     * The graphic's colour if it is one flat colour, null if it has any detail.
+     *
+     * This is what separates the gold hairline under a heading (a rule) from
+     * the green band behind one (a section header). Both are long thin PNGs in
+     * the export and nothing else distinguishes them.
+     */
+    private function flatColour(string $binary): ?string
+    {
+        $image = @imagecreatefromstring($binary);
+
+        if ($image === false) {
+            return null;
+        }
+
+        $width  = imagesx($image);
+        $height = imagesy($image);
+        $first  = null;
+
+        for ($i = 0; $i < self::BAND_FLATNESS_SAMPLES; $i++) {
+            $x = (int) round(($width - 1) * $i / max(1, self::BAND_FLATNESS_SAMPLES - 1));
+            $y = intdiv($height, 2);
+
+            $rgb = imagecolorat($image, $x, $y) & 0xFFFFFF;
+
+            if ($first === null) {
+                $first = $rgb;
+                continue;
+            }
+
+            // Any variation at all and this is artwork, not a fill.
+            if ($rgb !== $first) {
+                imagedestroy($image);
+
+                return null;
+            }
+        }
+
+        imagedestroy($image);
+
+        if ($first === null) {
+            return null;
+        }
+
+        $hex = sprintf('#%06X', $first);
+
+        // A white or near-black fill is a spacer or a shadow, not a band worth
+        // colouring a section header with.
+        return in_array($hex, ['#FFFFFF', '#000000'], true) ? null : $hex;
     }
 
     /**
@@ -749,7 +903,7 @@ class InDesignEmailImporter
      * @param  array<int, string>  $warnings
      * @return array<string, mixed>
      */
-    private function deriveTheme(array $items, string $css, array &$warnings): array
+    private function deriveTheme(array $items, string $css, array &$warnings, ?string $bandColour = null): array
     {
         $byColour = [];
 
@@ -767,10 +921,21 @@ class InDesignEmailImporter
         $accent = $this->accentColour($byColour, $text);
         $page   = $this->pageColour($css);
 
-        $theme = ['preset' => CampaignBlockRenderer::DEFAULT_THEME];
+        // A band colour is the strongest signal in the file about what the deck
+        // is meant to look like: it is a deliberate fill the designer chose,
+        // not type that happens to sit on artwork. Where a matching preset
+        // exists, start from it rather than reconstructing the palette one key
+        // at a time — that is what a preset is for, and it means the NEXT
+        // campaign for the same product starts correct too.
+        $theme = ['preset' => $this->presetFor($bandColour)];
+
+        if ($bandColour !== null) {
+            $theme['band_background'] = $bandColour;
+            $theme['band_text_color'] = $this->luminance($bandColour) > 0.5 ? '#111111' : '#FFFFFF';
+        }
 
         if ($text === null || $page === null) {
-            $warnings[] = 'No usable colours were found in the export, so the Okelcor house theme was applied.';
+            $warnings[] = 'No usable colours were found in the export, so the house theme was applied.';
 
             return $theme;
         }
@@ -779,7 +944,7 @@ class InDesignEmailImporter
             // The commonest real case, and the one worth naming: light type that
             // only worked because it sat on a photograph.
             $warnings[] = 'The design sets its type in ' . $text . ' against ' . $page
-                . ', which is unreadable once the background artwork is gone. The Okelcor house theme was applied instead — change it in the editor if you want different colours.';
+                . ', which is unreadable once the background artwork is gone. The house theme was applied instead — change it in the editor if you want different colours.';
 
             return $theme;
         }
@@ -795,6 +960,48 @@ class InDesignEmailImporter
         }
 
         return $theme;
+    }
+
+    /**
+     * Picks the preset whose own accent is closest to the design's band colour,
+     * falling back to the house default when nothing is near enough.
+     *
+     * Matching on the band rather than asking the marketer to choose means a
+     * Fuel Eco Tech deck lands on the FET preset by itself — including its card
+     * surface and dark tone, which no amount of per-campaign colour overriding
+     * would have produced.
+     */
+    private function presetFor(?string $bandColour): string
+    {
+        if ($bandColour === null) {
+            return CampaignBlockRenderer::DEFAULT_THEME;
+        }
+
+        $best     = CampaignBlockRenderer::DEFAULT_THEME;
+        $distance = INF;
+
+        foreach (CampaignBlockRenderer::THEMES as $preset => $values) {
+            $candidate = $this->distance($bandColour, $values['band_background']);
+
+            if ($candidate < $distance) {
+                $distance = $candidate;
+                $best     = $preset;
+            }
+        }
+
+        // Roughly "the same colour to the eye". Beyond it the design is using
+        // something the presets do not cover, and the per-campaign band
+        // override above carries the colour instead.
+        return $distance <= 60.0 ? $best : CampaignBlockRenderer::DEFAULT_THEME;
+    }
+
+    /** Straight-line distance in RGB. Crude, but only ever used to rank presets. */
+    private function distance(string $a, string $b): float
+    {
+        [$r1, $g1, $b1] = $this->rgb($a);
+        [$r2, $g2, $b2] = $this->rgb($b);
+
+        return sqrt((($r1 - $r2) ** 2) + (($g1 - $g2) ** 2) + (($b1 - $b2) ** 2));
     }
 
     /**
@@ -949,9 +1156,23 @@ class InDesignEmailImporter
             $paragraph = [];
         };
 
-        foreach ($items as $item) {
+        $bands = $this->bands($items, $rules);
+        $rows  = $this->imageRows($items, $media);
+        $taken = [];
+
+        foreach ($items as $index => $item) {
+            if (isset($taken[$index])) {
+                continue;
+            }
+
             if ($item['kind'] === 'image') {
-                if (isset($rules[$item['src']])) {
+                if (array_key_exists($item['src'], $rules)) {
+                    // A band is rendered by the heading that sits on it, not on
+                    // its own — an empty coloured bar says nothing.
+                    if (in_array($index, $bands['consumed'], true)) {
+                        continue;
+                    }
+
                     $flush();
 
                     // The same hairline art is reused throughout the deck, and
@@ -970,10 +1191,43 @@ class InDesignEmailImporter
 
                 $flush();
 
+                // Images sitting beside each other on the page, not under each
+                // other. Rendering them as separate blocks stacks them, which
+                // is the whole reported complaint.
+                if (isset($rows[$index])) {
+                    $block = ['type' => 'image_row'];
+
+                    foreach (array_values($rows[$index]) as $slot => $member) {
+                        $taken[$member] = true;
+                        $block['image_' . ($slot + 1)] = $media[$items[$member]['src']]['url'];
+                        $block['alt_' . ($slot + 1)]   = $this->tidy((string) $items[$member]['alt']);
+                    }
+
+                    $blocks[] = $block;
+
+                    continue;
+                }
+
                 $blocks[] = [
                     'type' => 'image',
                     'url'  => $media[$item['src']]['url'],
                     'alt'  => $this->tidy((string) $item['alt']),
+                ];
+
+                continue;
+            }
+
+            // A heading sitting on a coloured band is a section header. Emitted
+            // as a plain heading it loses the band, and the band was most of
+            // what made the design read as designed.
+            if (isset($bands['byItem'][$index])) {
+                $flush();
+
+                $blocks[] = [
+                    'type'  => 'section_header',
+                    'text'  => $item['text'],
+                    'style' => $bands['byItem'][$index]['style'],
+                    'tone'  => 'accent',
                 ];
 
                 continue;
@@ -1017,6 +1271,131 @@ class InDesignEmailImporter
         }
 
         return $blocks;
+    }
+
+    /**
+     * Matches each flat-colour band to the text sitting on it.
+     *
+     * The band and its title are two unrelated elements in the export — a
+     * rectangle and a text frame that happen to occupy the same strip of page.
+     * Pairing them by vertical overlap is the only thing that recovers the
+     * relationship, and without it the deck loses the three green bands that
+     * carry most of its structure.
+     *
+     * @param  array<int, array<string, mixed>>  $items
+     * @param  array<string, ?string>  $rules
+     * @return array{byItem: array<int, array{style: string, colour: string}>, consumed: array<int, int>, colour: ?string}
+     */
+    private function bands(array $items, array $rules): array
+    {
+        $byItem   = [];
+        $consumed = [];
+        $colour   = null;
+
+        foreach ($items as $index => $item) {
+            if ($item['kind'] !== 'image' || ($rules[$item['src']] ?? null) === null) {
+                continue;
+            }
+
+            $bandTop    = $item['y'];
+            $bandBottom = $bandTop + ($item['height'] ?? 0);
+
+            foreach ($items as $other => $candidate) {
+                if ($candidate['kind'] !== 'text' || isset($byItem[$other])) {
+                    continue;
+                }
+
+                // The text's baseline has to fall inside the rectangle. A
+                // tolerance either side absorbs the sub-pixel offsets InDesign
+                // emits, without reaching the next paragraph down.
+                if ($candidate['y'] < $bandTop - 6 || $candidate['y'] > $bandBottom + 6) {
+                    continue;
+                }
+
+                $byItem[$other] = [
+                    // Narrower than most of the page is the inset pill; the
+                    // full-width bars are the section bars.
+                    'style'  => ($item['width'] ?? 0) > 0 && $item['width'] < ($this->pageWidth * 0.8)
+                        ? 'inset_pill'
+                        : 'full_bleed',
+                    'colour' => $rules[$item['src']],
+                ];
+
+                $consumed[] = $index;
+                $colour ??= $rules[$item['src']];
+
+                break;
+            }
+        }
+
+        return ['byItem' => $byItem, 'consumed' => $consumed, 'colour' => $colour];
+    }
+
+    /**
+     * Groups images that sit beside each other into rows.
+     *
+     * Reported by frontend: three industry photographs side by side in the
+     * source came out stacked. They were never stacked in the export — they
+     * share a `y` and differ in `x`, which is exactly what "in a row" looks
+     * like on a page. Nothing read that until now.
+     *
+     * @param  array<int, array<string, mixed>>  $items
+     * @param  array<string, array<string, mixed>>  $media
+     * @return array<int, array<int, int>>  keyed by the row's first item index
+     */
+    private function imageRows(array $items, array $media): array
+    {
+        $rows    = [];
+        $current = [];
+        $anchor  = null;
+
+        $close = function () use (&$rows, &$current, &$anchor, $items): void {
+            // Two is a row. One is just an image, and the renderer would strand
+            // it at a third of the width with empty cells beside it.
+            if (count($current) >= 2) {
+                // Keyed on the first of them the block builder will reach, which
+                // is the topmost — that is where the row is emitted.
+                $first = min($current);
+
+                // Ordered left to right by where they sit, NOT by the order they
+                // were collected in. Items are sorted by y first and InDesign
+                // nudges the pictures in a row a pixel or two apart vertically,
+                // so collection order shuffles them across the row.
+                usort($current, fn ($a, $b) => $items[$a]['x'] <=> $items[$b]['x']);
+
+                // Three is the most a 620px card can hold and stay legible.
+                $rows[$first] = array_slice($current, 0, 3);
+            }
+
+            $current = [];
+            $anchor  = null;
+        };
+
+        foreach ($items as $index => $item) {
+            if ($item['kind'] !== 'image' || ! isset($media[$item['src']])) {
+                // Anything else between two images — a heading, a paragraph —
+                // means they are not in the same row, whatever their y says.
+                if ($item['kind'] === 'text') {
+                    $close();
+                }
+
+                continue;
+            }
+
+            if ($anchor !== null && abs($item['y'] - $anchor) <= self::ROW_Y_TOLERANCE && count($current) < 3) {
+                $current[] = $index;
+                continue;
+            }
+
+            $close();
+
+            $current = [$index];
+            $anchor  = $item['y'];
+        }
+
+        $close();
+
+        return $rows;
     }
 
     /**

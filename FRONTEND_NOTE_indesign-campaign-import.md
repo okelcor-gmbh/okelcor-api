@@ -275,6 +275,168 @@ from your side except that the duplicates stop.
 
 ---
 
+---
+
+# Session 78 — the block vocabulary gap
+
+Your analysis was right and the diagnosis was exact: every block was a single
+full-width element, so three photographs side by side could only ever come out
+stacked. That was never an importer bug. Four things shipped.
+
+## 1. `image_row` — the reported complaint
+
+Fixed at both ends. The block exists, **and the importer now emits it**: images
+that share a `y` and differ in `x` were never stacked in the export, and
+nothing was reading that.
+
+```jsonc
+{ "type": "image_row",
+  "image_1": "https://…/a.png", "alt_1": "Agriculture",
+  "image_2": "https://…/b.png", "alt_2": "Cars",
+  "image_3": "https://…/c.png", "alt_3": "Marine" }   // image_3/alt_3 optional
+```
+
+Fixed slots typed `image_url`, exactly as you specified — **no frontend deploy
+needed, it appears in the composer with the Media Library picker attached.**
+Tables throughout, `.ok-stack` on every cell so it stacks on a phone. One image
+falls through to a full-width `image` rather than being stranded at a third of
+the width.
+
+**A real bug your spec surfaced:** items are sorted top-to-bottom first, and
+InDesign nudges pictures in a row a pixel or two apart vertically — so
+collection order shuffled them across the row. Row members are now ordered by
+their actual `x`. On the real Fuel Eco Tech export this changed the middle
+picture, so it was wrong in production, not just in theory.
+
+## 2. `section_header` — the green bands
+
+```jsonc
+{ "type": "section_header", "text": "Benefits of the Fuel Eco Tech",
+  "style": "full_bleed",     // or "inset_pill"
+  "tone":  "accent" }        // or "dark" | "muted"
+```
+
+Named tones as you asked — no colour field. `accent` uses the theme's declared
+band pair; `dark` and `muted` pick black or white text by luminance, because
+the same tone is near-white in `light` and near-black in `okelcor_dark`.
+
+**And the importer recovers these automatically.** The bands are in the export
+as flat `#1F8A5B` rectangles; they were being discarded as dividers. A
+rectangle of one flat colour with a title sitting on it is a band — matched by
+vertical overlap, with `inset_pill` vs `full_bleed` inferred from its width
+against the page. A band-shaped *photograph* has detail, so it is not mistaken
+for one. The rectangle is no longer also emitted as a divider, or every section
+title would get an empty coloured bar above it.
+
+## 3. `cards` and the `group_list` field type
+
+We took your option (b). Here is the exact shape you asked for.
+
+**In `GET /admin/campaign-design`, the field arrives as:**
+
+```jsonc
+{
+  "name": "items",
+  "type": "group_list",
+  "label": "Cards",
+  "max_items": 24,
+  "item_fields": {
+    "title": { "type": "text",     "label": "Title",       "required": true, "max": 120 },
+    "body":  { "type": "textarea", "label": "Description", "max": 300 }
+  }
+}
+```
+
+`item_fields` is an **object keyed by field name** (not an array), and each
+value is the same field spec you already render for the eight existing types.
+So `group_list` is a container: render one sub-form per item using the specs in
+`item_fields`, and the leaf types are ones `block-field.tsx` already handles.
+
+**A stored item is a flat object:**
+
+```jsonc
+{ "title": "Improved combustion", "body": "Promotes more complete, efficient fuel burn." }
+```
+
+**And a whole stored block:**
+
+```jsonc
+{ "type": "cards",
+  "columns": "3",      // select, "2" | "3"  — note: a STRING, like every select
+  "check":   "yes",    // select, "yes" | "no" — the green tick
+  "items": [
+    { "title": "Improved combustion", "body": "Promotes more complete, efficient fuel burn." },
+    { "title": "Lower maintenance",   "body": "Fewer deposits and cleaner operation." }
+  ] }
+```
+
+Validation errors name the entry, not the index — *"Block 3 (Cards): entry 2
+needs \"Title\"."* — same `errors.blocks` array of plain strings as everything
+else. An item with a blank title is dropped at render rather than producing an
+empty tile. A short final row is padded with empty cells so its tiles keep
+their width instead of stretching.
+
+**One honest limitation on cards + import.** In the Fuel Eco Tech export
+InDesign **flattened the card grids into PNGs** (`19.png`, `20.png` — open one,
+it is a picture of four cards). The text is not in the export at all, so no
+importer can recover those 12 tiles as text; today they arrive as two images,
+which render but are unselectable and do not reflow. `cards` is therefore for
+hand-authoring, or for a future export where the grid is kept as live text.
+Worth telling the marketers: **if they want the benefit grid to be real text in
+the email, those tiles must not be flattened on export.**
+
+## 4. `fet_green` preset
+
+```jsonc
+{ "preset": "fet_green" }
+```
+
+`band_background` `#1F8A5B`, `band_dark_background` `#0D2B1A`, `card_surface`
+`#F0F4F1`, `card_width` 680 (three columns at 620 fall under 180px).
+
+**On the colour, since you flagged it as our call:** the green is `#1F8A5B`,
+read out of the marketers' own InDesign file rather than chosen. It is
+deliberately **not** the `#22c55e` the FET web UI documents — that is a bright
+accent tuned for buttons on a dark interface, and on a white email band it
+reads neon. The dark tone *is* the documented `#0D2B1A`. One constant either
+way if the business disagrees.
+
+**The importer picks the preset by itself** by matching the recovered band
+colour against each preset's own accent, so a FET deck lands on `fet_green`
+including its card surface and dark tone — which no amount of per-campaign
+colour overriding would have produced.
+
+## Also fixed: bold runs inside paragraphs
+
+You marked body paragraphs "✅ works", and they did — but the **bold runs
+inside them did not**. The importer took each paragraph's single dominant
+character style and threw the rest away, so *"**Fuel Eco Tech (FET)** offers"*
+came through flat. Now re-expressed in the existing inline syntax.
+
+**And to answer your open question: yes, inline markdown applies to list
+items.** `CampaignBlockRenderer::list()` runs each item through the same
+`inline()` as everything else, so `**Marine** – Boats, ships…` renders with the
+lead-in bold. That is confirmed from the source, and the importer now produces
+exactly that from the deck's bullets.
+
+## Still not possible, and still worth saying
+
+The hero band — text over a full-bleed photograph — has no email equivalent,
+and nothing here changes that. Your suggestion is the right one: flatten that
+region to a single image with strong alt text, **hero only, never body copy**.
+Same for the typeface, exact leading and letter-spacing, and the vertical rule
+beside the headline.
+
+## What the real export produces now
+
+15 blocks, down from 20, and structurally much closer: hero image → heading →
+intro → **inset pill band** → 3 body paragraphs with their bold runs → **full
+bleed band** → the two (flattened) benefit grids → **full bleed band** →
+**image_row of the three industry photographs** → intro paragraph → 10-item
+list with bold lead-ins → footer. Theme `fet_green`, selected automatically.
+
+---
+
 ## Contract summary
 
 | | |
@@ -285,3 +447,5 @@ from your side except that the duplicates stop.
 | Breaking changes | none |
 | Deploy-order | safe both ways. The endpoint 404s until the API deploys; everything else is unaffected |
 | `route:cache` | must be rebuilt — one new route |
+| Session 78 blocks | `image_row`, `section_header`, `cards`, preset `fet_green`. No migration, no new route |
+| Frontend work needed | **`image_row` and `section_header`: none** — their fields are types you already render. **`cards`: the `group_list` field type**, shape above |

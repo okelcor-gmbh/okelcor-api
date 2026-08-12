@@ -698,6 +698,198 @@ class InDesignCampaignImportTest extends TestCase
         $this->assertNotEmpty($preview->json('data.text'));
     }
 
+    // ── layout recovery (Session 78) ──────────────────────────────────────
+
+    /**
+     * Builds an export with a coloured band, a title on it, and a row of
+     * pictures beside each other — the three things the first version could
+     * not see.
+     */
+    private function layoutExport(): UploadedFile
+    {
+        $css = <<<'CSS'
+        #_idContainer000 { transform:translate(60.000px,40.000px); position:absolute; width:300.00px; height:30.00px; }
+        #_idContainer001 { transform:translate(60.000px,44.000px); position:absolute; width:300.00px; height:20.00px; }
+        #_idContainer002 { transform:translate(0.000px,140.000px); position:absolute; width:595.00px; height:30.00px; }
+        #_idContainer003 { transform:translate(0.000px,144.000px); position:absolute; width:595.00px; height:20.00px; }
+        #_idContainer004 { transform:translate(10.000px,240.000px); position:absolute; width:180.00px; height:120.00px; }
+        #_idContainer005 { transform:translate(205.000px,242.000px); position:absolute; width:180.00px; height:120.00px; }
+        #_idContainer006 { transform:translate(400.000px,241.000px); position:absolute; width:180.00px; height:120.00px; }
+        span.CharOverride-1 { color:#FFFFFF; font-size:280px; font-weight:bold; text-transform:uppercase; }
+        span.CharOverride-2 { color:#333333; font-size:220px; font-weight:normal; }
+        CSS;
+
+        $band = function (string $id, string $src): string {
+            return '<div id="' . $id . '" class="_idGenObjectStyle-Disabled"><img src="' . $src . '" alt="" /></div>';
+        };
+
+        $title = function (string $id, string $text): string {
+            return '<div id="' . $id . '" class="Basic-Text-Frame">'
+                . '<div style="transform: translate(0px,1px) scale(0.05);">'
+                . '<p class="Basic-Paragraph"><span class="CharOverride-1" style="position:absolute;top:0px;left:0px;">'
+                . $text . '</span></p></div></div>';
+        };
+
+        $page = '<!DOCTYPE html><html><head>'
+            . '<link href="../css/idGeneratedStyles.css" rel="stylesheet" type="text/css" /></head>'
+            . '<body id="publication" style="width:595px;height:1089px;background-color:white;">'
+            . $band('_idContainer000', '../image/pill.png')
+            . $title('_idContainer001', 'Introducing Fuel Eco Tech')
+            . $band('_idContainer002', '../image/bar.png')
+            . $title('_idContainer003', 'Designed for')
+            . '<div id="_idContainer004"><img src="../image/one.png" alt="Agriculture" /></div>'
+            . '<div id="_idContainer005"><img src="../image/two.png" alt="Cars" /></div>'
+            . '<div id="_idContainer006"><img src="../image/three.png" alt="Marine" /></div>'
+            . '</body></html>';
+
+        return $this->zip([
+            'publication-web-resources/html/publication.html'     => $page,
+            'publication-web-resources/css/idGeneratedStyles.css' => $css,
+            // Flat green fills, band-shaped: the inset pill and the full bar.
+            'publication-web-resources/image/pill.png'  => $this->png(410, 47, [31, 138, 91]),
+            'publication-web-resources/image/bar.png'   => $this->png(794, 47, [31, 138, 91]),
+            'publication-web-resources/image/one.png'   => $this->png(600, 400, [180, 120, 40]),
+            'publication-web-resources/image/two.png'   => $this->png(600, 400, [40, 40, 60]),
+            'publication-web-resources/image/three.png' => $this->png(600, 400, [30, 90, 150]),
+        ]);
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    private function layoutBlocks(): array
+    {
+        return $this->withHeaders($this->headers())
+            ->post('/api/v1/admin/campaign-templates/import', ['file' => $this->layoutExport(), 'dry_run' => true])
+            ->assertOk()
+            ->json('data.blocks');
+    }
+
+    public function test_pictures_side_by_side_come_back_as_a_row_not_a_stack(): void
+    {
+        // The reported complaint: three industry photographs in one row in the
+        // source, stacked vertically after import. They were never stacked —
+        // they share a `y` and differ in `x`. Nothing read that.
+        $row = collect($this->layoutBlocks())->firstWhere('type', 'image_row');
+
+        $this->assertNotNull($row, 'Three images sharing a row must import as one image_row.');
+        $this->assertSame('Agriculture', $row['alt_1']);
+        $this->assertSame('Cars', $row['alt_2']);
+        $this->assertSame('Marine', $row['alt_3']);
+
+        // And exactly one block, not three plus a row.
+        $this->assertSame(0, collect($this->layoutBlocks())->where('type', 'image')->count());
+    }
+
+    public function test_a_coloured_band_behind_a_title_becomes_a_section_header(): void
+    {
+        $headers = collect($this->layoutBlocks())->where('type', 'section_header')->values();
+
+        $this->assertCount(2, $headers);
+
+        // Narrower than the page is the inset pill; full width is the bar. The
+        // distinction is the whole visual rhythm of the deck.
+        $this->assertSame('Introducing Fuel Eco Tech', $headers[0]['text']);
+        $this->assertSame('inset_pill', $headers[0]['style']);
+        $this->assertSame('Designed for', $headers[1]['text']);
+        $this->assertSame('full_bleed', $headers[1]['style']);
+    }
+
+    public function test_the_band_is_not_also_emitted_as_a_divider(): void
+    {
+        // It is drawn by the header that sits on it. Left in as well, the email
+        // gets an empty coloured bar above every section title.
+        $this->assertNotContains('divider', array_column($this->layoutBlocks(), 'type'));
+    }
+
+    public function test_the_bands_colour_selects_the_matching_preset(): void
+    {
+        $theme = $this->withHeaders($this->headers())
+            ->post('/api/v1/admin/campaign-templates/import', ['file' => $this->layoutExport(), 'dry_run' => true])
+            ->assertOk()
+            ->json('data.theme');
+
+        // A Fuel Eco Tech deck lands on the FET preset by itself — including
+        // its card surface and dark tone, which no per-campaign colour
+        // override would have produced.
+        $this->assertSame('fet_green', $theme['preset']);
+        $this->assertSame('#1F8A5B', $theme['band_background']);
+    }
+
+    public function test_a_photograph_is_never_mistaken_for_a_band(): void
+    {
+        // Band detection keys on a FLAT fill. A band-shaped photograph has
+        // detail, and turning it into a coloured bar would delete a picture.
+        $binary = imagecreatetruecolor(800, 60);
+        for ($x = 0; $x < 800; $x++) {
+            imageline($binary, $x, 0, $x, 60, imagecolorallocate($binary, $x % 256, 120, 200));
+        }
+        ob_start();
+        imagepng($binary);
+        $gradient = ob_get_clean();
+        imagedestroy($binary);
+
+        $css = '#_idContainer000 { transform:translate(0px,10px); position:absolute; width:595.00px; height:40.00px; }'
+            . '#_idContainer001 { transform:translate(0px,14px); position:absolute; width:595.00px; height:30.00px; }'
+            . 'span.CharOverride-1 { color:#333333; font-size:220px; font-weight:normal; }';
+
+        // A title sits over the strip, exactly as it would over a real band —
+        // so the only thing keeping this from becoming a section header is the
+        // strip having detail rather than being a flat fill.
+        $page = '<html><head><link href="../css/idGeneratedStyles.css" rel="stylesheet" /></head>'
+            . '<body style="width:595px;background-color:white;">'
+            . '<div id="_idContainer000"><img src="../image/wide.png" alt="A wide photo" /></div>'
+            . '<div id="_idContainer001" class="Basic-Text-Frame">'
+            . '<div style="transform: translate(0px,1px) scale(0.05);">'
+            . '<p class="Basic-Paragraph"><span class="CharOverride-1" style="position:absolute;top:0px;left:0px;">'
+            . 'A caption that happens to sit over the artwork</span></p></div></div>'
+            . '</body></html>';
+
+        $blocks = $this->withHeaders($this->headers())->post('/api/v1/admin/campaign-templates/import', [
+            'file' => $this->zip([
+                'publication-web-resources/html/publication.html'     => $page,
+                'publication-web-resources/css/idGeneratedStyles.css' => $css,
+                'publication-web-resources/image/wide.png'            => $gradient,
+            ]),
+            'dry_run' => true,
+        ])->assertOk()->json('data.blocks');
+
+        $this->assertNotContains('section_header', array_column($blocks, 'type'));
+    }
+
+    public function test_bold_runs_inside_a_paragraph_survive(): void
+    {
+        $css = '#_idContainer000 { transform:translate(0px,10px); position:absolute; }'
+            . 'span.CharOverride-1 { color:#333333; font-size:220px; font-weight:normal; }'
+            . 'span.CharOverride-2 { color:#333333; font-size:220px; font-weight:bold; }';
+
+        $span = fn (string $class, string $text, float $left) =>
+            '<span class="' . $class . '" style="position:absolute;top:0px;left:' . $left . 'px;">' . $text . '</span>';
+
+        $page = '<html><head><link href="../css/idGeneratedStyles.css" rel="stylesheet" /></head>'
+            . '<body style="width:595px;background-color:white;">'
+            . '<div id="_idContainer000" class="Basic-Text-Frame">'
+            . '<div style="transform: translate(0px,1px) scale(0.05);">'
+            . '<p class="Basic-Paragraph">'
+            . $span('CharOverride-1', 'Improvements of ', 0)
+            . $span('CharOverride-2', '15%–35% ', 3000)
+            . $span('CharOverride-1', 'depending on the engine.', 6000)
+            . '</p></div></div></body></html>';
+
+        $blocks = $this->withHeaders($this->headers())->post('/api/v1/admin/campaign-templates/import', [
+            'file' => $this->zip([
+                'publication-web-resources/html/publication.html'     => $page,
+                'publication-web-resources/css/idGeneratedStyles.css' => $css,
+            ]),
+            'dry_run' => true,
+        ])->assertOk()->json('data.blocks');
+
+        $text = collect($blocks)->firstWhere('type', 'text')['text'];
+
+        // The markers must sit against the word. InDesign puts the trailing
+        // space inside the styled span, so marking it verbatim gives
+        // "of** 15%–35% **" — which renders as literal asterisks.
+        $this->assertSame('Improvements of **15%–35%** depending on the engine.', $text);
+    }
+
     // ── the real export the marketing team actually produced ───────────────
 
     public function test_the_real_marketing_export_converts_end_to_end(): void

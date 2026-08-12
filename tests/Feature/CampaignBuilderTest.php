@@ -398,4 +398,222 @@ class CampaignBuilderTest extends TestCase
 
         $this->assertNull(CampaignStarterTemplates::find('nope'));
     }
+
+    // ── multi-column blocks (Session 78) ──────────────────────────────────
+    //
+    // Frontend's finding: every block was a single full-width element, so a
+    // design with anything side by side could only ever come out stacked.
+
+    public function test_an_image_row_puts_its_pictures_in_one_row(): void
+    {
+        $html = $this->renderer->render([[
+            'type'    => 'image_row',
+            'image_1' => 'https://okelcor.com/a.png', 'alt_1' => 'Agriculture',
+            'image_2' => 'https://okelcor.com/b.png', 'alt_2' => 'Cars',
+            'image_3' => 'https://okelcor.com/c.png', 'alt_3' => 'Marine',
+        ]]);
+
+        $document = new \DOMDocument();
+        libxml_use_internal_errors(true);
+        $document->loadHTML($html);
+        libxml_clear_errors();
+
+        $xpath = new \DOMXPath($document);
+
+        // One row, three cells — not three rows of one.
+        $row = $xpath->query('//img/ancestor::tr[1]');
+        $this->assertSame(1, $row->length);
+        $this->assertSame(3, $xpath->query('//img')->length);
+        $this->assertSame(3, $xpath->query('//td[img]')->length);
+
+        // Tables, never flex or grid — Outlook renders through Word's engine.
+        $this->assertStringNotContainsString('display:flex', $html);
+        $this->assertStringNotContainsString('display:grid', $html);
+
+        // Three columns inside a 620px card is under 180px each. `.ok-stack`
+        // is what turns them into full-width blocks on a phone, and it is
+        // already declared in the head.
+        $this->assertSame(3, $xpath->query('//td[contains(@class,"ok-stack")]')->length);
+        $this->assertStringContainsString('.ok-stack', $html);
+    }
+
+    public function test_an_image_row_of_one_renders_full_width_instead_of_a_third(): void
+    {
+        $html = $this->renderer->render([[
+            'type' => 'image_row', 'image_1' => 'https://okelcor.com/a.png', 'alt_1' => 'Only one',
+        ]]);
+
+        // Stranding a lone picture at a third of the width with two empty cells
+        // beside it is worse than the plain image block. (`.ok-stack` still
+        // appears in the head stylesheet — what must not appear is a cell
+        // wearing it.)
+        $this->assertStringContainsString('max-width:552px', $html);
+        $this->assertStringNotContainsString('class="ok-stack"', $html);
+    }
+
+    public function test_a_section_header_carries_its_band_colour(): void
+    {
+        $html = $this->renderer->render(
+            [['type' => 'section_header', 'text' => 'Benefits of the Fuel Eco Tech', 'style' => 'full_bleed', 'tone' => 'accent']],
+            ['preset' => 'fet_green']
+        );
+
+        $this->assertStringContainsString('Benefits of the Fuel Eco Tech', $html);
+        $this->assertStringContainsString('#1F8A5B', $html);
+
+        // bgcolor as well as the declaration: Outlook honours the attribute
+        // more reliably, and a band that loses its fill is white bold text on
+        // a white card.
+        $this->assertStringContainsString('bgcolor="#1F8A5B"', $html);
+    }
+
+    public function test_a_muted_band_picks_text_that_survives_on_it(): void
+    {
+        // The same tone is near-white in `light` and near-black in
+        // `okelcor_dark`, so the text colour cannot be a constant.
+        $onLight = $this->renderer->render(
+            [['type' => 'section_header', 'text' => 'Section', 'tone' => 'muted']],
+            ['preset' => 'light']
+        );
+        $onDark = $this->renderer->render(
+            [['type' => 'section_header', 'text' => 'Section', 'tone' => 'muted']],
+            ['preset' => 'okelcor_dark']
+        );
+
+        $this->assertStringContainsString('color:#111111', $onLight);
+        $this->assertStringContainsString('color:#FFFFFF', $onDark);
+    }
+
+    public function test_cards_render_in_rows_of_the_chosen_width(): void
+    {
+        $items = [];
+        for ($i = 1; $i <= 7; $i++) {
+            $items[] = ['title' => "Benefit {$i}", 'body' => "What benefit {$i} does."];
+        }
+
+        $html = $this->renderer->render([['type' => 'cards', 'columns' => '3', 'items' => $items]]);
+
+        $document = new \DOMDocument();
+        libxml_use_internal_errors(true);
+        $document->loadHTML($html);
+        libxml_clear_errors();
+
+        $xpath = new \DOMXPath($document);
+
+        // 7 cards at 3 across is 3 rows, and the last row is padded to 3 cells
+        // so its single tile keeps its width instead of stretching.
+        $grid = $xpath->query('(//td[contains(@class,"ok-stack")])[1]/ancestor::table[1]')->item(0);
+
+        $this->assertNotNull($grid);
+        $this->assertSame(3, $xpath->query('./tr', $grid)->length);
+        $this->assertSame(9, $xpath->query('./tr/td', $grid)->length);
+
+        $this->assertStringContainsString('Benefit 7', $html);
+        $this->assertStringContainsString('What benefit 7 does.', $html);
+    }
+
+    public function test_a_card_without_a_title_is_dropped_rather_than_rendered_blank(): void
+    {
+        $html = $this->renderer->render([['type' => 'cards', 'items' => [
+            ['title' => 'Real', 'body' => 'Kept'],
+            ['title' => '', 'body' => 'Orphaned description'],
+        ]]]);
+
+        $this->assertStringContainsString('Real', $html);
+        $this->assertStringNotContainsString('Orphaned description', $html);
+    }
+
+    public function test_the_text_part_covers_the_new_blocks(): void
+    {
+        $text = $this->renderer->renderText([
+            ['type' => 'section_header', 'text' => 'Designed for'],
+            ['type' => 'cards', 'items' => [['title' => 'Marine', 'body' => 'Boats and ferries.']]],
+            ['type' => 'image_row', 'image_1' => 'https://okelcor.com/a.png', 'alt_1' => 'Fleet photo',
+             'image_2' => 'https://okelcor.com/b.png', 'alt_2' => 'Marine photo'],
+        ]);
+
+        $this->assertStringContainsString('DESIGNED FOR', $text);
+        $this->assertStringContainsString('* Marine — Boats and ferries.', $text);
+        $this->assertStringContainsString('[Fleet photo]', $text);
+        $this->assertStringContainsString('[Marine photo]', $text);
+    }
+
+    public function test_card_text_cannot_become_markup(): void
+    {
+        $html = $this->renderer->render([['type' => 'cards', 'items' => [[
+            'title' => '<script>alert(1)</script>',
+            'body'  => '<img src=x onerror=alert(1)>',
+        ]]]]);
+
+        // Escaped to visible text, so the literal words survive — as characters
+        // on the page, which is the point. What must not exist is a tag or an
+        // attribute.
+        $this->assertStringNotContainsString('<script', $html);
+        $this->assertStringContainsString('&lt;script', $html);
+        $this->assertStringContainsString('&lt;img src=x onerror=alert(1)&gt;', $html);
+        // The real risk is a tag, not the word: no <img> reached the document.
+        $this->assertStringNotContainsString('<img src=x', $html);
+    }
+
+    public function test_a_band_cannot_smuggle_a_link_or_markup(): void
+    {
+        $html = $this->renderer->render([[
+            'type' => 'section_header',
+            'text' => '[click](javascript:alert(1)) <b>raw</b>',
+        ]]);
+
+        // A band is not a link, so the inline link syntax is not honoured here
+        // at all. The only href in the document is the unsubscribe footer the
+        // renderer writes itself.
+        $this->assertStringNotContainsString('href="javascript', $html);
+        $this->assertSame(1, substr_count($html, 'href='));
+        $this->assertStringNotContainsString('<b>raw</b>', $html);
+        $this->assertStringContainsString('&lt;b&gt;raw&lt;/b&gt;', $html);
+    }
+
+    // ── group_list validation, the new field type ─────────────────────────
+
+    public function test_group_list_reports_the_entry_that_needs_fixing(): void
+    {
+        $errors = $this->renderer->validateBlocks([[
+            'type'  => 'cards',
+            'items' => [['title' => 'Fine'], ['body' => 'No title on this one']],
+        ]]);
+
+        $this->assertNotEmpty($errors);
+        // Phrased for a non-technical user and pointing at the entry, not the
+        // schema — same contract as every other block error.
+        $this->assertStringContainsString('entry 2', $errors[0]);
+        $this->assertStringContainsString('Title', $errors[0]);
+    }
+
+    public function test_group_list_accepts_a_well_formed_grid(): void
+    {
+        $this->assertSame([], $this->renderer->validateBlocks([[
+            'type'    => 'cards',
+            'columns' => '2',
+            'items'   => [['title' => 'One', 'body' => 'a'], ['title' => 'Two', 'body' => 'b']],
+        ]]));
+    }
+
+    public function test_every_theme_declares_the_keys_the_new_blocks_read(): void
+    {
+        // A preset missing one of these renders a band or a tile with an empty
+        // colour, which is a silently broken email rather than an error.
+        foreach (CampaignBlockRenderer::THEMES as $preset => $values) {
+            foreach (['band_background', 'band_text_color', 'band_dark_background', 'band_muted_background', 'card_surface'] as $key) {
+                $this->assertArrayHasKey($key, $values, "{$preset} is missing {$key}");
+                $this->assertMatchesRegularExpression('/^#[0-9A-Fa-f]{6}$/', $values[$key]);
+            }
+        }
+    }
+
+    public function test_the_fet_preset_exists_and_is_green(): void
+    {
+        $this->assertArrayHasKey('fet_green', CampaignBlockRenderer::THEMES);
+
+        // Read out of the marketers' own InDesign file, not chosen here.
+        $this->assertSame('#1F8A5B', CampaignBlockRenderer::THEMES['fet_green']['band_background']);
+        $this->assertSame('#0D2B1A', CampaignBlockRenderer::THEMES['fet_green']['band_dark_background']);
+    }
 }

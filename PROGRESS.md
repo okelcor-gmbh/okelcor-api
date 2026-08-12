@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-12 | Branch: `main` | Latest commit: Session 77 (**deployed**)
+Last updated: 2026-08-12 | Branch: `main` | Latest commit: Session 78 (**pushed, not deployed**)
 
 ---
 
@@ -1590,6 +1590,50 @@ purpose:**
 Option 2 is the better trade if this becomes real, precisely because it adds no
 new way to authenticate. Neither is worth building against a limit their actual
 usage is at a third of.
+
+See `FRONTEND_NOTE_indesign-campaign-import.md`.
+
+---
+
+## Campaign blocks learn to hold two things side by side (Session 78)
+
+> **Deploy status:** built and tested, **not yet deployed**. **No migration, no
+> new route** — three block types, one preset, and importer inference. Nothing
+> existing changes shape.
+
+Frontend's report, and the diagnosis was theirs: three industry photographs sit
+in a row in the source deck and stacked vertically after import. **Not an
+importer bug.** Every block in `CampaignBlockRenderer::BLOCKS` was a single
+full-width element concatenated into one column, so three stacked images was
+the only output available. The same gap explained the missing green bands and
+the missing benefit grid.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `image_row` block | 🔧 | Two or three pictures across one row, fixed `image_1/2/3` slots typed `image_url` **exactly as frontend specified** — so it appears in their composer with the Media Library picker attached and needs no frontend deploy. Tables throughout; `.ok-stack` (already in the head for the footer) stacks it on a phone. One image falls through to a full-width `image` rather than being stranded at a third of the width beside two empty cells. |
+| `section_header` block | 🔧 | The coloured bands. `full_bleed` / `inset_pill`, and **named tones rather than a colour field** — frontend's call, and the right one: it keeps the colour decision in the theme so a band cannot drift from the campaign one edit at a time. `dark` and `muted` pick their text colour by luminance, since the same tone is near-white in `light` and near-black in `okelcor_dark`. |
+| `cards` block + `group_list` field type | 🔧 | The 12-tile grid. Took frontend's option (b) — a list of objects with declared sub-fields — over fixed slots, because fixed slots meant 18 inputs across four blocks every time. `item_fields` is an object keyed by field name whose values are the same field specs already rendered, so `group_list` is a container and its leaves are types eight blocks already use. Errors name the entry, not the index. A short final row is padded so its tiles keep their width. |
+| `fet_green` preset | 🔧 | `#1F8A5B`, **read out of the marketers' InDesign file, not chosen.** Deliberately not the `#22c55e` the FET web UI documents: that is an accent tuned for buttons on a dark interface and reads neon on a white email band. The dark tone *is* the documented `#0D2B1A`. One constant either way if the business disagrees. |
+| **Importer emits `image_row`** | 🔧 | The images were never stacked in the export — they share a `y` and differ in `x`, which is what "in a row" looks like on a page. Nothing read that until now. |
+| **Bug found by its own test** — row order | 🔧 | Row members were emitted in collection order. Items are sorted top-to-bottom first and InDesign nudges pictures in a row a pixel or two apart vertically, so that order shuffled them **across** the row. Ordered by real `x` now. This was wrong on the real export, not just in theory — the middle picture changed when it was fixed. |
+| **Importer recovers the bands** | 🔧 | They are in the export as flat `#1F8A5B` rectangles and were being thrown away as dividers. A rectangle of **one flat colour** with a title sitting on it is a band — paired by vertical overlap, `inset_pill` vs `full_bleed` inferred from its width against the page. Flatness is what separates it from the gold hairlines, which stay dividers, and from a band-shaped photograph, which has detail. The rectangle is no longer *also* emitted as a divider, or every section title would carry an empty coloured bar above it. |
+| **Importer picks the preset** | 🔧 | By matching the recovered band colour against each preset's own accent. A Fuel Eco Tech deck lands on `fet_green` by itself, card surface and dark tone included — which no amount of per-campaign colour override would have produced. |
+| **Bold runs inside paragraphs** | 🔧 | Frontend marked body paragraphs as working, and they were — but the bold runs *inside* them were not. Each paragraph took its single dominant character style and discarded the rest, so "**Fuel Eco Tech (FET)** offers" came through flat. Re-expressed in the existing inline syntax, with the spaces moved outside the markers: InDesign puts the trailing space inside the styled span, so marking it verbatim produced `of** 15%–35% **`, which renders as literal asterisks. |
+| Backend tests (18 new) | ✅ | 11 in `CampaignBuilderTest` (row/band/card rendering, escaping, `group_list` validation, every preset declaring the new keys) + 7 in `InDesignCampaignImportTest` (row detection and ordering, band recovery, photograph-not-a-band, preset selection, bold runs). **Full suite 353 passed, 0 failed**, 206 skipped, up from 334. |
+
+**Answered for frontend:** yes, inline markdown applies to list items —
+`list()` runs each through the same `inline()` as everything else, so
+`**Marine** – Boats, ships…` renders bold, confirmed from source.
+
+**The one thing no block fixes.** In this export InDesign **flattened the card
+grids into PNGs** (`19.png`, `20.png` — open one, it is a picture of four
+cards). That text is not in the export at all, so no importer can recover those
+tiles; they arrive as images, which render but are unselectable and do not
+reflow. `cards` is for hand-authoring until a future export keeps the grid as
+live text. **Worth telling the marketers: don't flatten the benefit grid on
+export.** Same for the hero band — text over a full-bleed photograph has no
+email equivalent, and frontend's recommendation stands: flatten that one region
+to a single image with strong alt text, hero only, never body copy.
 
 See `FRONTEND_NOTE_indesign-campaign-import.md`.
 

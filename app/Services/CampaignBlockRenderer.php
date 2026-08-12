@@ -44,6 +44,14 @@ class CampaignBlockRenderer
             'button_text_color' => '#FFFFFF',
             'link_color'        => '#7FD3DB',
             'divider_color'     => '#464646',
+            // Section bands and card tiles. Separate keys rather than reusing
+            // button/card colours: a band is a different job from a button, and
+            // tying them together means one cannot be restyled without the other.
+            'band_background'       => '#2E6E75',
+            'band_text_color'       => '#FFFFFF',
+            'band_dark_background'  => '#1B1B1B',
+            'band_muted_background' => '#3A3A3A',
+            'card_surface'          => '#363636',
             'font_family'       => "Arial, Helvetica, sans-serif",
             'card_width'        => 620,
         ],
@@ -58,8 +66,46 @@ class CampaignBlockRenderer
             'button_text_color' => '#FFFFFF',
             'link_color'        => '#1D6F77',
             'divider_color'     => '#E1E5E7',
+            'band_background'       => '#2E6E75',
+            'band_text_color'       => '#FFFFFF',
+            'band_dark_background'  => '#14343A',
+            'band_muted_background' => '#E8EDEE',
+            'card_surface'          => '#F4F7F7',
             'font_family'       => "Arial, Helvetica, sans-serif",
             'card_width'        => 620,
+        ],
+        /**
+         * Fuel Eco Tech. A separate product with its own design system, so a FET
+         * campaign starts correct instead of being hand-corrected off an Okelcor
+         * preset every time.
+         *
+         * The green is #1F8A5B — read out of the marketers' own InDesign file,
+         * not chosen here. Note it is NOT the #22c55e the FET web UI documents:
+         * that is a bright accent tuned for buttons on a dark interface, and on
+         * a white email band it reads neon. The dark tone below IS the
+         * documented #0D2B1A. One constant either way if the business decides
+         * otherwise.
+         */
+        'fet_green' => [
+            'label'             => 'Fuel Eco Tech (green)',
+            'background'        => '#FFFFFF',
+            'card_background'   => '#FFFFFF',
+            'text_color'        => '#1F2937',
+            'heading_color'     => '#14532D',
+            'muted_color'       => '#6B7280',
+            'button_background' => '#1F8A5B',
+            'button_text_color' => '#FFFFFF',
+            'link_color'        => '#1F8A5B',
+            'divider_color'     => '#E1E5E7',
+            'band_background'       => '#1F8A5B',
+            'band_text_color'       => '#FFFFFF',
+            'band_dark_background'  => '#0D2B1A',
+            'band_muted_background' => '#EEF2F0',
+            'card_surface'          => '#F0F4F1',
+            'font_family'       => "Arial, Helvetica, sans-serif",
+            // Wider than the other two: this deck's grid is three across, and at
+            // 620 the columns fall under 180px. Still inside resolveTheme's cap.
+            'card_width'        => 680,
         ],
     ];
 
@@ -96,6 +142,47 @@ class CampaignBlockRenderer
                 'url'  => ['type' => 'image_url', 'label' => 'Image', 'required' => true],
                 'alt'  => ['type' => 'text', 'label' => 'Description (for screen readers / blocked images)', 'max' => 200],
                 'link' => ['type' => 'url', 'label' => 'Link when clicked (optional)'],
+            ],
+        ],
+        'image_row' => [
+            'label'       => 'Images side by side',
+            'description' => 'Two or three pictures in one row. They stack automatically on a phone.',
+            'fields'      => [
+                'image_1' => ['type' => 'image_url', 'label' => 'First image', 'required' => true],
+                'alt_1'   => ['type' => 'text', 'label' => 'First image description', 'max' => 200],
+                'image_2' => ['type' => 'image_url', 'label' => 'Second image', 'required' => true],
+                'alt_2'   => ['type' => 'text', 'label' => 'Second image description', 'max' => 200],
+                'image_3' => ['type' => 'image_url', 'label' => 'Third image (optional)'],
+                'alt_3'   => ['type' => 'text', 'label' => 'Third image description', 'max' => 200],
+            ],
+        ],
+        'section_header' => [
+            'label'       => 'Section band',
+            'description' => 'A coloured band that introduces a section.',
+            'fields'      => [
+                'text'  => ['type' => 'text', 'label' => 'Band text', 'required' => true, 'max' => 200],
+                'style' => ['type' => 'select', 'label' => 'Width', 'options' => ['full_bleed', 'inset_pill'], 'default' => 'full_bleed'],
+                // Named tones rather than a colour picker: the colour decision
+                // belongs to the theme, so a band cannot drift away from the
+                // rest of the campaign one edit at a time.
+                'tone'  => ['type' => 'select', 'label' => 'Colour', 'options' => ['accent', 'dark', 'muted'], 'default' => 'accent'],
+            ],
+        ],
+        'cards' => [
+            'label'       => 'Cards',
+            'description' => 'A grid of short titled points, two or three across. They stack on a phone.',
+            'fields'      => [
+                'columns' => ['type' => 'select', 'label' => 'Cards per row', 'options' => ['2', '3'], 'default' => '3'],
+                'check'   => ['type' => 'select', 'label' => 'Show a tick on each card', 'options' => ['yes', 'no'], 'default' => 'yes'],
+                'items'   => [
+                    'type'        => 'group_list',
+                    'label'       => 'Cards',
+                    'max_items'   => 24,
+                    'item_fields' => [
+                        'title' => ['type' => 'text', 'label' => 'Title', 'required' => true, 'max' => 120],
+                        'body'  => ['type' => 'textarea', 'label' => 'Description', 'max' => 300],
+                    ],
+                ],
             ],
         ],
         'button' => [
@@ -240,6 +327,24 @@ HTML;
                         $out[] = '[' . $this->plain($block['alt']) . ']';
                     }
                     break;
+                case 'image_row':
+                    foreach ([1, 2, 3] as $slot) {
+                        if (! empty($block['alt_' . $slot])) {
+                            $out[] = '[' . $this->plain((string) $block['alt_' . $slot]) . ']';
+                        }
+                    }
+                    break;
+                case 'section_header':
+                    // The band is the section title; upper-casing it keeps the
+                    // structure legible in a text-only client, same as heading.
+                    $out[] = strtoupper($this->plain($block['text'] ?? ''));
+                    break;
+                case 'cards':
+                    foreach ($this->cardItems($block['items'] ?? []) as $item) {
+                        $out[] = '* ' . $this->plain($item['title'])
+                            . ($item['body'] === '' ? '' : ' — ' . $this->plain($item['body']));
+                    }
+                    break;
                 case 'divider':
                     $out[] = str_repeat('-', 40);
                     break;
@@ -351,6 +456,39 @@ HTML;
                         }
                         break;
 
+                    case 'group_list':
+                        if (! is_array($value)) {
+                            $errors[] = "Block {$n} ({$label}): \"{$spec['label']}\" must be a list.";
+                            break;
+                        }
+
+                        if (isset($spec['max_items']) && count($value) > $spec['max_items']) {
+                            $errors[] = "Block {$n} ({$label}): \"{$spec['label']}\" allows at most {$spec['max_items']} entries.";
+                        }
+
+                        foreach ($value as $j => $item) {
+                            $position = $j + 1;
+
+                            if (! is_array($item)) {
+                                $errors[] = "Block {$n} ({$label}): entry {$position} is not filled in.";
+                                continue;
+                            }
+
+                            foreach ($spec['item_fields'] as $sub => $subSpec) {
+                                $subValue = $item[$sub] ?? null;
+                                $blank    = $subValue === null || $subValue === '';
+
+                                if (! empty($subSpec['required']) && $blank) {
+                                    $errors[] = "Block {$n} ({$label}): entry {$position} needs \"{$subSpec['label']}\".";
+                                } elseif (! $blank && ! is_string($subValue)) {
+                                    $errors[] = "Block {$n} ({$label}): entry {$position} — \"{$subSpec['label']}\" must be text.";
+                                } elseif (! $blank && isset($subSpec['max']) && mb_strlen($subValue) > $subSpec['max']) {
+                                    $errors[] = "Block {$n} ({$label}): entry {$position} — \"{$subSpec['label']}\" is too long (max {$subSpec['max']} characters).";
+                                }
+                            }
+                        }
+                        break;
+
                     case 'link_list':
                         if (! is_array($value)) {
                             $errors[] = "Block {$n} ({$label}): \"{$spec['label']}\" must be a list of links.";
@@ -419,15 +557,18 @@ HTML;
     private function renderBlock(array $block, array $t): string
     {
         return match ($block['type'] ?? '') {
-            'heading' => $this->heading($block, $t),
-            'text'    => $this->text($block, $t),
-            'image'   => $this->image($block, $t),
-            'button'  => $this->button($block, $t),
-            'list'    => $this->list($block, $t),
-            'divider' => $this->divider($t),
-            'spacer'  => $this->spacer($block),
-            'footer'  => $this->footer($block, $t),
-            default   => '',
+            'heading'        => $this->heading($block, $t),
+            'text'           => $this->text($block, $t),
+            'image'          => $this->image($block, $t),
+            'image_row'      => $this->imageRow($block, $t),
+            'section_header' => $this->sectionHeader($block, $t),
+            'cards'          => $this->cards($block, $t),
+            'button'         => $this->button($block, $t),
+            'list'           => $this->list($block, $t),
+            'divider'        => $this->divider($t),
+            'spacer'         => $this->spacer($block),
+            'footer'         => $this->footer($block, $t),
+            default          => '',
         };
     }
 
@@ -482,6 +623,273 @@ HTML;
 </tr></table>
 
 HTML;
+    }
+
+    /**
+     * Two or three images across one row.
+     *
+     * A table with one cell per image, not floats or flex — Outlook renders
+     * through Word's engine, which supports neither. `.ok-stack` (already in
+     * the head, already used by the footer) turns the cells into full-width
+     * blocks under 620px: three columns inside a 620px card is under 180px
+     * each, which is a thumbnail on a phone rather than a photograph.
+     */
+    private function imageRow(array $b, array $t): string
+    {
+        $images = [];
+
+        foreach ([1, 2, 3] as $slot) {
+            $url = $this->safeUrl((string) ($b['image_' . $slot] ?? ''));
+
+            if ($url !== null) {
+                $images[] = ['url' => $url, 'alt' => (string) ($b['alt_' . $slot] ?? '')];
+            }
+        }
+
+        if ($images === []) {
+            return '';
+        }
+
+        // One image is not a row. Falling through to the ordinary image block
+        // renders it full width instead of stranding it at a third of the
+        // width with two empty cells beside it.
+        if (count($images) === 1) {
+            return $this->image(['url' => $images[0]['url'], 'alt' => $images[0]['alt']], $t);
+        }
+
+        $count = count($images);
+        $width = (int) floor(100 / $count);
+        $cells = '';
+
+        foreach ($images as $i => $image) {
+            // Gutters as cell padding rather than margins, which Outlook drops.
+            $left  = $i === 0 ? 0 : 6;
+            $right = $i === $count - 1 ? 0 : 6;
+
+            $cells .= '<td class="ok-stack" width="' . $width . '%" valign="top" style="padding:0 ' . $right . 'px 0 ' . $left . 'px;">'
+                . '<img src="' . e($image['url']) . '" alt="' . e($image['alt']) . '" '
+                . 'style="display:block; width:100%; max-width:100%; height:auto; border:0; outline:none; text-decoration:none;" />'
+                . '</td>';
+        }
+
+        return <<<HTML
+<table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%"><tr>
+{$cells}
+</tr></table>
+<table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%"><tr><td style="height:20px; line-height:20px; font-size:0;">&nbsp;</td></tr></table>
+
+HTML;
+    }
+
+    /**
+     * A coloured band introducing a section.
+     *
+     * `full_bleed` runs the width of the card; `inset_pill` is centred and only
+     * as wide as its text. The colour comes from the theme by tone name, so a
+     * band cannot drift away from the rest of the campaign one edit at a time.
+     */
+    private function sectionHeader(array $b, array $t): string
+    {
+        $text = $this->inline($b['text'] ?? '', $t, allowLinks: false);
+
+        if (trim(strip_tags($text)) === '') {
+            return '';
+        }
+
+        [$background, $color] = $this->bandColours($b['tone'] ?? 'accent', $t);
+
+        $cell = "font-family:{$t['font_family']}; font-size:18px; line-height:26px; font-weight:bold; "
+            . "color:{$color}; text-align:center; letter-spacing:0.5px;";
+
+        // bgcolor as well as the style: Outlook honours the attribute more
+        // reliably than the declaration, and a band that loses its colour is
+        // white bold text on a white card — invisible.
+        if (($b['style'] ?? 'full_bleed') === 'inset_pill') {
+            return <<<HTML
+<table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%"><tr>
+<td align="center" style="padding:6px 0 22px 0;">
+  <table role="presentation" border="0" cellpadding="0" cellspacing="0"><tr>
+  <td align="center" bgcolor="{$background}" style="background-color:{$background}; padding:14px 34px; {$cell}">{$text}</td>
+  </tr></table>
+</td>
+</tr></table>
+
+HTML;
+        }
+
+        return <<<HTML
+<table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin:0;"><tr>
+<td align="center" bgcolor="{$background}" style="background-color:{$background}; padding:16px 20px; {$cell}">{$text}</td>
+</tr></table>
+<table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%"><tr><td style="height:22px; line-height:22px; font-size:0;">&nbsp;</td></tr></table>
+
+HTML;
+    }
+
+    /**
+     * @return array{0: string, 1: string}  background, and a text colour with
+     *                                      enough contrast to survive on it
+     */
+    private function bandColours(string $tone, array $t): array
+    {
+        $background = match ($tone) {
+            'dark'  => $t['band_dark_background'],
+            'muted' => $t['band_muted_background'],
+            default => $t['band_background'],
+        };
+
+        // The accent pair is declared together in the theme and trusted. For the
+        // other two the background can be light or dark depending on the preset,
+        // so the text colour is chosen rather than assumed — a muted band is
+        // near-white in `light` and near-black in `okelcor_dark`.
+        if ($tone === 'accent') {
+            return [$background, $t['band_text_color']];
+        }
+
+        return [$background, $this->readableOn($background)];
+    }
+
+    /**
+     * A grid of short titled points, two or three across.
+     *
+     * Rows of a fixed column count rather than a single wrapping row: email has
+     * no wrapping layout, so the rows are built here. Cells are padded to a
+     * consistent count so the last row's tiles keep their width instead of
+     * stretching across the gap.
+     */
+    private function cards(array $b, array $t): string
+    {
+        $items = $this->cardItems($b['items'] ?? []);
+
+        if ($items === []) {
+            return '';
+        }
+
+        $columns = ((string) ($b['columns'] ?? '3')) === '2' ? 2 : 3;
+        $check   = ((string) ($b['check'] ?? 'yes')) !== 'no';
+        $width   = (int) floor(100 / $columns);
+
+        $rows = '';
+
+        foreach (array_chunk($items, $columns) as $chunk) {
+            $cells = '';
+
+            foreach ($chunk as $i => $item) {
+                $left  = $i === 0 ? 0 : 5;
+                $right = $i === $columns - 1 ? 0 : 5;
+
+                $cells .= '<td class="ok-stack" width="' . $width . '%" valign="top" style="padding:0 ' . $right . 'px 10px ' . $left . 'px;">'
+                    . $this->card($item, $t, $check)
+                    . '</td>';
+            }
+
+            // Empty cells so a short final row does not stretch its tiles.
+            for ($i = count($chunk); $i < $columns; $i++) {
+                $cells .= '<td class="ok-stack" width="' . $width . '%" style="padding:0 0 10px 5px;">&nbsp;</td>';
+            }
+
+            $rows .= '<tr>' . $cells . '</tr>';
+        }
+
+        return <<<HTML
+<table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+{$rows}
+</table>
+<table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%"><tr><td style="height:14px; line-height:14px; font-size:0;">&nbsp;</td></tr></table>
+
+HTML;
+    }
+
+    /** @param array{title: string, body: string} $item */
+    private function card(array $item, array $t, bool $check): string
+    {
+        $title = $this->inline($item['title'], $t);
+        $body  = $item['body'] === '' ? '' : $this->inline($item['body'], $t);
+
+        // A square, not a circle: border-radius is ignored by Outlook, so a
+        // "circle" would be a square there and a circle everywhere else. One
+        // shape everywhere beats a shape that changes by client.
+        $tick = $check
+            ? '<td valign="top" width="30" style="padding:0 10px 0 0;">'
+                . '<table role="presentation" border="0" cellpadding="0" cellspacing="0"><tr>'
+                . '<td align="center" width="24" height="24" bgcolor="' . $t['band_background'] . '" '
+                . 'style="background-color:' . $t['band_background'] . '; width:24px; height:24px; '
+                . 'font-family:' . $t['font_family'] . '; font-size:14px; line-height:24px; color:' . $t['band_text_color'] . ';">&#10003;</td>'
+                . '</tr></table></td>'
+            : '';
+
+        $bodyRow = $body === ''
+            ? ''
+            : '<div style="font-family:' . $t['font_family'] . '; font-size:13px; line-height:20px; color:' . $t['muted_color'] . '; padding-top:5px;">' . $body . '</div>';
+
+        return '<table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" '
+            . 'bgcolor="' . $t['card_surface'] . '" style="background-color:' . $t['card_surface'] . '; height:100%;"><tr>'
+            . '<td valign="top" style="padding:14px 14px 16px 14px;">'
+            . '<table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%"><tr>'
+            . $tick
+            . '<td valign="top">'
+            . '<div style="font-family:' . $t['font_family'] . '; font-size:15px; line-height:21px; font-weight:bold; color:' . $t['heading_color'] . ';">' . $title . '</div>'
+            . $bodyRow
+            . '</td>'
+            . '</tr></table>'
+            . '</td></tr></table>';
+    }
+
+    /**
+     * @return array<int, array{title: string, body: string}>
+     */
+    private function cardItems(mixed $value): array
+    {
+        if (! is_array($value)) {
+            return [];
+        }
+
+        $out = [];
+
+        foreach ($value as $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+
+            $title = is_string($item['title'] ?? null) ? trim($item['title']) : '';
+
+            if ($title === '') {
+                continue;
+            }
+
+            $out[] = [
+                'title' => $title,
+                'body'  => is_string($item['body'] ?? null) ? trim($item['body']) : '',
+            ];
+        }
+
+        return $out;
+    }
+
+    /** Black or white, whichever survives on the given background. */
+    private function readableOn(string $background): string
+    {
+        $hex = ltrim($background, '#');
+
+        if (strlen($hex) === 3) {
+            $hex = $hex[0] . $hex[0] . $hex[1] . $hex[1] . $hex[2] . $hex[2];
+        }
+
+        if (strlen($hex) < 6) {
+            return '#FFFFFF';
+        }
+
+        $channel = function (float $c): float {
+            $c /= 255;
+
+            return $c <= 0.03928 ? $c / 12.92 : (($c + 0.055) / 1.055) ** 2.4;
+        };
+
+        $luminance = 0.2126 * $channel((float) hexdec(substr($hex, 0, 2)))
+            + 0.7152 * $channel((float) hexdec(substr($hex, 2, 2)))
+            + 0.0722 * $channel((float) hexdec(substr($hex, 4, 2)));
+
+        return $luminance > 0.45 ? '#111111' : '#FFFFFF';
     }
 
     private function button(array $b, array $t): string
