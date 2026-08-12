@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-12 | Branch: `main` | Latest commit: Session 79 (**pushed, not deployed**)
+Last updated: 2026-08-12 | Branch: `main` | Latest commit: Session 80 (**pushed, not deployed**)
 
 ---
 
@@ -1662,6 +1662,38 @@ that produced the empty-preview report a session earlier.
 **Left to frontend, and deliberately:** the editor's *block list* still shows
 "can't edit here, will still send" for unknown types, which is correct and
 should stay until `group_list` lands. It just must not drive the preview.
+
+See `FRONTEND_NOTE_indesign-campaign-import.md`.
+
+---
+
+## Campaign email on small screens (Session 80)
+
+> **Deploy status:** built and tested, **not yet deployed**. No migration, no
+> new route, no contract change. Affects the rendered HTML of every campaign.
+
+The imported design was reported as "still wrong" three times before the actual
+condition surfaced: **it reads correctly on a desktop and badly on a phone.**
+Every earlier round was chasing a layout that had been right since Session 78.
+
+Three real defects, all mine, all introduced by making `card_width` variable in
+Session 78 without moving what depended on it.
+
+| Change | Status | Notes |
+|--------|--------|-------|
+| **Breakpoint derived from `card_width`** | 🔧 | It was hardcoded at `620px` while `card_width` became a per-theme setting reaching 800 — and `fet_green`, the preset the imported deck selects, is **680**. So every viewport between 621 and 680 kept the full-width card and scrolled sideways instead of collapsing. Now `card_width + 40`, with a test asserting the breakpoint exceeds the card width **for every preset**, so a future preset cannot reintroduce it. |
+| **Spacer cells hidden instead of stacked** | 🔧 | `cards` pads a short final row with empty cells so its tiles keep their width on a wide screen. Those cells carried `ok-stack`, so on a phone they became empty full-width blocks — stray gaps in the middle of the grid. New `ok-hide-sm` removes them below the breakpoint. |
+| **Full-width images sized to the card** | 🔧 | The image block hardcoded `width="552"`, correct for a 620px card and 60px too narrow in a 680px one, leaving a visible margin down one side of every picture. Derived from `card_width` now. |
+| **`full_bleed` bands are now actually full bleed** | 🔧 | Not a mobile bug, found while fixing them, and the most visible one. Every block shared a single cell padded 34px each side, so a band named *full bleed* was inset by 34px — which is the one thing the name promises. `render()` now emits one row per block and a block declares whether it sits inside the card's padding. The source deck's green bars run edge to edge; ours did not. |
+| `img { max-width: 100% }` on small screens | 🔧 | A picture wider than the viewport is the commonest cause of an email that scrolls sideways, and an imported photograph is whatever size InDesign exported it at. |
+| Backend tests (7 new) | ✅ | `CampaignBuilderTest` — breakpoint vs card width across **every** preset and a custom width, full-bleed placement, spacer hiding, image sizing, and a sweep asserting **every percentage-width cell in any block either stacks or hides**. That last one is the general guard: a column that never collapses is a column squeezed into a third of a phone screen, and it would otherwise be found the same way this was. Full suite **384 passed, 0 failed**, 206 skipped. |
+
+**Worth recording about the diagnosis, not the code.** Three rounds were spent
+on "the preview shows the old layout" — a stale deploy, then a client-side
+renderer, then a saved template — and the actual condition was never in any of
+those. Nobody said which screen size until the fourth report. The preview has a
+desktop/mobile toggle; **the first question about a rendering complaint should
+be which of the two it was.**
 
 See `FRONTEND_NOTE_indesign-campaign-import.md`.
 

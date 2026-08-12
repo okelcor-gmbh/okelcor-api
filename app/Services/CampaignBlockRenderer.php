@@ -239,12 +239,31 @@ class CampaignBlockRenderer
     {
         $t = $this->resolveTheme($theme);
 
-        $content = '';
-        foreach ($blocks as $block) {
-            $content .= $this->renderBlock($block, $t);
-        }
-
         $width = (int) $t['card_width'];
+
+        // Anything narrower than the card plus the page gutter has to collapse,
+        // or it scrolls sideways.
+        $breakpoint = $width + 40;
+
+        // One row per block, so a block can decide whether it sits inside the
+        // card's horizontal padding or runs the full width of it. Previously
+        // every block shared one padded cell, which meant `full_bleed` section
+        // bands were inset by 34px — i.e. not full bleed, which is the one
+        // thing their name promises.
+        $content = '';
+
+        foreach ($blocks as $block) {
+            $html = $this->renderBlock($block, $t);
+
+            if ($html === '') {
+                continue;
+            }
+
+            $padding = $this->bleeds($block) ? '0' : '0 34px';
+
+            $content .= '<tr><td class="' . ($this->bleeds($block) ? 'ok-bleed' : 'ok-pad') . '" style="padding:' . $padding . ';">'
+                . $html . '</td></tr>';
+        }
 
         return <<<HTML
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
@@ -255,11 +274,22 @@ class CampaignBlockRenderer
 <title></title>
 <style type="text/css">
 /* Mobile only. Layout never depends on these — a client that drops the
-   <style> block still gets the full-width table layout below. */
-@media only screen and (max-width: 620px) {
-  .ok-card { width: 100% !important; }
+   <style> block still gets the full-width table layout below.
+
+   The breakpoint is derived from the card width rather than fixed, because
+   card_width is a per-theme setting that can reach 800: a hardcoded 620 left
+   every viewport between the breakpoint and the card width scrolling
+   sideways, which is exactly the band a small tablet sits in. */
+@media only screen and (max-width: {$breakpoint}px) {
+  .ok-card { width: 100% !important; max-width: 100% !important; }
   .ok-pad { padding-left: 20px !important; padding-right: 20px !important; }
-  .ok-stack { display: block !important; width: 100% !important; text-align: center !important; padding: 8px 0 !important; }
+  .ok-bleed { padding-left: 0 !important; padding-right: 0 !important; }
+  .ok-stack { display: block !important; width: 100% !important; max-width: 100% !important; text-align: center !important; padding: 8px 0 !important; }
+  /* Spacer cells exist only to stop a short final row of tiles stretching on
+     a wide screen. Stacked, they are empty full-width blocks, so they become
+     stray gaps in the middle of the grid. */
+  .ok-hide-sm { display: none !important; }
+  img { max-width: 100% !important; height: auto !important; }
 }
 </style>
 </head>
@@ -269,11 +299,9 @@ class CampaignBlockRenderer
 <td align="center" style="padding:28px 12px;">
 
 <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="{$width}" class="ok-card" style="width:{$width}px; max-width:{$width}px; background-color:{$t['card_background']};">
-<tr>
-<td class="ok-pad" style="padding:36px 34px;">
+<tr><td style="height:36px; line-height:36px; font-size:0;">&nbsp;</td></tr>
 {$content}
-</td>
-</tr>
+<tr><td style="height:24px; line-height:24px; font-size:0;">&nbsp;</td></tr>
 </table>
 
 <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="{$width}" class="ok-card" style="width:{$width}px; max-width:{$width}px;">
@@ -551,6 +579,22 @@ HTML;
     // -------------------------------------------------------------------------
 
     /**
+     * Whether a block runs the full width of the card rather than sitting
+     * inside its horizontal padding.
+     *
+     * Only a full-bleed section band does. An inset pill is centred inside the
+     * padding by definition, and body content inset by 34px is the entire point
+     * of the card.
+     *
+     * @param  array<string, mixed>  $block
+     */
+    private function bleeds(array $block): bool
+    {
+        return ($block['type'] ?? '') === 'section_header'
+            && ($block['style'] ?? 'full_bleed') === 'full_bleed';
+    }
+
+    /**
      * @param  array<string, mixed>  $block
      * @param  array<string, mixed>  $t
      */
@@ -610,7 +654,14 @@ HTML;
         }
 
         $alt = e((string) ($b['alt'] ?? ''));
-        $img = '<img src="' . e($url) . '" alt="' . $alt . '" width="552" style="display:block; width:100%; max-width:552px; height:auto; border:0; outline:none; text-decoration:none;" />';
+
+        // Derived from the card rather than fixed at 552: a theme can set
+        // card_width up to 800, and a hardcoded width leaves the picture
+        // narrower than the column it sits in with a visible margin down one
+        // side. 68 is the card's horizontal padding.
+        $inner = max(200, (int) $t['card_width'] - 68);
+
+        $img = '<img src="' . e($url) . '" alt="' . $alt . '" width="' . $inner . '" style="display:block; width:100%; max-width:' . $inner . 'px; height:auto; border:0; outline:none; text-decoration:none;" />';
 
         $link = isset($b['link']) ? $this->safeUrl((string) $b['link']) : null;
         if ($link !== null) {
@@ -784,8 +835,10 @@ HTML;
             }
 
             // Empty cells so a short final row does not stretch its tiles.
+            // Hidden on a phone: stacked, they are empty full-width blocks and
+            // become stray gaps in the middle of the grid.
             for ($i = count($chunk); $i < $columns; $i++) {
-                $cells .= '<td class="ok-stack" width="' . $width . '%" style="padding:0 0 10px 5px;">&nbsp;</td>';
+                $cells .= '<td class="ok-hide-sm" width="' . $width . '%" style="padding:0 0 10px 5px;">&nbsp;</td>';
             }
 
             $rows .= '<tr>' . $cells . '</tr>';

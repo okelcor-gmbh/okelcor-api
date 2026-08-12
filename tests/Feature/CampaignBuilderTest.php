@@ -608,6 +608,127 @@ class CampaignBuilderTest extends TestCase
         }
     }
 
+    // ── small screens (Session 80) ────────────────────────────────────────
+    //
+    // Reported: the design reads correctly on a desktop and badly on a phone.
+
+    public function test_the_breakpoint_follows_the_card_width(): void
+    {
+        // The bug: card_width became a per-theme setting reaching 800, and the
+        // breakpoint stayed hardcoded at 620 — so every viewport between the
+        // two scrolled sideways instead of collapsing. fet_green is 680, which
+        // is exactly the deck being complained about.
+        foreach (CampaignBlockRenderer::THEMES as $preset => $values) {
+            $html = $this->renderer->render([['type' => 'text', 'text' => 'Hello']], ['preset' => $preset]);
+
+            preg_match('/max-width:\s*(\d+)px\)/', $html, $m);
+
+            $this->assertNotEmpty($m, "{$preset} has no media query");
+            $this->assertGreaterThan(
+                (int) $values['card_width'],
+                (int) $m[1],
+                "{$preset} collapses later than its own card width, so it scrolls sideways in between"
+            );
+        }
+    }
+
+    public function test_a_custom_card_width_moves_the_breakpoint_with_it(): void
+    {
+        $html = $this->renderer->render(
+            [['type' => 'text', 'text' => 'Hello']],
+            ['preset' => 'light', 'card_width' => 800]
+        );
+
+        preg_match('/max-width:\s*(\d+)px\)/', $html, $m);
+
+        $this->assertGreaterThan(800, (int) $m[1]);
+    }
+
+    public function test_a_full_bleed_band_is_actually_full_bleed(): void
+    {
+        $html = $this->renderer->render([
+            ['type' => 'section_header', 'text' => 'Benefits', 'style' => 'full_bleed'],
+            ['type' => 'section_header', 'text' => 'Introducing', 'style' => 'inset_pill'],
+            ['type' => 'text', 'text' => 'Body copy'],
+        ]);
+
+        $document = new \DOMDocument();
+        libxml_use_internal_errors(true);
+        $document->loadHTML($html);
+        libxml_clear_errors();
+
+        $xpath = new \DOMXPath($document);
+
+        // Every block used to share one cell padded 34px each side, so a band
+        // named "full bleed" was inset by 34px — not full bleed, which is the
+        // one thing the name promises.
+        $this->assertSame(1, $xpath->query('//td[contains(@class,"ok-bleed")]')->length);
+
+        $bleed = $xpath->query('//td[contains(@class,"ok-bleed")]')->item(0);
+        $this->assertStringContainsString('Benefits', $bleed->textContent);
+        $this->assertStringNotContainsString('Introducing', $bleed->textContent);
+
+        // An inset pill is centred inside the padding by definition, and body
+        // copy inset is the entire point of the card.
+        $this->assertGreaterThanOrEqual(2, $xpath->query('//td[contains(@class,"ok-pad")]')->length);
+    }
+
+    public function test_spacer_cells_are_hidden_rather_than_stacked(): void
+    {
+        $html = $this->renderer->render([['type' => 'cards', 'columns' => '3', 'items' => [
+            ['title' => 'A'], ['title' => 'B'], ['title' => 'C'], ['title' => 'D'],
+        ]]]);
+
+        // 4 cards at 3 across leaves 2 fillers. Stacked they would be empty
+        // full-width blocks — stray gaps in the middle of the grid.
+        $this->assertSame(2, substr_count($html, 'class="ok-hide-sm"'));
+        $this->assertStringContainsString('.ok-hide-sm { display: none !important; }', $html);
+        $this->assertStringNotContainsString('class="ok-stack" width="33%" style="padding:0 0 10px 5px;">&nbsp;', $html);
+    }
+
+    public function test_a_full_width_image_fills_the_card_it_sits_in(): void
+    {
+        $html = $this->renderer->render(
+            [['type' => 'image', 'url' => 'https://okelcor.com/hero.png', 'alt' => 'Hero']],
+            ['preset' => 'fet_green']
+        );
+
+        // Was hardcoded at 552, sized for a 620px card. In a 680px card that
+        // leaves a visible margin down one side of every picture.
+        $this->assertStringContainsString('width="612"', $html);
+        $this->assertStringContainsString('max-width:612px', $html);
+    }
+
+    public function test_every_stacking_cell_can_actually_stack(): void
+    {
+        $html = $this->renderer->render([
+            ['type' => 'image_row', 'image_1' => 'https://o.com/a.png', 'image_2' => 'https://o.com/b.png'],
+            ['type' => 'cards', 'items' => [['title' => 'A'], ['title' => 'B']]],
+            ['type' => 'footer', 'address_lines' => ['Okelcor'], 'site_url' => 'https://okelcor.com'],
+        ]);
+
+        // A cell carrying a percentage width that never collapses is a column
+        // squeezed into a third of a phone screen.
+        preg_match_all('/<td[^>]*width="\d+%"[^>]*>/', $html, $cells);
+
+        foreach ($cells[0] as $cell) {
+            $this->assertMatchesRegularExpression(
+                '/class="[^"]*(ok-stack|ok-hide-sm)[^"]*"/',
+                $cell,
+                'A percentage-width cell must either stack or hide on a phone: ' . $cell
+            );
+        }
+    }
+
+    public function test_images_are_capped_to_the_screen_on_a_phone(): void
+    {
+        $html = $this->renderer->render([['type' => 'image', 'url' => 'https://o.com/a.png']]);
+
+        // An image whose intrinsic width exceeds the viewport is the commonest
+        // cause of an email that scrolls sideways on a phone.
+        $this->assertStringContainsString('img { max-width: 100% !important; height: auto !important; }', $html);
+    }
+
     public function test_the_fet_preset_exists_and_is_green(): void
     {
         $this->assertArrayHasKey('fet_green', CampaignBlockRenderer::THEMES);
