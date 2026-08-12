@@ -46,11 +46,21 @@ Content-Type: multipart/form-data
 }
 ```
 
-**422** with `code: "import_failed"` and a `message` already written for the
-marketer ("That file could not be opened as a ZIP archive.", "No InDesign page
-could be found in that archive. Export from InDesign with File → Publish Online
-(HTML), and upload the whole exported folder zipped."). Show the `message`
-verbatim — do not replace it with a generic one.
+### Errors — there are two, not one
+
+The first version of this note documented only `import_failed`. Frontend found
+the second by reading the controller. Corrected:
+
+| Status | `code` | Meaning |
+|---|---|---|
+| 422 | `import_failed` | The archive could not be read. `message` is already written for the marketer ("That file could not be opened as a ZIP archive.", "No InDesign page could be found in that archive. Export from InDesign with File → Publish Online (HTML), and upload the whole exported folder zipped."). **Show it verbatim.** |
+| 422 | `invalid_blocks` | The design was read but could not be turned into a valid campaign. Carries `errors.blocks` — an array of plain strings, already phrased per block ("Block 3 (Button): …"), the same shape `POST /admin/campaign-templates` returns. |
+| 422 | — | Ordinary Laravel validation (`errors.name`, `errors.file`). |
+
+`invalid_blocks` should not fire in practice — the importer only emits block
+types it builds itself — but it is the same gate a hand-built template passes,
+and a design that fails it must not be saved as a template that breaks at send
+time. If you ever see one in the wild, it is a backend bug; send it over.
 
 ---
 
@@ -161,12 +171,52 @@ A count of what was filtered comes back in `warnings`.
 
 ---
 
-## Testing without the marketers
+## Upload size — the API says 50MB, Vercel delivers 4.5MB
 
-`dry_run: true` is safe to call as often as you like — it writes no template.
-Note that it **does** register the images in the Media Library (they are needed
-to build the block URLs), so repeated dry runs on the same export will
-accumulate media rows. Worth knowing if you are iterating on the screen.
+Frontend established this and it is correct: the upload crosses a Next.js route
+handler, and Vercel caps Function request bodies at **4.5MB**, returning a 413
+`FUNCTION_PAYLOAD_TOO_LARGE` before any application code runs. It is not
+tunable — the `bodySizeLimit` in `next.config.ts` covers Server Actions only.
+
+The API's own 50MB limit stands, because it is correct for a self-hosted or
+direct upload. On Vercel the effective ceiling is 4.5MB. Their handling —
+warn from 4MB, catch 413 on status alone since the body is Vercel's HTML error
+page, and word it so the marketer knows the limit is the site's and not their
+file — is right and stays.
+
+**Before anyone builds a workaround, the cheap fix usually applies: export
+smaller.** The importer already downscales every image to a maximum of 2000px
+on its longest side and re-encodes at JPEG quality 90. Anything above that
+resolution is discarded on the way in, so exporting at a higher one costs
+upload budget and buys nothing — the delivered email is byte-identical either
+way. In InDesign's Publish Online dialog, image quality *Medium* / 150ppi is
+already at or above what survives.
+
+For reference, the real Fuel Eco Tech export is **1.6MB** — comfortably inside
+the ceiling. Tell the marketers the export setting before assuming the limit is
+a blocker.
+
+If a genuine export does exceed 4.5MB, there are two ways up and the choice is
+open — see PROGRESS.md. Do not build either speculatively.
+
+## Reviewing repeatedly no longer duplicates images — fixed
+
+Frontend reported that reviewing one export three times before saving left
+three copies of its photographs in the library, with the save adding a fourth.
+Correct, and now fixed backend-side: a conversion is keyed on the archive's own
+content hash and reused for two hours.
+
+- Re-uploading **the same file** returns the same conversion and the same
+  media rows, however many times you review it, and whoever reviews it.
+- Re-uploading a **genuinely edited** export has different bytes, so it
+  converts again — an edit is never served a stale design.
+- If the media has been deleted from the library in the meantime, the reuse is
+  dropped and it converts again rather than returning blocks that point at
+  URLs nothing serves.
+
+So `dry_run: true` is now free to call as often as you like, and faster on
+every call after the first. **No frontend change needed** — this is invisible
+from your side except that the duplicates stop.
 
 ---
 

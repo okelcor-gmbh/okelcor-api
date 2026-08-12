@@ -4,10 +4,13 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\CampaignTemplate;
+use App\Models\Media;
 use App\Services\CampaignBlockRenderer;
 use App\Services\InDesignEmailImporter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 use RuntimeException;
@@ -57,7 +60,7 @@ class AdminCampaignImportController extends Controller
         ]);
 
         try {
-            $result = $importer->import($request->file('file'), $request->user()->id);
+            $result = $this->convert($request->file('file'), $importer, $request->user()->id);
         } catch (RuntimeException $e) {
             // Everything thrown from the importer is already phrased for the
             // marketer who uploaded the file.
@@ -127,5 +130,55 @@ class AdminCampaignImportController extends Controller
             ],
             'message' => 'Design imported and saved as a reusable template.',
         ], 201);
+    }
+
+    // -------------------------------------------------------------------------
+
+    /**
+     * Converts the archive, reusing the result for an archive already converted.
+     *
+     * Reported by frontend: reviewing one export three times before saving it
+     * left three copies of the same photographs in the Media Library, and the
+     * save added a fourth. Reviewing is exactly what a dry run is FOR, so the
+     * feature working as intended was filling the library up.
+     *
+     * Keyed on the archive's own content hash, so the reuse is by what was
+     * uploaded rather than by who uploaded it or what they called it: a second
+     * marketer reviewing the same export gets the same images, and re-uploading
+     * a genuinely edited export gets a fresh conversion because its bytes
+     * differ. Two hours covers a review session and expires long before anyone
+     * could mistake a stale conversion for a current one.
+     *
+     * A content hash on `media` would be the more general fix, but that is a
+     * migration on a live table to solve a problem confined to this one flow.
+     *
+     * @return array<string, mixed>
+     */
+    private function convert(UploadedFile $file, InDesignEmailImporter $importer, int $adminId): array
+    {
+        $key = 'indesign_import:' . hash_file('sha256', $file->getRealPath());
+
+        $cached = Cache::get($key);
+
+        // The cached result names media rows by id. If any has since been
+        // deleted from the library, its URL is dead and the blocks would point
+        // at nothing — convert again rather than hand back a broken design.
+        if (is_array($cached) && $this->mediaStillExists($cached)) {
+            return $cached;
+        }
+
+        $result = $importer->import($file, $adminId);
+
+        Cache::put($key, $result, now()->addHours(2));
+
+        return $result;
+    }
+
+    /** @param array<string, mixed> $result */
+    private function mediaStillExists(array $result): bool
+    {
+        $ids = array_column($result['media'] ?? [], 'media_id');
+
+        return $ids === [] || Media::whereIn('id', $ids)->count() === count($ids);
     }
 }

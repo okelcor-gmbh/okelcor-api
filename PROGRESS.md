@@ -1509,6 +1509,52 @@ person to compare it side-by-side with InDesign reports it as broken.
 carries no links, so every import warns about it. Someone has to add one before
 the campaign goes out.
 
+### Frontend review — two findings, both real
+
+Frontend built and verified the screen (three-step flow off the template
+picker, `dry_run` review, then save) and came back with two things.
+
+| Finding | Status | Notes |
+|---------|--------|-------|
+| **Reviewing duplicated the images** | 🔧 fixed | Reviewing one export three times before saving left three copies of its photographs in the Media Library, and the save added a fourth. Reviewing is precisely what a dry run is *for*, so the feature working as intended was filling the library up. Conversions are now keyed on the **archive's own content hash**, cached two hours: same bytes → same conversion and the same media rows, whoever uploads them; edited bytes → a fresh conversion, so an edit is never served a stale design; media since deleted → the reuse is dropped rather than returning blocks pointing at dead URLs. Keyed by content rather than by uploader or name deliberately. A checksum column on `media` would be the more general fix but is a migration on a live table for a problem confined to this one flow. |
+| **`invalid_blocks` was missing from my note** | ✅ | My documentation error, found by them reading the controller rather than the note. The endpoint returns two 422 codes and the note described one. Fixed — and it is the second time in three sessions a frontend deploy has been shaped by this note being written from memory instead of from the source (cf. the partner login response shape, Session 75). |
+
+**Upload ceiling — 50MB on the API, 4.5MB in production.** Frontend
+established, against Vercel's own docs, that the upload crosses a Next.js route
+handler and Vercel caps Function request bodies at 4.5MB with a 413 before any
+application code runs. Not tunable: `bodySizeLimit` covers Server Actions only.
+Their handling (warn from 4MB, catch 413 on status since the body is Vercel's
+HTML page, word it so the marketer knows the limit is the site's not their
+file, and no client-side block since a self-hosted deploy really does take 50MB)
+is right and stays.
+
+**The cheap fix applies first, and probably settles it.** The importer already
+downscales every image to 2000px on its longest side and re-encodes at JPEG 90
+— anything above that is discarded on the way in, so a higher-resolution export
+costs upload budget and produces a byte-identical email. The real Fuel Eco Tech
+export is **1.6MB**, comfortably inside the ceiling. Telling the marketers to
+export at *Medium* / 150ppi is a zero-code answer to the common case.
+
+**If a real export ever does exceed 4.5MB, two ways up — neither built, on
+purpose:**
+
+1. **Direct browser → API upload.** Needs an upload-ticket endpoint (the
+   `admin_token` is httpOnly, so the browser cannot authenticate to Laravel
+   itself) plus CORS on the API host. Real, and a real security surface: a
+   bearer-equivalent credential outside the normal token path, wanting
+   single-use, a short TTL, binding to the issuing admin and this one action,
+   and a header rather than a query string so it stays out of access logs.
+2. **Split the archive client-side.** Frontend strips the images out, uploads
+   the (tiny) HTML+CSS, and sends each image through the **existing**
+   `POST /admin/media` — individually well under 4.5MB — then passes a
+   filename → media_id map to the importer. No new credential path at all, and
+   it reuses an endpoint that has existed since Session 51. Costs an optional
+   `media_map` parameter here and archive-splitting there.
+
+Option 2 is the better trade if this becomes real, precisely because it adds no
+new way to authenticate. Neither is worth building against a limit their actual
+usage is at a third of.
+
 See `FRONTEND_NOTE_indesign-campaign-import.md`.
 
 ---

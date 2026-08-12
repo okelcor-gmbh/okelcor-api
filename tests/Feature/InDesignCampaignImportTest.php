@@ -527,6 +527,52 @@ class InDesignCampaignImportTest extends TestCase
         $this->assertSame(0, CampaignTemplate::count());
     }
 
+    public function test_reviewing_the_same_export_repeatedly_does_not_duplicate_its_images(): void
+    {
+        // Reported by frontend: reviewing before saving is what a dry run is
+        // for, so the feature working as intended was filling the Media Library
+        // with copies of the same photographs.
+        $this->importBlocks();
+        $this->importBlocks();
+
+        $this->withHeaders($this->headers())->post('/api/v1/admin/campaign-templates/import', [
+            'file' => $this->export(),
+            'name' => 'After three reviews',
+        ])->assertStatus(201);
+
+        $this->assertSame(1, Media::count(), 'Three reviews and a save is still one photograph.');
+    }
+
+    public function test_a_genuinely_different_export_is_converted_again(): void
+    {
+        $this->importBlocks();
+
+        // Same design, edited — different bytes, so it must not be served the
+        // previous conversion.
+        $this->withHeaders($this->headers())->post('/api/v1/admin/campaign-templates/import', [
+            'file'    => $this->export(['publication-web-resources/image/second.png' => $this->png(700, 350, [10, 20, 30])]),
+            'dry_run' => true,
+        ])->assertOk();
+
+        $this->assertSame(2, Media::count());
+    }
+
+    public function test_a_reused_conversion_is_dropped_when_its_media_has_been_deleted(): void
+    {
+        $first = $this->importBlocks();
+
+        Media::query()->delete();
+
+        $second = $this->importBlocks();
+
+        // Otherwise the blocks would point at a URL nothing serves any more.
+        $this->assertSame(1, Media::count());
+        $this->assertNotSame(
+            collect($first)->firstWhere('type', 'image')['url'],
+            collect($second)->firstWhere('type', 'image')['url']
+        );
+    }
+
     public function test_a_name_is_required_unless_it_is_a_dry_run(): void
     {
         $this->withHeaders($this->headers())->postJson('/api/v1/admin/campaign-templates/import', [
