@@ -1,40 +1,62 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-13 | Branch: `main` | Latest commit: Session 81 (**pushed, not deployed**)
+Last updated: 2026-08-13 | Branch: `main` | Latest commit: Session 82 (**pushed, not deployed**)
 
 ---
 
-## 🔧 Sessions 78–81 pushed, NOT deployed
+## ✅ Sessions 78–80 deployed to production (2026-08-13)
 
-One unapplied migration.
+Production is at `d7b63a7`. Migration **#32 `search_events`** applied as **batch
+102**, confirmed by `migrate:status`. `route:cache` rebuilt — Session 79's
+`GET /admin/analytics/behaviour` returns Laravel's own `401`, not a 404 from a
+stale cache. Behaviour recording is live and the report fills as traffic
+accumulates.
+
+**The deploy caught Sessions 78–80 only.** The `git fetch` ran against a state
+that did not yet have Session 81, so `HEAD` came back `d7b63a7` rather than the
+tip. Worth recording as a pattern, not an incident: **`migrate:status` looking
+right does not prove the deployed code is the code you pushed.** Batch 102
+proved a fetch had happened, and the 401 proved the route cache was fresh —
+neither says which commit. The check that actually settles it is
+
+```bash
+git rev-parse --short HEAD
+/opt/alt/php83/usr/bin/php artisan tinker --execute="echo array_key_exists('hero', App\Services\CampaignBlockRenderer::BLOCKS) ? 'live' : 'OLD CODE';"
+```
+
+— a SHA plus one assertion against the running code. Sessions 78–80 were only
+recorded as deployed after that came back, and the earlier draft of this section
+that marked Session 81 deployed on the strength of the migration alone was
+wrong.
+
+---
+
+## 🔧 Sessions 81–82 pushed, NOT deployed
+
+**No migration.** No new route. Code-only, both sessions.
 
 | Session | What it is | Migration | Routes |
 |---|---|---|---|
-| **78** | Campaign blocks that hold two things side by side (`image_row`, `section_header`, `cards`, `fet_green`) + importer inference | none | none |
-| **79** | Customer behaviour analytics — what people search for and cannot find | **#32** `search_events` | **1 new** (`GET /admin/analytics/behaviour`) |
-| **80** | Campaign email on small screens | none | none |
 | **81** | Text printed ON a picture (`hero` block) + the importer recovering the masthead | none | none |
+| **82** | `group_list` served in one shape; a `url()` injection in `hero`; empty group rows | none | none |
 
 ```bash
 cd /home/okelvaxj/domains/okelcor.com/public_html/okelcor-api
 git fetch origin && git reset --hard origin/main
 composer install --no-dev
-/opt/alt/php83/usr/bin/php artisan backup:okelcor
-/opt/alt/php83/usr/bin/php artisan migrate --force
 /opt/alt/php83/usr/bin/php artisan config:clear && /opt/alt/php83/usr/bin/php artisan config:cache
 /opt/alt/php83/usr/bin/php artisan route:cache
 /opt/alt/php83/usr/bin/php artisan view:clear && /opt/alt/php83/usr/bin/php artisan cache:clear
 ```
 
-`route:cache` is required (Session 79 adds a route). `cache:clear` matters
-because the InDesign conversion cache is keyed on a fingerprint of the
-converting code — stale entries expire on their own, but clearing removes the
-two-hour window in which a re-upload looks like the deploy did not happen.
+`cache:clear` is the one that matters. The InDesign conversion cache is keyed on
+a fingerprint of the converting code, which Session 81 changes — skip it and a
+re-upload of the same export inside two hours returns the **old** reading,
+headline under the picture, indistinguishable from the deploy not having
+happened. Re-uploading is the first thing the marketers will do to check.
 
-**Nothing here changes customer-facing behaviour.** Session 79 starts recording
-catalogue searches — no PII, and the report is empty until traffic accumulates.
-Sessions 78, 80 and 81 change how campaign emails render; no campaign sends on
-deploy.
+**Nothing here changes customer-facing behaviour.** These change how campaign
+emails render; no campaign sends on deploy.
 
 ---
 
@@ -1827,6 +1849,25 @@ spec. The fix is a dedicated drag handle plus a pointer activation distance, and
 it is written up per-library in the note.
 
 See `FRONTEND_NOTE_campaign-text-position.md`.
+
+### Session 82 — answering the frontend report
+
+Frontend built the position grid and fixed the drag (the whole card was
+`draggable`, exactly as diagnosed; this repo uses native DnD, so the dnd-kit
+advice in the note did not apply). Three things came back.
+
+| Change | Status | Notes |
+|--------|--------|-------|
+| **`group_list` served in one shape** | 🔧 | The blocker, and it was mine. `item_fields` was an object keyed by field name while a block's own `fields` were a list of objects carrying `name` — same concept, two shapes, so a renderer for one could not be reused for the other. `design()` now flattens it the same way, recursively. Nothing consumed the old shape, so a fix rather than a break. Frontend was right to stop rather than guess: an invented item-field key would have had nothing to disagree with it until production. |
+| **A `url()` injection in `hero`** | 🔧 | Found by taking their CSS finding seriously against my own code. `hero` is the only place a URL enters a CSS declaration rather than an HTML attribute, and `e()` is not sufficient there — the HTML parser decodes `&#039;` back to `'` before the CSS parser sees it, and `filter_var(FILTER_VALIDATE_URL)` accepts apostrophes, brackets and semicolons in a path (**checked, not assumed**). An `image_url` pasted as `https://…/a');background:red;x=('.png` closed the string and injected declarations into the sent email and the admin preview. Percent-encoded rather than rejected — those characters are legal in a URL, so `tyre_(winter).png` still works. Requires `marketing.manage`, so low severity; still a stored injection reachable from a form field. |
+| **An empty group row no longer blocks saving** | 🔧 | An "add another" button produces one every time it is pressed. Refusing to save over it makes the editor feel broken, and `cardItems()` already dropped it at render — so what validated and what sent disagreed. A row carrying only a client-side id counts as empty; a partly-filled row is still an error. |
+| Backend tests (4 new) | ✅ | The injection (encoded in all three places it appears, brackets preserved), empty and partly-filled rows, `item_fields` shape at every depth, and the `hero` block reaching the catalogue with its nine options. Full suite **404 passed, 0 failed**, 206 skipped. |
+
+**Correction accepted, on index keys.** The mechanism given in the note was
+wrong — controlled inputs re-render without remounting, so the caret does not
+move. The real cost is each row's local UI state binding to a position, so
+deleting block 2 of 5 strands the image field's flags on the wrong block. Same
+fix, different failure.
 
 ---
 

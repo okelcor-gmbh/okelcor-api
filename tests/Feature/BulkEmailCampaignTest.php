@@ -1154,6 +1154,67 @@ class BulkEmailCampaignTest extends TestCase
         $this->assertContains('[[FIRST_NAME]]', array_column($response->json('data.merge_tags'), 'tag'));
     }
 
+    public function test_a_group_field_describes_its_own_fields_in_the_same_shape(): void
+    {
+        // Frontend stopped on this, correctly: `item_fields` was served as an
+        // object keyed by field name while a block's own fields were a list, so
+        // the same concept arrived in two shapes and a renderer for one could
+        // not be reused for the other. A group_list is a container whose leaves
+        // are field types already drawn — it has to LOOK like that.
+        $blocks = $this->actingAs($this->admin('order_manager'), 'sanctum')
+            ->getJson('/api/v1/admin/campaign-design')
+            ->assertOk()
+            ->json('data.blocks');
+
+        $cards = collect($blocks)->firstWhere('type', 'cards');
+        $items = collect($cards['fields'])->firstWhere('name', 'items');
+
+        $this->assertSame('group_list', $items['type']);
+        $this->assertSame(24, $items['max_items']);
+
+        // A list, in the same shape as the outer fields — not a keyed object.
+        $this->assertArrayHasKey(0, $items['item_fields']);
+        $this->assertSame(['title', 'body'], array_column($items['item_fields'], 'name'));
+        $this->assertSame('text', $items['item_fields'][0]['type']);
+        $this->assertTrue($items['item_fields'][0]['required']);
+        $this->assertSame('textarea', $items['item_fields'][1]['type']);
+
+        // Every field of every block carries a name, at every depth — that is
+        // what lets one recursive renderer draw all of them.
+        $walk = function (array $fields) use (&$walk): void {
+            foreach ($fields as $field) {
+                $this->assertArrayHasKey('name', $field);
+                $this->assertArrayHasKey('type', $field);
+
+                if (isset($field['item_fields'])) {
+                    $walk($field['item_fields']);
+                }
+            }
+        };
+
+        foreach ($blocks as $block) {
+            $walk($block['fields']);
+        }
+    }
+
+    public function test_the_banner_block_reaches_the_editor_catalogue(): void
+    {
+        $blocks = $this->actingAs($this->admin('order_manager'), 'sanctum')
+            ->getJson('/api/v1/admin/campaign-design')
+            ->assertOk()
+            ->json('data.blocks');
+
+        $hero     = collect($blocks)->firstWhere('type', 'hero');
+        $position = collect($hero['fields'])->firstWhere('name', 'position');
+
+        // The hint is advice about drawing, never about meaning: it rides on an
+        // ordinary select whose options are the whole contract.
+        $this->assertSame('select', $position['type']);
+        $this->assertSame('position_grid', $position['control']);
+        $this->assertCount(9, $position['options']);
+        $this->assertSame('middle_center', $position['default']);
+    }
+
     public function test_starter_templates_are_served(): void
     {
         $response = $this->actingAs($this->admin('order_manager'), 'sanctum')

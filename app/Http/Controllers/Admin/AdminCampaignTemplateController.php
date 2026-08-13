@@ -32,16 +32,11 @@ class AdminCampaignTemplateController extends Controller
     {
         $blocks = [];
         foreach (CampaignBlockRenderer::BLOCKS as $type => $spec) {
-            $fields = [];
-            foreach ($spec['fields'] as $name => $field) {
-                $fields[] = array_merge(['name' => $name], $field);
-            }
-
             $blocks[] = [
                 'type'        => $type,
                 'label'       => $spec['label'],
                 'description' => $spec['description'],
-                'fields'      => $fields,
+                'fields'      => $this->fieldList($spec['fields']),
             ];
         }
 
@@ -188,6 +183,38 @@ class AdminCampaignTemplateController extends Controller
     }
 
     // -------------------------------------------------------------------------
+
+    /**
+     * Flattens a field map into the `[{name, type, …}]` list the editor reads.
+     *
+     * Applied to a `group_list`'s `item_fields` as well as to a block's own
+     * fields — those were being served as an object keyed by field name while
+     * the outer fields were a list, so the same concept arrived in two shapes
+     * and a renderer for one could not be reused for the other. Frontend hit
+     * exactly that and stopped, correctly: `group_list` is a container whose
+     * leaves are field types they already draw, and now it looks like it.
+     *
+     * Recursive because nothing prevents a group inside a group, and a shape
+     * that only holds one level deep is a shape that breaks the first time it
+     * is nested.
+     *
+     * @param  array<string, array<string, mixed>>  $fields
+     * @return array<int, array<string, mixed>>
+     */
+    private function fieldList(array $fields): array
+    {
+        $out = [];
+
+        foreach ($fields as $name => $field) {
+            if (isset($field['item_fields']) && is_array($field['item_fields'])) {
+                $field['item_fields'] = $this->fieldList($field['item_fields']);
+            }
+
+            $out[] = array_merge(['name' => $name], $field);
+        }
+
+        return $out;
+    }
 
     /**
      * Block problems come back as a plain list under `errors.blocks`, already

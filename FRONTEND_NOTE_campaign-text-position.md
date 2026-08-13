@@ -254,3 +254,102 @@ Three more that came out of "make the editor easy to do anything":
 
 See also `FRONTEND_NOTE_campaign-builder.md` (the block catalogue) and
 `FRONTEND_NOTE_indesign-campaign-import.md` (the import endpoint).
+
+---
+
+## Addendum — Session 82, answering the frontend report
+
+Three changes, all in response to what came back.
+
+### `group_list` is now specified, and in the shape you asked for
+
+You were right to stop: `item_fields` was being served as an **object keyed by
+field name** while a block's own `fields` were a **list of objects carrying
+`name`**. Same concept, two shapes — so a renderer for one couldn't be reused
+for the other, which is the exact opposite of what a container field should
+cost you.
+
+`GET /api/v1/admin/campaign-design` now flattens `item_fields` the same way,
+recursively. Nothing consumed the old shape, so this is a fix rather than a
+break. A `group_list` is now literally a container whose leaves are field specs
+you already draw.
+
+**The fragment, as served:**
+
+```jsonc
+{
+  "name": "items",
+  "type": "group_list",
+  "label": "Cards",
+  "max_items": 24,
+  "item_fields": [
+    { "name": "title", "type": "text",     "label": "Title",       "required": true, "max": 120 },
+    { "name": "body",  "type": "textarea", "label": "Description", "max": 300 }
+  ]
+}
+```
+
+**A block instance, as sent back:**
+
+```jsonc
+{
+  "type": "cards",
+  "columns": "3",
+  "check": "yes",
+  "items": [
+    { "title": "Save up to 15% on fuel", "body": "Reduce consumption and lower operating costs." },
+    { "title": "Improved combustion",    "body": "Promotes more complete, efficient fuel burn." },
+    { "title": "Lower CO₂ & emissions",  "body": "Cleaner operation, smaller footprint." }
+  ]
+}
+```
+
+`items` is a plain array of plain objects. No wrapper, no index key, no id — the
+value shape is exactly the sub-field names.
+
+**Validation rules, so nothing has to be discovered in production:**
+
+| Rule | Behaviour |
+|---|---|
+| `max_items` | 24 for `cards`. Over it: *"Block 3 (Cards): "Cards" allows at most 24 entries."* |
+| `required` sub-field | Names the **entry**, not the index: *"Block 3 (Cards): entry 2 needs "Title"."* |
+| `max` on a sub-field | *"Block 3 (Cards): entry 2 — "Title" is too long (max 120 characters)."* |
+| **A wholly empty entry** | **Dropped, not an error.** New this session. |
+| A partly-filled entry | An error — that's a mistake, not an unused row. |
+| Rendering | Fewer items than the column count pads the final row with cells that are hidden on a phone. Two or three across; `columns` is `"2"` or `"3"` **as a string**. |
+
+That empty-entry rule is there because an "add another" button produces an empty
+row every time it's pressed, and refusing to save the campaign over one makes
+the editor feel broken. A row carrying only a client-side `id` and no declared
+sub-field still counts as empty, so your ids-beside-the-blocks decision works
+either way — but they're cheap to keep out of the payload.
+
+### A `url()` injection in my own renderer
+
+Your CSS finding applies to the backend too, and I had the same bug. `hero` is
+the only place a URL goes into a CSS declaration rather than an HTML attribute,
+and `e()` is not sufficient there — the HTML parser decodes `&#039;` back to `'`
+before the CSS parser sees the value. `filter_var(FILTER_VALIDATE_URL)` accepts
+apostrophes, parentheses and semicolons in a path (checked, not assumed), so
+`safeUrl()` let them through.
+
+An `image_url` pasted as `https://…/a');background:red;x=('.png` closed the
+`url()` string and injected declarations — into the sent email **and** into your
+preview. Now percent-encoded rather than rejected: those characters are legal in
+a URL and the encoded form fetches the same file, so
+`https://…/tyre_(winter).png` still works. Nothing changes for you; it's just
+no longer a hole.
+
+### On the index-key correction
+
+Yours is right and mine was wrong. Controlled inputs re-render without
+remounting, so the caret doesn't move — the mechanism I described doesn't happen
+in your code. Binding each row's local UI state to a position is the real cost,
+and deleting block 2 of 5 stranding the image field's flags on the wrong block
+is a better example than the one I gave.
+
+### Still open
+
+Nothing blocking. `min_items` doesn't exist on any field and isn't enforced; if
+the editor wants a "at least one card" rule it's yours to impose, and say so, and
+I'll add it to the schema if you'd rather it were declared server-side.

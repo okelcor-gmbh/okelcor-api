@@ -911,6 +911,75 @@ class CampaignBuilderTest extends TestCase
         $this->assertStringContainsString('[A fuel conditioner on a dark background]', $wordless);
     }
 
+    // ── Session 82 ────────────────────────────────────────────────────────
+
+    public function test_a_banner_url_cannot_break_out_of_the_css_it_sits_in(): void
+    {
+        // The one place a URL goes into a CSS declaration rather than an HTML
+        // attribute, and e() is not enough there: the HTML parser decodes
+        // &#039; back to ' before the CSS parser sees it. filter_var accepts
+        // apostrophes, parentheses and semicolons in a path — checked, not
+        // assumed — so safeUrl alone lets this through.
+        $html = $this->renderer->render([$this->banner([
+            'image' => "https://api.okelcor.com/a');background:red;x=('.png",
+        ])]);
+
+        // "background:red" is still in there, and has to be — it is part of the
+        // path. What matters is that it stays INSIDE the url() string: the
+        // quotes and brackets that would close that string are encoded, so the
+        // whole thing is one inert image address rather than two declarations.
+        $this->assertStringContainsString(
+            "url('https://api.okelcor.com/a%27%29;background:red;x=%28%27.png')",
+            $html
+        );
+        // One background declaration, not one plus whatever the path smuggled.
+        $this->assertSame(1, substr_count($html, 'background-image:url('));
+
+        // The address appears three times — the cell's `background` attribute,
+        // the CSS, and the VML fill — and every one of them is the encoded
+        // form. A single unencoded copy would be the whole hole reopened.
+        $this->assertSame(3, substr_count($html, 'a%27%29;background:red;x=%28%27.png'));
+        $this->assertStringNotContainsString("a');", $html);
+
+        // Encoded, not refused — every one of those characters is legal in a
+        // URL and the encoded form fetches the same file.
+        $bracketed = $this->renderer->render([$this->banner([
+            'image' => 'https://api.okelcor.com/tyre_(winter).png',
+        ])]);
+
+        $this->assertStringContainsString('tyre_%28winter%29.png', $bracketed);
+        $this->assertStringContainsString('background-image', $bracketed);
+    }
+
+    public function test_an_unfilled_row_does_not_block_saving_the_campaign(): void
+    {
+        // An "add another" button produces an empty row every time it is
+        // pressed. Refusing to save over one makes the editor feel broken, and
+        // the renderer drops it anyway — so what validates and what sends
+        // would otherwise disagree.
+        $errors = $this->renderer->validateBlocks([[
+            'type'  => 'cards',
+            'items' => [
+                ['title' => 'Save up to 15% on fuel', 'body' => 'Reduce consumption.'],
+                ['title' => '', 'body' => ''],
+                // A row carrying only a client-side id is still an empty row.
+                ['id' => 'card-3'],
+            ],
+        ]]);
+
+        $this->assertSame([], $errors);
+
+        // A row that is PARTLY filled is a mistake, not an unused row, and
+        // still names the entry rather than its index.
+        $partial = $this->renderer->validateBlocks([[
+            'type'  => 'cards',
+            'items' => [['title' => 'A'], ['body' => 'A description with no title']],
+        ]]);
+
+        $this->assertCount(1, $partial);
+        $this->assertStringContainsString('entry 2', $partial[0]);
+    }
+
     public function test_the_fet_preset_exists_and_is_green(): void
     {
         $this->assertArrayHasKey('fet_green', CampaignBlockRenderer::THEMES);

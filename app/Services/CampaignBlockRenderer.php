@@ -566,6 +566,16 @@ HTML;
                                 continue;
                             }
 
+                            // A row with nothing in it at all is a row someone
+                            // added and did not use — an "add another" button
+                            // produces one every time it is pressed. Refusing to
+                            // save the campaign over it would make the editor
+                            // feel broken; the renderer drops it too, so what is
+                            // accepted here and what is sent agree.
+                            if ($this->blankEntry($item, $spec['item_fields'])) {
+                                continue;
+                            }
+
                             foreach ($spec['item_fields'] as $sub => $subSpec) {
                                 $subValue = $item[$sub] ?? null;
                                 $blank    = $subValue === null || $subValue === '';
@@ -600,6 +610,29 @@ HTML;
         }
 
         return $errors;
+    }
+
+    /**
+     * Whether every declared sub-field of a group entry is empty.
+     *
+     * Only the declared ones: an entry carrying a client-side id and nothing
+     * else is still an empty row, and treating a stray key as content would
+     * turn it back into a validation error.
+     *
+     * @param  array<string, mixed>  $item
+     * @param  array<string, array<string, mixed>>  $itemFields
+     */
+    private function blankEntry(array $item, array $itemFields): bool
+    {
+        foreach (array_keys($itemFields) as $sub) {
+            $value = $item[$sub] ?? null;
+
+            if ($value !== null && $value !== '' && $value !== []) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -831,7 +864,15 @@ HTML;
             $stack = '<a href="' . e($link) . '" style="color:' . $color . '; text-decoration:none;">' . $stack . '</a>';
         }
 
-        $escaped = e($url);
+        // This is the ONLY place a URL is put inside a CSS declaration rather
+        // than an HTML attribute, and e() is not sufficient there: the HTML
+        // parser decodes &#039; back to ' before the CSS parser ever sees the
+        // value, so a pasted image address ending `'); background:red; x=('`
+        // closes the url() string and injects declarations — into the sent
+        // email AND into the admin preview that renders it. Percent-encoding
+        // rather than rejecting, because those characters are legal in a URL
+        // and the encoded form fetches the same file.
+        $escaped = e($this->cssSafeUrl($url));
 
         // No percentage width on this cell: it is as wide as its own text, so
         // there is nothing to collapse on a phone.
@@ -1315,6 +1356,28 @@ HTML;
         }
 
         return filter_var($url, FILTER_VALIDATE_URL) === false ? null : $url;
+    }
+
+    /**
+     * Percent-encodes the characters that can break out of a CSS `url()`.
+     *
+     * `safeUrl()` guards the scheme and rejects control characters, angle
+     * brackets and double quotes — which is everything that matters in an HTML
+     * attribute, and not enough in a style declaration. `filter_var()` accepts
+     * apostrophes, parentheses and semicolons in a path (verified, not
+     * assumed), and all three are structural inside `url('…')`.
+     *
+     * Encoding rather than refusing: every one of these is legal in a URL, the
+     * encoded form fetches the same file, and a marketer pasting a link with a
+     * bracket in it should not be told their image is invalid.
+     */
+    private function cssSafeUrl(string $url): string
+    {
+        return str_replace(
+            ["\\", "'", '"', '(', ')', ' '],
+            ['%5C', '%27', '%22', '%28', '%29', '%20'],
+            $url
+        );
     }
 
     private function align(string $align): string
