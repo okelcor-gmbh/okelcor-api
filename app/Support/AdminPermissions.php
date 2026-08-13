@@ -12,6 +12,7 @@ namespace App\Support;
  *   super_admin     — full system access + admin management
  *   admin           — operational access, no admin user management
  *   order_manager   — orders, quotes, EU declarations, trade docs, newsletter
+ *   finance         — invoice reconciliation + the finance half of order sign-off
  *   sales_manager   — read-only orders + quotes (view pipeline, no mutations)
  *   content_manager — all content (products, articles, hero, promotions, media)
  *   support         — customer read-only + contacts
@@ -33,12 +34,33 @@ class AdminPermissions
         'security.manage'         => ['super_admin'],
 
         // ── Orders ────────────────────────────────────────────────────────
-        'orders.view'             => ['super_admin', 'admin', 'order_manager', 'sales_manager'],
+        'orders.view'             => ['super_admin', 'admin', 'order_manager', 'sales_manager', 'finance'],
         'orders.update'           => ['super_admin', 'admin', 'order_manager'],
         'orders.delete'           => ['super_admin'],
         'orders.import'           => ['super_admin', 'admin', 'order_manager'],
-        'orders.export'                     => ['super_admin', 'admin', 'order_manager', 'sales_manager'],
+        'orders.export'                     => ['super_admin', 'admin', 'order_manager', 'sales_manager', 'finance'],
         'orders.approve_financial_revision' => ['super_admin', 'admin'],
+
+        // ── Order confirmation sign-off ───────────────────────────────────
+        // Two signatures, and the business asked for exactly two roles to hold
+        // them: the order manager and finance. `admin` is deliberately NOT on
+        // either list — a control that any administrator can satisfy on their
+        // own is not a separation of duties, it is a checkbox. super_admin is
+        // on both as break-glass, and OrderSignoffService still refuses to let
+        // one person fill both slots, so holding both permissions buys nobody
+        // the ability to self-approve.
+        'orders.signoff_ops'      => ['super_admin', 'order_manager'],
+        'orders.signoff_finance'  => ['super_admin', 'finance'],
+
+        // Sending a confirmation that is not fully signed. Recorded as
+        // `signoff_bypassed` on the order, which is the point: the escape hatch
+        // exists so the business is never stuck, and leaves a mark so it is
+        // never quietly routine.
+        'orders.signoff_bypass'   => ['super_admin'],
+
+        // ── Finance system reconciliation (sevDesk) ───────────────────────
+        'finance.view'            => ['super_admin', 'admin', 'finance', 'order_manager'],
+        'finance.manage'          => ['super_admin', 'admin', 'finance'],
 
         // ── Payments ──────────────────────────────────────────────────────
         'payments.mark_paid'      => ['super_admin', 'admin', 'order_manager'],
@@ -89,11 +111,9 @@ class AdminPermissions
         'marketing.manage'        => ['super_admin', 'admin', 'order_manager'],
 
         // ── Customer behaviour analytics ──────────────────────────────────
-        // What customers search for and cannot find. Granted to the roles that
-        // actually exist in the admin_users.role ENUM — `sales_manager` is the
-        // natural fourth and cannot be stored (see Known Gaps); add it in the
-        // same change that widens the ENUM.
-        'analytics.view'          => ['super_admin', 'admin', 'order_manager', 'editor'],
+        // `sales_manager` added here as Session 79 said it should be, in the
+        // same change that widened admin_users.role — see the migration.
+        'analytics.view'          => ['super_admin', 'admin', 'order_manager', 'editor', 'sales_manager'],
 
         // ── Customers ─────────────────────────────────────────────────────
         'customers.view'          => ['super_admin', 'admin', 'support'],
@@ -104,16 +124,16 @@ class AdminPermissions
 
         // ── Supplier intelligence ─────────────────────────────────────────
         // ── Partner sales log ─────────────────────────────────────────────
-        // Granted to roles that actually EXIST in the admin_users.role ENUM.
-        // `sales_manager` is the natural fit and is documented above, but the
-        // column cannot store it (Known Gaps, High) — granting it here would
-        // create a permission nobody could ever hold. Add it to this list in
-        // the same change that widens the ENUM, not before.
-        'partners.view'           => ['super_admin', 'admin', 'order_manager'],
+        // `sales_manager` added here as Session 73 said it should be, in the
+        // same change that widened admin_users.role. Read and export only —
+        // verifying and correcting a partner's reported figure stay with the
+        // roles that already held them, because widening the column was
+        // permission to store the role, not a decision to expand what it does.
+        'partners.view'           => ['super_admin', 'admin', 'order_manager', 'sales_manager'],
         'partners.manage'         => ['super_admin', 'admin'],
-        'partner_sales.view'      => ['super_admin', 'admin', 'order_manager'],
+        'partner_sales.view'      => ['super_admin', 'admin', 'order_manager', 'sales_manager'],
         'partner_sales.verify'    => ['super_admin', 'admin', 'order_manager'],
-        'partner_sales.export'    => ['super_admin', 'admin', 'order_manager'],
+        'partner_sales.export'    => ['super_admin', 'admin', 'order_manager', 'sales_manager'],
 
         // Rewriting a figure a partner reported is a stronger act than signing
         // one off, so it gets its own key even though the role list currently
@@ -137,6 +157,7 @@ class AdminPermissions
         'super_admin',
         'admin',
         'order_manager',
+        'finance',
         'sales_manager',
         'content_manager',
         'support',

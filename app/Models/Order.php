@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -123,9 +124,69 @@ class Order extends Model
         'ebay_raw_summary'                      => 'array',
     ];
 
+    /**
+     * The two sales channels the business actually reports on.
+     *
+     * `source` carries four values today (website, ebay, manual, and imported
+     * rows) and the distinction that matters to the finance board is only ever
+     * "did this come from eBay". Derived rather than stored: a second column
+     * saying the same thing as `source` is a column that can disagree with it.
+     */
+    public const CHANNEL_NORMAL = 'normal';
+    public const CHANNEL_EBAY   = 'ebay';
+    public const CHANNELS       = [self::CHANNEL_NORMAL, self::CHANNEL_EBAY];
+
     public function isFinancialsLocked(): bool
     {
         return $this->financials_locked_at !== null;
+    }
+
+    public function channel(): string
+    {
+        return $this->source === 'ebay' ? self::CHANNEL_EBAY : self::CHANNEL_NORMAL;
+    }
+
+    /**
+     * Restricts a query to one channel. One definition, used by the order list,
+     * the summary board and the reconciliation, so the three cannot disagree
+     * about what an eBay order is.
+     */
+    public function scopeChannel(Builder $query, ?string $channel): Builder
+    {
+        return match ($channel) {
+            self::CHANNEL_EBAY   => $query->where('source', 'ebay'),
+            self::CHANNEL_NORMAL => $query->where(fn ($q) => $q->where('source', '!=', 'ebay')->orWhereNull('source')),
+            default              => $query,
+        };
+    }
+
+    /**
+     * Paid for, dispatched, not yet arrived.
+     *
+     * The order manager's cue to send trade documents, which is the whole
+     * reason it is on the board: a paid order in transit with no commercial
+     * invoice attached is a container that will reach a port without its
+     * paperwork.
+     *
+     * Deliberately does not include `processing` — nothing has moved yet — nor
+     * an unpaid shipped order, which is a different and more urgent problem
+     * than a documentation one.
+     */
+    public function isInTransit(): bool
+    {
+        if ($this->status !== 'shipped') {
+            return false;
+        }
+
+        return $this->isFullyPaid() || in_array($this->payment_stage, ['deposit_paid', 'balance_due'], true);
+    }
+
+    /** @see isInTransit() — the same rule, expressed for a query. */
+    public function scopeInTransit(Builder $query): Builder
+    {
+        return $query->where('status', 'shipped')
+            ->where(fn ($q) => $q->where('payment_status', 'paid')
+                ->orWhereIn('payment_stage', ['deposit_paid', 'balance_due', 'balance_paid', 'shipment_released']));
     }
 
     /**
@@ -239,6 +300,11 @@ class Order extends Model
     public function tradeDocuments(): HasMany
     {
         return $this->hasMany(TradeDocument::class)->orderByDesc('created_at');
+    }
+
+    public function signoffs(): HasMany
+    {
+        return $this->hasMany(OrderSignoff::class)->orderBy('signed_at');
     }
 
     /**

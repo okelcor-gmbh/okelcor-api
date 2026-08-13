@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\OrderLog;
+use App\Services\OrderSignoffService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -173,6 +174,19 @@ class AdminOrderItemController extends Controller
         Request $request, Order $order, string $reason, string $action, ?array $oldItem, ?array $newItem
     ): void {
         $totals = $order->recalculateTotalsFromItems();
+
+        // A signature covers a figure. If editing the lines moved the total, the
+        // people who signed approved something else, and a confirmation sent on
+        // the strength of it would carry evidence that two people agreed to a
+        // number neither of them saw.
+        if ($totals['changed']) {
+            app(OrderSignoffService::class)->invalidateForFinancialChange(
+                $order,
+                $request->user(),
+                "order total changed from {$totals['total_from']} to {$totals['total_to']} ({$reason})",
+                $request->ip()
+            );
+        }
 
         // old_value/new_value are VARCHAR(100) — keep them short, bounded
         // summaries; the full item snapshot goes in `notes` (unbounded TEXT).

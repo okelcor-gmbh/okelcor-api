@@ -9,6 +9,7 @@ use App\Models\Order;
 use App\Models\OrderLog;
 use App\Models\TradeDocument;
 use App\Services\CustomerNotifier;
+use App\Services\OrderSignoffService;
 use App\Services\TradeDocumentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -21,7 +22,10 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class AdminTradeDocumentController extends Controller
 {
-    public function __construct(private TradeDocumentService $service) {}
+    public function __construct(
+        private TradeDocumentService $service,
+        private OrderSignoffService $signoffs,
+    ) {}
 
     /**
      * POST /api/v1/admin/orders/{id}/trade-documents/order-confirmation
@@ -149,15 +153,8 @@ class AdminTradeDocumentController extends Controller
         $order = Order::with(['items', 'shipmentEvents'])->findOrFail($id);
         $admin = $request->user();
 
-        $depositStages = ['deposit_paid', 'balance_due', 'balance_paid', 'shipment_released'];
-        if (! in_array($order->payment_stage, $depositStages, true)) {
-            $this->logDocumentBlocked($request, $order, 'packing_list', $order->payment_stage);
-            return response()->json([
-                'message'       => 'Packing list can only be generated after the deposit has been confirmed.',
-                'code'          => 'document_generation_blocked_payment_stage',
-                'payment_stage' => $order->payment_stage,
-                'required'      => 'deposit_paid',
-            ], 409);
+        if ($refusal = $this->paymentStageGate($request, $order, 'packing_list', ['deposit_paid', 'balance_due', 'balance_paid', 'shipment_released'], 'the deposit is confirmed')) {
+            return $refusal;
         }
 
         try {
@@ -213,14 +210,8 @@ class AdminTradeDocumentController extends Controller
         $order = Order::with(['items', 'shipmentEvents'])->findOrFail($id);
         $admin = $request->user();
 
-        if ($order->payment_stage !== 'shipment_released') {
-            $this->logDocumentBlocked($request, $order, 'delivery_note', $order->payment_stage);
-            return response()->json([
-                'message'       => 'Delivery note can only be generated after the shipment has been released.',
-                'code'          => 'document_generation_blocked_payment_stage',
-                'payment_stage' => $order->payment_stage,
-                'required'      => 'shipment_released',
-            ], 409);
+        if ($refusal = $this->paymentStageGate($request, $order, 'delivery_note', ['shipment_released'], 'the shipment is released')) {
+            return $refusal;
         }
 
         try {
@@ -276,15 +267,8 @@ class AdminTradeDocumentController extends Controller
         $order = Order::with(['items', 'shipmentEvents'])->findOrFail($id);
         $admin = $request->user();
 
-        $depositStages = ['deposit_paid', 'balance_due', 'balance_paid', 'shipment_released'];
-        if (! in_array($order->payment_stage, $depositStages, true)) {
-            $this->logDocumentBlocked($request, $order, 'commercial_invoice', $order->payment_stage);
-            return response()->json([
-                'message'       => 'Commercial invoice can only be generated after the deposit has been confirmed.',
-                'code'          => 'document_generation_blocked_payment_stage',
-                'payment_stage' => $order->payment_stage,
-                'required'      => 'deposit_paid',
-            ], 409);
+        if ($refusal = $this->paymentStageGate($request, $order, 'commercial_invoice', ['deposit_paid', 'balance_due', 'balance_paid', 'shipment_released'], 'the deposit is confirmed')) {
+            return $refusal;
         }
 
         try {
@@ -422,16 +406,15 @@ class AdminTradeDocumentController extends Controller
         $order = Order::findOrFail($id);
         $admin = $request->user();
 
-        $depositStages = ['deposit_paid', 'balance_due', 'balance_paid', 'shipment_released'];
-        if (! in_array($order->payment_stage, $depositStages, true)) {
-            $this->logDocumentBlocked($request, $order, 'shipment_document_upload', $order->payment_stage);
-            return response()->json([
-                'message'       => 'Shipment documents can only be uploaded after the deposit has been confirmed.',
-                'code'          => 'document_generation_blocked_payment_stage',
-                'payment_stage' => $order->payment_stage,
-                'required'      => 'deposit_paid',
-            ], 409);
-        }
+        // No payment-stage gate on uploading. An uploaded file records something
+        // that already happened outside this system — an accountant's invoice, a
+        // bill of lading, a document the order manager was handed at a port.
+        // Refusing to store it does not make it not exist; it only means the one
+        // place everyone looks is missing it, and the copy that matters lives in
+        // somebody's inbox. This also covers the case the business asked for
+        // directly: documents sent AFTER delivery, which the old gate had no
+        // upper bound for but which sat behind a lower one that a historical
+        // order could easily fail.
 
         // Accept both field names — frontend may send document_label or type_label
         if (!$request->has('type_label') && $request->has('document_label')) {
@@ -571,6 +554,30 @@ class AdminTradeDocumentController extends Controller
         // Resolve recipient — fallback to the order's customer email
         $order          = Order::find($document->order_id);
         $recipientEmail = $request->input('recipient_email') ?? $order?->customer_email;
+
+        // The same two signatures the acceptance-request route requires. Without
+        // this the control is one route deep: an order confirmation can be
+        // e-mailed straight from the documents list, which reaches the customer
+        // by exactly the same means and would have been the obvious way around
+        // it. Every other document type is unaffected — the business asked for
+        // those to be freely sendable, including after delivery.
+        if ($order !== null && $document->type === 'order_confirmation') {
+            $guard = $this->signoffs->guardSend(
+                $order,
+                $admin,
+                $request->boolean('override_signoff'),
+                $request->input('override_signoff_reason'),
+                $request->ip()
+            );
+
+            if (! $guard['ok']) {
+                return response()->json([
+                    'message' => $guard['message'],
+                    'code'    => $guard['code'],
+                    'signoff' => $guard['signoff'] ?? null,
+                ], 409);
+            }
+        }
 
         if (! $recipientEmail) {
             return response()->json([
@@ -931,6 +938,82 @@ class AdminTradeDocumentController extends Controller
 
     // -------------------------------------------------------------------------
 
+
+    /**
+     * A payment-stage gate the order manager may pass deliberately.
+     *
+     * The gates exist for a real reason — Session 76, where a buyer was e-mailed
+     * about a deposit nobody had asked him for — so they stay on. But the
+     * business now expects the order manager, not the system, to decide when a
+     * document goes out, including after delivery. A refusal that cannot be
+     * overridden by the person accountable for the decision just moves the work
+     * outside the system, where nothing is recorded at all.
+     *
+     * So: still blocked by default, passable with a written reason, and the
+     * override is an audit row rather than a silence.
+     *
+     * @param  array<int, string>  $allowedStages
+     * @return JsonResponse|null  a refusal, or null to proceed
+     */
+    private function paymentStageGate(Request $request, Order $order, string $docType, array $allowedStages, string $requirement): ?JsonResponse
+    {
+        if (in_array($order->payment_stage, $allowedStages, true)) {
+            return null;
+        }
+
+        $reason = trim((string) $request->input('override_reason', ''));
+        $wants  = $request->boolean('override_gate') || $reason !== '';
+
+        if ($wants && config('orders.document_gates.overridable', true)) {
+            if ($reason === '') {
+                return response()->json([
+                    'message' => 'Generating this document before ' . $requirement . ' needs a written reason.',
+                    'code'    => 'override_reason_required',
+                ], 422);
+            }
+
+            $this->logOrderAction($request, $order, 'document_gate_overridden',
+                "{$docType} generated before {$requirement} (payment_stage={$order->payment_stage}): {$reason}");
+
+            return null;
+        }
+
+        $this->logDocumentBlocked($request, $order, $docType, $order->payment_stage);
+
+        return response()->json([
+            'message'       => 'This document is normally issued after ' . $requirement
+                . '. Send `override_gate: true` with an `override_reason` to issue it anyway.',
+            'code'          => 'document_generation_blocked_payment_stage',
+            'payment_stage' => $order->payment_stage,
+            'required'      => $requirement,
+            'overridable'   => (bool) config('orders.document_gates.overridable', true),
+        ], 409);
+    }
+
+    /**
+     * An order log row for an action this controller takes. Same try/catch
+     * shape as everywhere else — a failed log must not fail the action — but
+     * the action string is checked against OrderLog::ACTIONS first, which is
+     * what the column's ENUM is now built from.
+     */
+    private function logOrderAction(Request $request, Order $order, string $action, string $notes): void
+    {
+        try {
+            OrderLog::create([
+                'order_id'         => $order->id,
+                'order_ref'        => $order->ref,
+                'admin_user_id'    => $request->user()?->id,
+                'admin_user_email' => $request->user()?->email,
+                'action'           => $action,
+                'notes'            => $notes,
+                'ip_address'       => $request->ip(),
+                'created_at'       => now(),
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('Order log write failed', ['order_ref' => $order->ref, 'action' => $action, 'error' => $e->getMessage()]);
+        }
+    }
+
     private function logDocumentBlocked(Request $request, Order $order, string $docType, string $currentStage): void
     {
         try {
@@ -997,11 +1080,34 @@ class AdminTradeDocumentController extends Controller
         $request->validate([
             'recipient_email' => ['nullable', 'email', 'max:255'],
             'message'         => ['nullable', 'string', 'max:1000'],
+            'override_signoff'        => ['sometimes', 'boolean'],
+            'override_signoff_reason' => ['nullable', 'string', 'max:500'],
         ]);
 
         if ($order->customer_acceptance_status === 'accepted') {
             return response()->json([
                 'message' => 'Customer has already accepted this order confirmation.',
+            ], 409);
+        }
+
+        // Two signatures — operations and finance — before this reaches the
+        // customer. This is the gate, and it is here rather than on generating
+        // the document: an unsigned confirmation is a draft the two signatories
+        // need to read, so blocking its creation would block the thing they are
+        // approving. Sending it is the irreversible act.
+        $guard = $this->signoffs->guardSend(
+            $order,
+            $admin,
+            $request->boolean('override_signoff'),
+            $request->input('override_signoff_reason'),
+            $request->ip()
+        );
+
+        if (! $guard['ok']) {
+            return response()->json([
+                'message' => $guard['message'],
+                'code'    => $guard['code'],
+                'signoff' => $guard['signoff'] ?? null,
             ], 409);
         }
 

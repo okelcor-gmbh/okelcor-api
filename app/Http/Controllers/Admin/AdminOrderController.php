@@ -13,6 +13,7 @@ use App\Services\CurrencyConversionService;
 use App\Services\CustomerHealthService;
 use App\Services\CustomerNotifier;
 use App\Services\InvoiceService;
+use App\Services\OrderSignoffService;
 use App\Services\WhatsAppNotifier;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -27,6 +28,21 @@ class AdminOrderController extends Controller
     public function index(Request $request): JsonResponse
     {
         $query = Order::orderByDesc('created_at');
+
+        // eBay orders are a separate book: different fulfilment, different
+        // paperwork, and the finance board reports them on their own line. The
+        // default stays 'all' deliberately — silently hiding rows from every
+        // existing consumer of this endpoint (the admin list, the ops mobile
+        // app) to achieve a split that belongs in the UI would be a data change
+        // dressed up as a feature. The admin panel passes channel=normal on the
+        // Orders page and channel=ebay on the eBay page.
+        if ($request->filled('channel') && $request->input('channel') !== 'all') {
+            $query->channel($request->input('channel'));
+        }
+
+        if ($request->filled('in_transit') && $request->boolean('in_transit')) {
+            $query->inTransit();
+        }
 
         if ($request->filled('status')) {
             $query->where('status', $request->status);
@@ -64,6 +80,15 @@ class AdminOrderController extends Controller
                 'per_page'     => $paginated->perPage(),
                 'total'        => $paginated->total(),
                 'last_page'    => $paginated->lastPage(),
+                'channel'      => $request->input('channel', 'all'),
+                // Always present, and always counted across ALL orders rather
+                // than the current filter — so the Orders page can say "42 eBay
+                // orders, view separately" instead of the split being something
+                // the user has to already know about.
+                'channel_counts' => [
+                    'normal' => Order::query()->channel(Order::CHANNEL_NORMAL)->count(),
+                    'ebay'   => Order::query()->channel(Order::CHANNEL_EBAY)->count(),
+                ],
             ],
             'message' => 'success',
         ]);
@@ -502,6 +527,20 @@ class AdminOrderController extends Controller
             'notes'     => $request->input('reason'),
         ]);
 
+        // A signature covers a figure. Moving the total after it was signed
+        // means the confirmation that would go out is not the one anybody
+        // approved, so both signatures come off and have to be given again.
+        $withdrawn = 0;
+
+        if (round($newTotal, 2) !== round($oldTotal, 2)) {
+            $withdrawn = app(OrderSignoffService::class)->invalidateForFinancialChange(
+                $order,
+                $request->user(),
+                "order total changed from {$oldTotal} to {$newTotal}",
+                $request->ip()
+            );
+        }
+
         return response()->json([
             'data' => [
                 'id'               => $order->id,
@@ -510,8 +549,11 @@ class AdminOrderController extends Controller
                 'total'            => (float) $order->total,
                 'old_delivery_cost' => $oldDeliveryCost,
                 'old_total'         => $oldTotal,
+                'signoffs_withdrawn' => $withdrawn,
             ],
-            'message' => 'Order financials updated successfully.',
+            'message' => $withdrawn > 0
+                ? 'Order financials updated. The total changed, so the order confirmation sign-offs were withdrawn and must be given again.'
+                : 'Order financials updated successfully.',
         ]);
     }
 
@@ -746,6 +788,10 @@ class AdminOrderController extends Controller
             'id'             => $o->id,
             'order_ref'      => $o->ref,
             'source'         => $o->source ?? 'website',
+            // Derived from source, never stored — a second column saying the
+            // same thing is a column that can disagree with it.
+            'channel'        => $o->channel(),
+            'in_transit'     => $o->isInTransit(),
             'customer_name'  => $o->customer_name,
             'customer_email' => $o->customer_email,
             'total'          => (float) $o->total,
@@ -765,6 +811,13 @@ class AdminOrderController extends Controller
             'customer_name'      => $o->customer_name,
             'customer_email'     => $o->customer_email,
             'phone'              => $o->customer_phone,
+            'source'             => $o->source ?? 'website',
+            'channel'            => $o->channel(),
+            'in_transit'         => $o->isInTransit(),
+            // The two signatures on the order confirmation. Always present, so
+            // the panel never has to make a second request to find out whether
+            // there is anything to show.
+            'signoff'            => app(\App\Services\OrderSignoffService::class)->state($o),
             'company_name'       => null,
             'address'            => trim(implode(', ', array_filter([$o->address, $o->city, $o->postal_code]))),
             'country'            => $o->country,

@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-13 | Branch: `main` | Latest commit: Session 82 (**pushed, not deployed**)
+Last updated: 2026-08-13 | Branch: `main` | Latest commit: Session 83 (**pushed, not deployed**)
 
 ---
 
@@ -31,22 +31,37 @@ wrong.
 
 ---
 
-## 🔧 Sessions 81–82 pushed, NOT deployed
+## 🔧 Sessions 81–83 pushed, NOT deployed
 
-**No migration.** No new route. Code-only, both sessions.
+**Four migrations (#33–36), nine new routes.**
 
 | Session | What it is | Migration | Routes |
 |---|---|---|---|
 | **81** | Text printed ON a picture (`hero` block) + the importer recovering the masthead | none | none |
 | **82** | `group_list` served in one shape; a `url()` injection in `hero`; empty group rows | none | none |
+| **83** | Operations board, dual sign-off, finance-system invoices, eBay split | **#33–36** | **9 new** |
 
 ```bash
 cd /home/okelvaxj/domains/okelcor.com/public_html/okelcor-api
+pwd                                     # okelvaxj, not u978121777
 git fetch origin && git reset --hard origin/main
 composer install --no-dev
+
+/opt/alt/php83/usr/bin/php artisan backup:okelcor
+/opt/alt/php83/usr/bin/php artisan migrate --pretend    # read before the next line
+/opt/alt/php83/usr/bin/php artisan migrate --force
+
 /opt/alt/php83/usr/bin/php artisan config:clear && /opt/alt/php83/usr/bin/php artisan config:cache
 /opt/alt/php83/usr/bin/php artisan route:cache
 /opt/alt/php83/usr/bin/php artisan view:clear && /opt/alt/php83/usr/bin/php artisan cache:clear
+```
+
+**Verify with a SHA and an assertion against the running code**, not with
+`migrate:status` — see the Sessions 78–80 note below for why that is not enough:
+
+```bash
+git rev-parse --short HEAD
+/opt/alt/php83/usr/bin/php artisan tinker --execute="echo in_array('finance', App\Support\AdminPermissions::ROLES) && Schema::hasTable('order_signoffs') ? 'session 83 live' : 'NOT LIVE';"
 ```
 
 `cache:clear` is the one that matters. The InDesign conversion cache is keyed on
@@ -55,8 +70,11 @@ re-upload of the same export inside two hours returns the **old** reading,
 headline under the picture, indistinguishable from the deploy not having
 happened. Re-uploading is the first thing the marketers will do to check.
 
-**Nothing here changes customer-facing behaviour.** These change how campaign
-emails render; no campaign sends on deploy.
+**Customer-facing behaviour is unchanged.** Sessions 81–82 change how campaign
+emails render; no campaign sends on deploy. Session 83 is admin-side only — the
+one rule that touches a customer is that an order confirmation now needs two
+signatures before it can be e-mailed, and orders raised before 2026-08-13 are
+exempt so nothing in flight is frozen.
 
 ---
 
@@ -1871,6 +1889,111 @@ fix, different failure.
 
 ---
 
+## Operations board, dual sign-off, eBay split (Session 83)
+
+> **Deploy status:** built and tested, **not yet deployed**. Migrations **#33–36**
+> unapplied, 9 new routes, `route:cache` required. Deploy-order safe in both
+> directions — proved by test, not assumed.
+
+From the finance director's sketch (`WhatsApp Image 2026-08-13 at 13.46.11.jpeg`):
+a board of one row per sales channel and seven columns, plus four things around
+it that the sketch implies rather than draws.
+
+### The blocker was a role the database could not store
+
+Two signatures — operations and finance — need a `finance` role, and
+`admin_users.role` was a MySQL ENUM allowing exactly four values. That has been
+the top Known Gap since Session 52, and three sessions have granted a permission
+to a deliberately narrowed role list with a comment saying to widen it first.
+It stopped being a nuisance and became a hard blocker here.
+
+| Change | Status | Notes |
+|--------|--------|-------|
+| **#33** `admin_users.role` → `VARCHAR(30)` | 🔧 | Not a wider ENUM. Every ENUM widening in this codebase restates the full value list and is one forgotten entry from truncating data — that has now been paid for four times. The authoritative list is `AdminPermissions::ROLES`, which the create/update endpoints already validate against, so the constraint moves to the place already enforcing it. `down()` **refuses** if any account holds a role the old ENUM could not store, rather than blanking it and locking the person out. |
+| `finance` role added; deferred grants closed | 🔧 | `sales_manager` added to `analytics.view`, `partners.view`, `partner_sales.view` and `partner_sales.export` exactly as Sessions 73 and 79 said to. **Read and export only** — verify and correct stay where they were, because widening the column was permission to store the role, not a decision to expand what it does. Five roles the admin panel offers have been silently unstorable all along; they now work. |
+
+### The board
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `GET /admin/operations/summary` | 🔧 | `orders.view`. One row per channel + a total, defaulting to the current month. Orders sent, amount, clients, orders confirmed, website invoices, finance invoices, variance, in transit. |
+| **Every column declares how it was counted** | 🔧 | `definitions` ships with the numbers. Seven figures two departments will argue over are worthless if "orders sent" means something different to the reader than to the query. |
+| `total.clients` is not the sum of the rows | 🔧 | One buyer who ordered on eBay and on the website is one client; adding the rows reports two. Counted distinctly across both channels. |
+| Other currencies are named, not converted | 🔧 | Converting at today's rate would make a historic month's revenue change every time the board is opened. |
+| `in_transit` — paid, dispatched, not delivered | 🔧 | The order manager's cue that trade documents need sending. One definition (`Order::isInTransit()` + a matching scope), used by the board, the list filter and the row badge, with a test asserting the scope and the accessor agree — otherwise the count and the badge tell different stories about the same order. |
+
+### The two invoice columns exist to disagree
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| **#35** `finance_invoices` + CRUD | 🔧 | `finance.manage`. Finance types in what sevDesk raised. **Deliberately not an integration** — one that silently stopped syncing would make the two columns agree by accident, which is the one failure this board exists to catch. |
+| `order_ref` is not validated against `orders` | 🔧 | An invoice finance cannot match to an order here is exactly the row worth recording. Refusing it would hide the discrepancy instead of surfacing it; the payload carries `order_known_here: false`. |
+| A duplicate entry is a 422, not a DB error | 🔧 | Entering the same sevDesk number twice would make the two sides agree when they do not. |
+| `GET /admin/operations/invoice-reconciliation` | 🔧 | Both sides named, so the answer is "SD-201 has no invoice here" rather than "there is a discrepancy of one". Matched on order ref then our invoice number — **never on amount**, which would pair unrelated invoices that happen to be for the same figure. Reports `amount_mismatch` separately: two systems holding the same invoice at different money is worse than one holding it alone, and is invisible from the counts. |
+
+### Dual sign-off
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| **#34** `order_signoffs` + 3 endpoints | 🔧 | `unique(order_id, slot, active)` with `active` as 1-or-NULL — MySQL treats NULLs as distinct, so the database permits any number of withdrawn rows and exactly one standing signature per slot. Enforced by the schema rather than by remembering to check. |
+| **Two different people** | 🔧 | The whole point. `super_admin` holds both permissions as break-glass, so without this the control is satisfiable alone — a checkbox, not a separation of duties. `admin` deliberately holds neither half. |
+| **Editing the money withdraws both signatures** | 🔧 | Approving €10,000 and then sending a confirmation for €10,500 is worse than no approval, because it carries evidence that two people agreed to it. Fires on `PATCH /financials` and on item edits, only when the total actually moves — a control that fires on nothing gets routed around. |
+| A withdrawal is itself evidence | 🔧 | Requires a written reason; the row survives as history. A sign-off that can be quietly removed is one nobody can rely on afterwards. |
+| The gate is on **sending**, not generating | 🔧 | An unsigned confirmation is the draft the signatories need to read. Applied to `send-acceptance-request` **and** to `trade-documents/{id}/send-email` for `order_confirmation` — without the second the control was one route deep and the obvious way around it was the documents list. |
+| Grandfathered from 2026-08-13 | 🔧 | `ORDER_SIGNOFF_APPLIES_FROM`. Shipping this without it would freeze every open order on production, and a control that halts the business on its first day gets switched off. `ORDER_SIGNOFF_REQUIRED=false` stands the whole thing down from `.env` without a deploy. |
+| `super_admin` bypass, with a reason, logged | 🔧 | The escape hatch exists so the business is never stuck, and leaves a `signoff_bypassed` mark so it is never quietly routine. |
+
+### The audit trail this project keeps losing
+
+| Change | Status | Notes |
+|--------|--------|-------|
+| `OrderLog::ACTIONS` is now the source of truth | 🔧 | **#36** builds the ENUM from the constant instead of restating the list. Every previous widening carried its own copy, which is the mechanism behind three separate instances of shipped code writing an action the column rejected — silently, behind a try/catch — including the one that destroyed the payment milestone history for every order on production. |
+| A test asserts every action written in `app/` is declared | ✅ | The check the Known Gaps entry has been asking for since Session 76. **Its first run failed** — on `'action' => 'linked'` in a `Log::info` context array, a false positive. Narrowed to the two shapes this codebase actually writes audit rows with, because a check that cries wolf gets deleted. |
+
+### Documents: the order manager decides, not the system
+
+| Change | Status | Notes |
+|--------|--------|-------|
+| **Uploading is no longer gated at all** | 🔧 | It required `deposit_paid`. An uploaded file records something that already happened outside this system; refusing to store it does not make it not exist, it only means the one place everyone looks is missing it. Also the direct answer to "they will send even after delivery" — the old gate had no upper bound but sat behind a lower one a historical order could easily fail. |
+| Generation gates are overridable with a reason | 🔧 | The gates exist for a real reason (Session 76 — a buyer queried a deposit nobody had asked him for), so they stay on and now name their own escape hatch in the 409. Recorded as `document_gate_overridden`. A refusal the accountable person cannot override just moves the work outside the system, where nothing is recorded at all. |
+| Customer-facing visibility unchanged | ✅ | A commercial invoice still stays hidden from the buyer until the order is fully paid. Different control, and the ask was about the admin side. |
+
+### eBay separated, without hiding anything
+
+`GET /admin/orders` gains `?channel=normal|ebay|all`, `?in_transit=1`,
+`meta.channel_counts`, and `channel`/`in_transit` on every row.
+
+**The default stays `all` deliberately.** Flipping it to `normal` would have
+delivered the separation with no frontend work — and silently dropped eBay
+orders from every other consumer of this endpoint, including the Session 65 ops
+mobile app. A data change dressed up as a feature. The split belongs in the UI;
+the counts ride along on every response so the Orders page can say "42 eBay
+orders, view separately" rather than the split being something the user has to
+already know about.
+
+The existing `GET /admin/ebay/orders` is behind `ebay.manage` (super_admin +
+admin), so **an order manager cannot see it** — the eBay page uses
+`/admin/orders?channel=ebay` under `orders.view` instead.
+
+### Found while building
+
+| Finding | |
+|---|---|
+| `match(true)` against an array | `'partial'` was unreachable — `match(true)` compares with `===`, and a non-empty array is not `true`. A half-signed order reported itself as untouched. |
+| The service 500'd an unrelated feature | The order-item edit path calls into sign-off, so before the table-existence guard, every item correction would have 500'd between the code deploying and the migration running. **Caught by `OrderTotalFromItemsTest`, which knows nothing about sign-off** — a new control must not be able to break an old feature by arriving first. |
+| A date comparison right in production, wrong in CI | `issued_on` is a MySQL `DATE`, but Eloquent's date cast writes a full timestamp on sqlite, and `'2026-08-13 00:00:00'` compares as greater than `'2026-08-13'` as a string — so the last day of every period fell out of the count, on the harness only. A figure that is right in production and wrong in CI is worse than one that is wrong in both. |
+| The suite hit the runner's memory ceiling | It passed at 430 tests and exhausted the default 128M at 431. Nothing leaks — the runner holds every booted application for the run. Pinned to 512M in `phpunit.xml` so CI fails on a real regression rather than on suite size. |
+
+Backend tests (27 new): `OrderSignoffAndBoardTest` — the role, both halves,
+same-person refusal, read-without-writing, withdrawal history, money-change
+invalidation, grandfathering, the bypass, the audit-action scan, every board
+column, the reconciliation, the channel split and deploy-order inertness. Full
+suite **431 passed, 0 failed**, 206 skipped, up from 404.
+
+See `FRONTEND_NOTE_operations-board.md`.
+
+---
+
 ## eBay Integration (Sessions 15–25)
 
 | Phase | Feature | Status |
@@ -1949,10 +2072,10 @@ fix, different failure.
 | eBay production credentials rotation | **High** | `EBAY_CLIENT_SECRET` was exposed in a prior session — must rotate in eBay Developer Portal before listing live products |
 | ~~`storage/logs/laravel.log` doesn't receive writes on production~~ | ~~Medium~~ Resolved | Confirmed resolved in Session 63/70 — used this file repeatedly to diagnose real production issues (Gemini quota errors, Crisp API errors) and it received writes correctly both times |
 | GLS production API access | Low | Currently running on the sandbox host (`api-sandbox.gls-group.net`) for both auth and tracking — verified to return real live data for real parcels, so not urgent, but production access requires a separate GLS approval step if sandbox ever proves unreliable long-term |
-| `admin_users.role` ENUM missing documented roles | **High** | Column only allows `super_admin/admin/editor/order_manager`; `sales_manager`, `support`, `content_manager`, `viewer` are referenced throughout `AdminPermissions.php` and this doc but can't be stored under MySQL strict mode — creating an admin with any of those roles fails outright. Found via CI in Session 52; needs a migration widening the ENUM (or switching to a plain string column) plus a check for any admin accounts already silently affected. **Now shaping new work rather than just blocking old**: `partner_sales.verify` (Session 73) and `analytics.view` (Session 79) were both granted to a narrower role list than they should have, with a comment on each saying to add `sales_manager` in the same change that widens the ENUM. Every session that adds a permission pays this again |
+| ~~`admin_users.role` ENUM missing documented roles~~ | ~~**High**~~ Resolved | **Fixed in Session 83 (migration #33)** — the column is now `VARCHAR(30)`, validated against `AdminPermissions::ROLES`, and `finance` was added. The deferred `sales_manager` grants in `analytics.view` and the partner-sales permissions were closed in the same change, as their comments instructed. Original entry: | Column only allows `super_admin/admin/editor/order_manager`; `sales_manager`, `support`, `content_manager`, `viewer` are referenced throughout `AdminPermissions.php` and this doc but can't be stored under MySQL strict mode — creating an admin with any of those roles fails outright. Found via CI in Session 52; needs a migration widening the ENUM (or switching to a plain string column) plus a check for any admin accounts already silently affected. **Now shaping new work rather than just blocking old**: `partner_sales.verify` (Session 73) and `analytics.view` (Session 79) were both granted to a narrower role list than they should have, with a comment on each saying to add `sales_manager` in the same change that widens the ENUM. Every session that adds a permission pays this again |
 | 5 orders where line items exceed the stored total | **High** | Orders **10075, 10076, 10077, 10079, 10080** (all `source = website`). Items sum to roughly 2× the recorded total on ratios of 0.43–0.49 — inconsistent, so not one mechanism. Surfaced by `orders:repair-totals` in Session 75 and deliberately **not** repaired: no rule can say which of the two figures is right, and one of them is what the customer was charged. Needs a person to compare each against the issued invoice. Money-facing, and unlike the double count it is not self-evident which direction the error runs |
 | Payment milestone history missing for all pre-#31 orders | Medium | `order_logs.action` never accepted the milestone values, and the writes are wrapped in a `try/catch` that only logs a warning — so no order on production has a record of who confirmed its deposit or balance. Migration #31 fixes it going forward; the lost rows cannot be reconstructed. If any order's payment confirmation is ever disputed, `storage/logs/laravel.log` warnings are the only trace, and only for as long as that file is retained |
-| Audit-log writes fail silently across the codebase | **High** | Not the ENUM itself — the pattern. Every `OrderLog` write is inside a `try/catch` that logs a warning and continues, which is right (a failed log must not fail the user's action) but means a schema mismatch is invisible until someone reads the column definition. Three separate instances found this way now (`security_events.type` Session 73, `order_logs.action` Sessions 75 and 76). Wants a test asserting every action string written in `app/` is accepted by the column, or a CI check — otherwise there will be a fourth |
+| ~~Audit-log writes fail silently across the codebase~~ | ~~**High**~~ Mitigated | **Session 83** — `OrderLog::ACTIONS` is now the single source the ENUM is built from, and a test asserts every action literal written in `app/` appears in it. The pattern (try/catch around every log write) is unchanged and still correct; what changed is that a schema mismatch is now a red test rather than a silent hole. `security_events.type` is NOT yet covered by an equivalent check. Original entry: | Not the ENUM itself — the pattern. Every `OrderLog` write is inside a `try/catch` that logs a warning and continues, which is right (a failed log must not fail the user's action) but means a schema mismatch is invisible until someone reads the column definition. Three separate instances found this way now (`security_events.type` Session 73, `order_logs.action` Sessions 75 and 76). Wants a test asserting every action string written in `app/` is accepted by the column, or a CI check — otherwise there will be a fourth |
 | `login_histories` table doesn't exist | Medium | Found in production logs (Session 70 investigation) — viewing a customer's login history in the admin panel throws `PDOException: Table 'login_histories' doesn't exist`. Distinct from the working `admin_login_histories` table (admin-side logins) — this is the customer-portal-side equivalent, apparently never migrated. Not yet fixed — flagged, not investigated further this session |
 | Crisp webhook inactive (free plan) | Low | `POST /webhooks/crisp` is fully built and HMAC-verified but Crisp's free plan doesn't support custom webhooks at all (requires Premium) — mobile polls the conversations list in the meantime. Will "just work" the moment the plan changes, no code change needed |
 | Custom live-chat system unused | Low | Session 66's Pusher-based `live_chat_sessions` system has zero real traffic — Crisp (Session 67) is the actual live chat product. Left in place rather than removed; candidate for deletion once Crisp is confirmed as the permanent choice |
@@ -2217,6 +2340,20 @@ then fail on the audit-log insert. They now wrap both writes in one transaction
 so the order rolls back rather than being left corrected and unexplained — but
 the work simply cannot be done until the ENUM is widened. Apply #30 before
 touching order 10112 or the two lump-sum orders.
+
+33. `2026_08_13_000001_widen_admin_users_role_column` (Session 83 — `admin_users.role` ENUM → `VARCHAR(30)` + an explicit index. Closes the top Known Gap since Session 52. Data-safe: every existing value is a valid string, so no row changes and none can be lost. `down()` **throws** rather than running if any account holds a role the old four-value ENUM could not store, since reverting would blank it and lock that person out. MySQL-only; skipped on other drivers.)
+34. `2026_08_13_000002_create_order_signoffs_table` (Session 83 — one new table, nothing existing read or altered. `unique(order_id, slot, active)` with `active` as 1-or-NULL is what enforces "one standing signature per slot" in the database rather than in code. Exercised against real SQL by `OrderSignoffAndBoardTest`, which runs the migration file itself.)
+35. `2026_08_13_000003_create_finance_invoices_table` (Session 83 — one new table for sevDesk invoice entries. Nothing existing read or altered. Same real-SQL exercise as #34.)
+36. `2026_08_13_000004_add_signoff_actions_to_order_logs_enum` (Session 83 — adds `signoff_given`, `signoff_revoked`, `signoff_bypassed`, `document_gate_overridden`. **The first widening that does not restate the list by hand**: the ENUM is built from `OrderLog::ACTIONS`, so the schema and the code that writes to it cannot drift. `down()` throws if any row uses an added value. MySQL-only.)
+
+**#33–36 are pushed but NOT applied to production.** All four are additive or
+widening; none rewrites an existing row. The code is **deploy-order safe in both
+directions**, proved rather than assumed: `OrderSignoffService` checks for its
+table and reports `not_required` when it is absent, so the order list, the order
+detail and the item-edit path all work unchanged before the migration runs — an
+existing test (`OrderTotalFromItemsTest`) caught the one path where that was not
+true. The finance column on the board reads a structural zero and says so in
+`meta.finance_recording_available`. `route:cache` must be rebuilt: 9 new routes.
 
 ⚠️ Bulk email is deployed but **not yet safe to use for a real send**: `.env`
 still has `QUEUE_CONNECTION=sync`, so `SendBulkEmailCampaignJob` would run

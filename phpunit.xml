@@ -18,6 +18,11 @@
         </include>
     </source>
     <php>
+        <!-- The suite passed at 430 tests and exhausted the default 128M at
+             431. Nothing leaked: the runner holds every booted application
+             for the run, so this grows with the number of tests. Pinned here
+             so CI fails on a real regression rather than on suite size. -->
+        <ini name="memory_limit" value="512M"/>
         <env name="APP_ENV" value="testing"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>

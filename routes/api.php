@@ -40,7 +40,10 @@ use App\Http\Controllers\Admin\AdminPartnerSaleController;
 use App\Http\Controllers\Partner\PartnerAuthController;
 use App\Http\Controllers\Partner\PartnerSaleController;
 use App\Http\Controllers\Admin\AdminNewsletterController;
+use App\Http\Controllers\Admin\AdminFinanceInvoiceController;
+use App\Http\Controllers\Admin\AdminOperationsSummaryController;
 use App\Http\Controllers\Admin\AdminOrderController;
+use App\Http\Controllers\Admin\AdminOrderSignoffController;
 use App\Http\Controllers\Admin\AdminOrderItemController;
 use App\Http\Controllers\Admin\AdminOrderShipmentEventController;
 use App\Http\Controllers\Admin\OrderImportController;
@@ -531,11 +534,24 @@ Route::prefix('v1')->group(function () {
         // Orders — granular permission gates
         // -----------------------------------------------------------------
 
-        // Read — orders.view (super_admin, admin, order_manager, sales_manager)
+        // Read — orders.view (super_admin, admin, order_manager, sales_manager, finance)
         Route::middleware('permission:orders.view')->group(function () {
+            // Static/segment routes BEFORE 'orders/{id}', or 'summary' is read
+            // as an order id and 404s — the same trap the campaign import route
+            // fell into in Session 77.
+            Route::get('operations/summary', [AdminOperationsSummaryController::class, 'summary']);
             Route::get('orders', [AdminOrderController::class, 'index']);
-            Route::get('orders/{id}', [AdminOrderController::class, 'show']);
             Route::get('orders/export', [OrderImportController::class, 'export']);
+
+            // Order confirmation sign-off. Reading is orders.view; the
+            // entitlement to sign each slot is per-role and checked in the
+            // service, because ops and finance hold different permissions and
+            // one route middleware cannot express that.
+            Route::get('orders/{id}/signoffs', [AdminOrderSignoffController::class, 'index']);
+            Route::post('orders/{id}/signoffs', [AdminOrderSignoffController::class, 'store']);
+            Route::delete('orders/{id}/signoffs/{slot}', [AdminOrderSignoffController::class, 'destroy']);
+
+            Route::get('orders/{id}', [AdminOrderController::class, 'show']);
         });
 
         // Write — orders.update (super_admin, admin, order_manager)
@@ -748,6 +764,24 @@ Route::prefix('v1')->group(function () {
             Route::post('orders/{id}/generate-acceptance-link', [AdminTradeDocumentController::class, 'generateAcceptanceLink']);
             Route::post('orders/{id}/send-acceptance-request',  [AdminTradeDocumentController::class, 'sendAcceptanceRequest']);
             Route::post('orders/{id}/acceptance/send',           [AdminTradeDocumentController::class, 'sendAcceptanceRequest']);
+        });
+
+        // -----------------------------------------------------------------
+        // Finance system (sevDesk) invoice reconciliation
+        //
+        // Read is finance.view, which order managers hold — the point of the
+        // board is that operations and finance are looking at the same two
+        // numbers. Writing is finance.manage.
+        // -----------------------------------------------------------------
+        Route::middleware('permission:finance.view')->group(function () {
+            Route::get('operations/invoice-reconciliation', [AdminOperationsSummaryController::class, 'reconciliation']);
+            Route::get('finance-invoices', [AdminFinanceInvoiceController::class, 'index']);
+        });
+
+        Route::middleware('permission:finance.manage')->group(function () {
+            Route::post('finance-invoices', [AdminFinanceInvoiceController::class, 'store']);
+            Route::patch('finance-invoices/{id}', [AdminFinanceInvoiceController::class, 'update']);
+            Route::delete('finance-invoices/{id}', [AdminFinanceInvoiceController::class, 'destroy']);
         });
 
         // -----------------------------------------------------------------
