@@ -36,6 +36,7 @@ class OrderSignoffAndBoardTest extends TestCase
 
         foreach ([
             'order_signoffs', 'finance_invoices', 'order_logs', 'invoices',
+            'trade_documents', 'order_items', 'order_shipment_events', 'eu_declarations',
             'orders', 'personal_access_tokens', 'admin_users',
         ] as $table) {
             Schema::dropIfExists($table);
@@ -105,6 +106,54 @@ class OrderSignoffAndBoardTest extends TestCase
             $table->timestamp('issued_at')->nullable();
             $table->timestamp('due_at')->nullable();
             $table->timestamp('released_at')->nullable();
+            $table->timestamps();
+        });
+
+        // The order DETAIL endpoint eager-loads these; the sign-off block it
+        // now carries is reached through it.
+        Schema::create('order_items', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('order_id');
+            $table->unsignedBigInteger('product_id')->nullable();
+            $table->string('name')->nullable();
+            $table->string('brand')->nullable();
+            $table->string('size')->nullable();
+            $table->string('sku')->nullable();
+            $table->integer('quantity')->default(1);
+            $table->decimal('unit_price', 12, 2)->default(0);
+            $table->decimal('line_total', 12, 2)->default(0);
+            $table->timestamps();
+        });
+
+        Schema::create('order_shipment_events', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('order_id');
+            $table->date('event_date')->nullable();
+            $table->string('location')->nullable();
+            $table->string('status_label')->nullable();
+            $table->text('description')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::create('eu_declarations', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('order_id');
+            $table->unsignedBigInteger('invoice_id')->nullable();
+            $table->timestamps();
+        });
+
+        // The order list aggregates document state onto each row, so the
+        // in-transit queue can answer "has the paperwork gone out?" without a
+        // request per row.
+        Schema::create('trade_documents', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('order_id');
+            $table->string('order_ref', 30);
+            $table->string('type', 30);
+            $table->string('number', 50)->nullable();
+            $table->string('status', 30)->default('draft');
+            $table->timestamp('issued_at')->nullable();
+            $table->timestamp('sent_at')->nullable();
             $table->timestamps();
         });
 
@@ -541,6 +590,95 @@ class OrderSignoffAndBoardTest extends TestCase
             $this->runMigration('2026_08_13_000002_create_order_signoffs_table');
             OrderSignoffService::forgetTableCheck();
         }
+    }
+
+    public function test_the_order_page_answers_which_button_to_offer(): void
+    {
+        // Frontend reported making a second request to /signoffs for this one
+        // question, which is the thing embedding the block was meant to save.
+        // It cannot be derived client-side: the same-person rule needs the
+        // signatory's user id, and the payload carries a display name.
+        $order = $this->order();
+        $ops   = $this->admin('order_manager');
+
+        $this->service()->sign($order, $ops, 'ops');
+
+        $signoff = $this->withHeaders($this->headers($ops))
+            ->getJson("/api/v1/admin/orders/{$order->id}")
+            ->assertOk()
+            ->json('data.signoff');
+
+        // Already signed as ops, and not entitled to finance.
+        $this->assertSame([], $signoff['you_may_sign']);
+        // But may take their own signature back — no same-person rule applies
+        // to withdrawal, which is exactly what you need when you spot an error.
+        $this->assertSame(['ops'], $signoff['you_may_revoke']);
+
+        $finance = $this->admin('finance');
+
+        $asFinance = $this->withHeaders($this->headers($finance))
+            ->getJson("/api/v1/admin/orders/{$order->id}")
+            ->assertOk()
+            ->json('data.signoff');
+
+        $this->assertSame(['finance'], $asFinance['you_may_sign']);
+        // Cannot withdraw a signature in a slot they do not hold — frontend
+        // found Withdraw offered on every signed slot regardless of role, the
+        // exact permissions puzzle this exists to prevent.
+        $this->assertSame([], $asFinance['you_may_revoke']);
+    }
+
+    public function test_the_detail_block_and_the_signoffs_endpoint_agree(): void
+    {
+        // One being a superset of the other is how the two drift.
+        $order = $this->order();
+        $ops   = $this->admin('order_manager');
+
+        $embedded = $this->withHeaders($this->headers($ops))
+            ->getJson("/api/v1/admin/orders/{$order->id}")->json('data.signoff');
+
+        $dedicated = $this->withHeaders($this->headers($ops))
+            ->getJson("/api/v1/admin/orders/{$order->id}/signoffs")->json('data');
+
+        $this->assertSame($embedded, $dedicated);
+    }
+
+    public function test_the_order_list_says_whether_the_paperwork_has_gone_out(): void
+    {
+        // Without this the in-transit queue's "documents sent?" column is one
+        // request per row, or a column asserting something it has not been told.
+        $order = $this->order(['status' => 'shipped', 'payment_status' => 'paid']);
+
+        \DB::table('trade_documents')->insert([
+            ['order_id' => $order->id, 'order_ref' => $order->ref, 'type' => 'commercial_invoice',
+             'status' => 'sent', 'sent_at' => '2026-08-10 09:00:00', 'created_at' => now(), 'updated_at' => now()],
+            ['order_id' => $order->id, 'order_ref' => $order->ref, 'type' => 'packing_list',
+             'status' => 'issued', 'sent_at' => null, 'created_at' => now(), 'updated_at' => now()],
+        ]);
+
+        $row = $this->withHeaders($this->headers($this->admin('order_manager')))
+            ->getJson('/api/v1/admin/orders?in_transit=1')
+            ->assertOk()
+            ->json('data.0');
+
+        $this->assertSame(2, $row['documents_count']);
+        $this->assertSame(1, $row['documents_sent_count']);
+        $this->assertStringStartsWith('2026-08-10', $row['last_document_sent_at']);
+    }
+
+    public function test_support_can_read_orders_because_the_panel_already_offers_it(): void
+    {
+        // Frontend found the admin panel showing Orders to support while the
+        // API refused it, so the page 403'd. Granting is the right half to
+        // move — read only.
+        $this->order();
+
+        $this->withHeaders($this->headers($this->admin('support')))
+            ->getJson('/api/v1/admin/orders')
+            ->assertOk();
+
+        $this->assertFalse(AdminPermissions::can('support', 'orders.update'));
+        $this->assertFalse(AdminPermissions::can('support', 'orders.signoff_ops'));
     }
 
     // ── the board ─────────────────────────────────────────────────────────

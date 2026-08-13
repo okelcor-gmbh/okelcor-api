@@ -118,7 +118,7 @@ class OrderSignoffService
      *
      * @return array<string, mixed>
      */
-    public function state(Order $order): array
+    public function state(Order $order, ?AdminUser $viewer = null): array
     {
         $live    = $this->live($order);
         $applies = $this->applies($order);
@@ -161,6 +161,22 @@ class OrderSignoffService
             },
             'signed_count' => count($live),
             'slots'        => $slots,
+
+            // Which slots THIS viewer may act on. Answered here rather than
+            // left to the client because neither question can be derived from
+            // the payload: signing carries the two-different-people rule, which
+            // needs the signatory's user id and not their display name, and
+            // withdrawing is satisfied by the bypass permission as well as by
+            // the slot's own. Frontend reported having to make a second request
+            // for the first, and having reimplemented the second by hand.
+            'you_may_sign'   => $viewer === null ? [] : array_values(array_filter(
+                OrderSignoff::SLOTS,
+                fn ($slot) => $this->canSign($order, $viewer, $slot)['ok']
+            )),
+            'you_may_revoke' => $viewer === null ? [] : array_values(array_filter(
+                OrderSignoff::SLOTS,
+                fn ($slot) => $this->canRevoke($viewer, $slot) && isset($live[$slot])
+            )),
             'history'      => ! $this->recordingAvailable() ? [] : $order->signoffs()
                 ->with(['adminUser:id,name', 'revokedBy:id,name'])
                 ->get()
@@ -285,13 +301,7 @@ class OrderSignoffService
             return ['ok' => false, 'code' => 'unknown_slot', 'message' => 'That is not a sign-off slot.'];
         }
 
-        // Whoever may give a signature may take one back, and a super_admin may
-        // always. Anyone else withdrawing someone's approval would be able to
-        // unpick a control they are not part of.
-        $entitled = AdminPermissions::can($admin->role, OrderSignoff::SLOT_PERMISSIONS[$slot])
-            || AdminPermissions::can($admin->role, 'orders.signoff_bypass');
-
-        if (! $entitled) {
+        if (! $this->canRevoke($admin, $slot)) {
             return [
                 'ok'      => false,
                 'code'    => 'not_entitled',
@@ -395,6 +405,25 @@ class OrderSignoffService
     }
 
     // -------------------------------------------------------------------------
+
+    /**
+     * Whoever may give a signature may take one back, and a bypass holder may
+     * always. Anyone else withdrawing someone's approval would be able to
+     * unpick a control they are not part of.
+     *
+     * Unlike signing there is no same-person rule — withdrawing your own
+     * signature is exactly what you should be able to do when you notice a
+     * mistake.
+     */
+    public function canRevoke(AdminUser $admin, string $slot): bool
+    {
+        if (! in_array($slot, OrderSignoff::SLOTS, true)) {
+            return false;
+        }
+
+        return AdminPermissions::can($admin->role, OrderSignoff::SLOT_PERMISSIONS[$slot])
+            || AdminPermissions::can($admin->role, 'orders.signoff_bypass');
+    }
 
     /**
      * Standing signatures, keyed by slot.

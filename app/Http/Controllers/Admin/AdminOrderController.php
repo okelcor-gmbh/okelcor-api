@@ -8,6 +8,7 @@ use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\OrderLog;
+use App\Models\TradeDocument;
 use App\Services\AdminAuditLogger;
 use App\Services\CurrencyConversionService;
 use App\Services\CustomerHealthService;
@@ -27,7 +28,21 @@ class AdminOrderController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $query = Order::orderByDesc('created_at');
+        // Document state as aggregates on the row, not a relation. The
+        // in-transit queue's "documents sent?" column is the whole reason that
+        // queue is worth having, and without these it would be one request per
+        // row — or a column asserting something it has not been told.
+        $query = Order::query()
+            ->withCount([
+                'tradeDocuments as documents_count',
+                'tradeDocuments as documents_sent_count' => fn ($q) => $q->whereNotNull('sent_at'),
+            ])
+            ->addSelect(['orders.*'])
+            ->selectSub(
+                TradeDocument::selectRaw('MAX(sent_at)')->whereColumn('order_id', 'orders.id'),
+                'last_document_sent_at'
+            )
+            ->orderByDesc('created_at');
 
         // eBay orders are a separate book: different fulfilment, different
         // paperwork, and the finance board reports them on their own line. The
@@ -94,12 +109,12 @@ class AdminOrderController extends Controller
         ]);
     }
 
-    public function show(int $id): JsonResponse
+    public function show(Request $request, int $id): JsonResponse
     {
         $order = Order::with(['items', 'logs', 'shipmentEvents', 'euDeclaration', 'tradeDocuments'])->findOrFail($id);
 
         return response()->json([
-            'data'    => $this->formatOrderDetail($order),
+            'data'    => $this->formatOrderDetail($order, $request->user()),
             'message' => 'success',
         ]);
     }
@@ -239,7 +254,7 @@ class AdminOrderController extends Controller
         $order->load(['items', 'logs', 'euDeclaration', 'tradeDocuments']);
 
         return response()->json([
-            'data'    => $this->formatOrderDetail($order),
+            'data'    => $this->formatOrderDetail($order, $request->user()),
             'message' => 'Order recorded successfully.',
         ], 201);
     }
@@ -279,7 +294,7 @@ class AdminOrderController extends Controller
         $this->notifyShipmentStatus($order, $previousStatus);
 
         return response()->json([
-            'data'    => $this->formatOrderDetail($order),
+            'data'    => $this->formatOrderDetail($order, $request->user()),
             'message' => 'success',
         ]);
     }
@@ -792,6 +807,14 @@ class AdminOrderController extends Controller
             // same thing is a column that can disagree with it.
             'channel'        => $o->channel(),
             'in_transit'     => $o->isInTransit(),
+            // Enough to answer "has the paperwork gone out?" without opening
+            // the order. Null rather than 0 when the aggregate was not
+            // selected, so a caller can tell "none sent" from "not asked".
+            'documents_count'       => $o->documents_count === null ? null : (int) $o->documents_count,
+            'documents_sent_count'  => $o->documents_sent_count === null ? null : (int) $o->documents_sent_count,
+            'last_document_sent_at' => $o->last_document_sent_at
+                ? \Carbon\Carbon::parse($o->last_document_sent_at)->toIso8601String()
+                : null,
             'customer_name'  => $o->customer_name,
             'customer_email' => $o->customer_email,
             'total'          => (float) $o->total,
@@ -803,7 +826,7 @@ class AdminOrderController extends Controller
         ];
     }
 
-    private function formatOrderDetail(Order $o): array
+    private function formatOrderDetail(Order $o, ?\App\Models\AdminUser $viewer = null): array
     {
         return [
             'id'                 => $o->id,
@@ -817,7 +840,11 @@ class AdminOrderController extends Controller
             // The two signatures on the order confirmation. Always present, so
             // the panel never has to make a second request to find out whether
             // there is anything to show.
-            'signoff'            => app(\App\Services\OrderSignoffService::class)->state($o),
+            // The viewer travels with it so `you_may_sign` / `you_may_revoke`
+            // are answered here — frontend was otherwise making a second
+            // request to /signoffs for the one question of which button to
+            // offer, which is the thing embedding this block was meant to save.
+            'signoff'            => app(\App\Services\OrderSignoffService::class)->state($o, $viewer),
             'company_name'       => null,
             'address'            => trim(implode(', ', array_filter([$o->address, $o->city, $o->postal_code]))),
             'country'            => $o->country,

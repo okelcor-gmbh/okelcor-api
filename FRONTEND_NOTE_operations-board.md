@@ -21,7 +21,7 @@ stop being mixed in with the rest.
 
 ## 1. The board — `GET /api/v1/admin/operations/summary`
 
-`orders.view`. Optional `?from=YYYY-MM-DD&to=YYYY-MM-DD`, defaulting to the
+`orders.view` — which is `super_admin`, `admin`, `order_manager`, `sales_manager`, **`finance`** and `support`. Optional `?from=YYYY-MM-DD&to=YYYY-MM-DD`, defaulting to the
 current month (which is the period finance actually reconciles in).
 
 ```jsonc
@@ -329,3 +329,85 @@ feature is inert until its migrations run: `signoff` reports `not_required`,
 the finance column is a structural zero flagged in `meta`, and the order list
 and item-edit paths do not touch the new tables. That is tested, not assumed —
 an existing test caught the one path where it was not true.
+
+---
+
+## Addendum — Session 84, answering the frontend report
+
+All three findings were right, and all three are fixed. Nothing you have built
+needs changing; two things you worked around can now be deleted.
+
+### `you_may_sign` is on the order detail — and `you_may_revoke` with it
+
+You were right that it could not be derived: the same-person rule compares
+`admin_user_id` and the payload carries a display name. `state()` now takes the
+viewer, so `GET /admin/orders/{id}` → `data.signoff` carries both arrays and the
+second request to `/signoffs` can go.
+
+```jsonc
+"signoff": {
+  "…": "…",
+  "you_may_sign":   ["finance"],   // slots this viewer can sign right now
+  "you_may_revoke": ["ops"]        // standing signatures this viewer can withdraw
+}
+```
+
+`GET /admin/orders/{id}/signoffs` now returns the **identical** shape — a test
+asserts the two are the same object, because one being a superset of the other
+is how they drift.
+
+**`you_may_revoke` replaces the rule you reimplemented.** Your reading was
+right — withdrawal is a pure role check with no same-person rule, satisfied by
+the slot's own permission *or* by `orders.signoff_bypass`. The bypass half is
+the part that is hard to see from the payload, which is why it now comes from
+the server. The array is already filtered to slots that actually have a standing
+signature, so `you_may_revoke.includes(slot)` is the whole condition.
+
+Good catch on Withdraw being offered regardless of role. That was a real hole in
+the instruction, not just in the implementation.
+
+### The order list now carries document state
+
+Three fields on every row of `GET /admin/orders`, as SQL aggregates — no
+relation, no request per row:
+
+```jsonc
+{ "documents_count": 2, "documents_sent_count": 1, "last_document_sent_at": "2026-08-10T09:00:00+00:00" }
+```
+
+`null` rather than `0` when the aggregate was not selected, so a caller can tell
+"none sent" from "not asked". The in-transit queue's "documents sent?" column is
+real now — and it was the right call to say plainly that the list did not carry
+it rather than assert something you had not been told.
+
+### `orders.view` includes `support`, and the note's omission is fixed
+
+`finance` was in the permission map from the start; the note's table omitted it,
+which is a documentation bug and the one that mattered most — a finance admin
+who cannot open the order page cannot give the signature the feature exists to
+collect. The note is corrected.
+
+**On `support`: I have granted it, so keep your UI as it is.** The panel has
+been offering the Orders page to support all along and the API has been refusing
+it, so the page 403'd — the divergence was already broken, and granting is the
+right half to move. A support role that cannot see an order cannot answer the
+commonest support question there is. Read only: `orders.update` and both
+sign-off permissions stay off it.
+
+### On settling divergences generally — including `analytics.view`
+
+Don't map roles to pages in the frontend at all. The auth payload already
+returns `permissions` for the signed-in user (`AuthController:154`, and the same
+on both 2FA paths) — an array of permission keys from the same
+`AdminPermissions::MAP` the API enforces. Key page visibility off that and this
+class of divergence stops existing: a grant made server-side reaches the UI on
+the next login, and a page can never be offered for a call that will 403.
+
+That is the durable answer to the `analytics.view` question rather than my
+listing its roles here for you to hardcode again. If a page still needs a role
+list after that, tell me which permission it should be gated on and I will add
+it to the map.
+
+### Please do commit and push
+
+Yes — push it. The backend for all of the above is on `main`.

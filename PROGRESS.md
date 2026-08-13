@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-13 | Branch: `main` | Latest commit: Session 83 (**pushed, not deployed**)
+Last updated: 2026-08-13 | Branch: `main` | Latest commit: Session 84 (**pushed, not deployed**)
 
 ---
 
@@ -40,6 +40,7 @@ wrong.
 | **81** | Text printed ON a picture (`hero` block) + the importer recovering the masthead | none | none |
 | **82** | `group_list` served in one shape; a `url()` injection in `hero`; empty group rows | none | none |
 | **83** | Operations board, dual sign-off, finance-system invoices, eBay split | **#33–36** | **9 new** |
+| **84** | Frontend's three findings: `you_may_sign`/`you_may_revoke` embedded, document state on the order row, `support` given `orders.view` | none | none |
 
 ```bash
 cd /home/okelvaxj/domains/okelcor.com/public_html/okelcor-api
@@ -1989,6 +1990,27 @@ same-person refusal, read-without-writing, withdrawal history, money-change
 invalidation, grandfathering, the bypass, the audit-action scan, every board
 column, the reconciliation, the channel split and deploy-order inertness. Full
 suite **431 passed, 0 failed**, 206 skipped, up from 404.
+
+
+### Session 84 — answering the frontend report
+
+Frontend built all six screens and reported three gaps. All three were real.
+
+| Change | Status | Notes |
+|--------|--------|-------|
+| `you_may_sign` + **`you_may_revoke`** moved into `state()` | 🔧 | The note claimed the embedded block meant no second request, and it did not — `you_may_sign` was added only in the controller. Frontend was right that it cannot be derived client-side: the same-person rule compares `admin_user_id` and the payload carries a display name. `state()` now takes the viewer, and a test asserts the embedded block and the `/signoffs` endpoint return the **identical** object, because one being a superset of the other is how they drift. |
+| **`you_may_revoke` was a hole in the instruction, not just the code** | 🔧 | Frontend found Withdraw offered on every signed slot regardless of role — the exact permissions puzzle `you_may_sign` exists to prevent, in the one control that instruction did not cover. They gated it correctly from the payload; the reason it now comes from the server anyway is `orders.signoff_bypass`, which also entitles a withdrawal and is not visible from the slot's own permission. `canRevoke()` extracted so the guard and the payload use one rule. |
+| Document state on the order list row | 🔧 | `documents_count`, `documents_sent_count`, `last_document_sent_at` as SQL aggregates — the in-transit queue's "documents sent?" column was otherwise one request per row. `null` rather than `0` when not selected, so a caller can tell "none sent" from "not asked". Frontend shipped a row saying plainly that the list did not carry document state rather than asserting something it had not been told, which was the right call. |
+| **`orders.view` granted to `support`** | 🔧 | Frontend found the panel offering Orders to support while the API refused it — the page 403'd, so the divergence was already broken. Granting is the right half to move: a support role that cannot see an order cannot answer the commonest support question there is. Read only; `orders.update` and both sign-off permissions stay off it. The note's omission of `finance` from `orders.view` was a documentation bug and the one that mattered most — a finance admin who cannot open the order page cannot give the signature the feature exists to collect. |
+| Backend tests (4 new) | ✅ | `you_may_sign`/`you_may_revoke` per role, the two payloads agreeing, document aggregates on an in-transit row, and support's read-only access. Full suite **435 passed, 0 failed**, 206 skipped. |
+
+**On divergences generally.** The auth payload has always returned `permissions`
+for the signed-in user (`AuthController:154`, plus both 2FA paths), from the same
+`AdminPermissions::MAP` the API enforces. Frontend keying page visibility off
+that rather than off role lists is the structural fix — a grant made server-side
+then reaches the UI on the next login, and a page can never be offered for a
+call that will 403. Told them so rather than listing `analytics.view`'s roles for
+them to hardcode a second time.
 
 See `FRONTEND_NOTE_operations-board.md`.
 

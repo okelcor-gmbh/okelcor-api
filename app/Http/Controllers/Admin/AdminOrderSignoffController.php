@@ -32,16 +32,13 @@ class AdminOrderSignoffController extends Controller
         $order = Order::findOrFail($id);
         $admin = $request->user();
 
-        $state = $this->signoffs->state($order);
-
-        // Which slots THIS admin could sign right now, so the panel can show one
-        // button rather than two disabled ones and a permissions puzzle.
-        $state['you_may_sign'] = array_values(array_filter(
-            OrderSignoff::SLOTS,
-            fn ($slot) => $this->signoffs->canSign($order, $admin, $slot)["ok"]
-        ));
-
-        return response()->json(['data' => $state, 'message' => 'success']);
+        // `you_may_sign` / `you_may_revoke` come from state() itself now, so
+        // this endpoint and the block embedded in the order detail return the
+        // identical shape rather than one being a superset of the other.
+        return response()->json([
+            'data'    => $this->signoffs->state($order, $admin),
+            'message' => 'success',
+        ]);
     }
 
     // -------------------------------------------------------------------------

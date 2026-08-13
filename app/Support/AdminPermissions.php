@@ -34,7 +34,13 @@ class AdminPermissions
         'security.manage'         => ['super_admin'],
 
         // ── Orders ────────────────────────────────────────────────────────
-        'orders.view'             => ['super_admin', 'admin', 'order_manager', 'sales_manager', 'finance'],
+        // `support` added in Session 84, settling a divergence frontend found:
+        // the admin panel has been offering the Orders page to support all
+        // along and the API has been refusing it, so the page 403'd. Granting
+        // is the right half to move — a support role that cannot see an order
+        // cannot answer the commonest support question there is. Read only;
+        // `orders.update` is unchanged.
+        'orders.view'             => ['super_admin', 'admin', 'order_manager', 'sales_manager', 'finance', 'support'],
         'orders.update'           => ['super_admin', 'admin', 'order_manager'],
         'orders.delete'           => ['super_admin'],
         'orders.import'           => ['super_admin', 'admin', 'order_manager'],
