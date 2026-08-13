@@ -90,6 +90,23 @@ class InDesignEmailImporter
     /** How far apart two images' tops may be and still read as one row. */
     private const ROW_Y_TOLERANCE = 24.0;
 
+    /**
+     * A banner: a picture the words are printed ON, rather than one they sit
+     * under. Both bounds are needed. The page share alone would catch a wide
+     * mid-page photograph with a caption crossing its corner; the ratio alone
+     * would catch a small inset picture with a label on it. A masthead is both
+     * — most of the page across, and markedly wider than it is tall.
+     */
+    private const HERO_MIN_PAGE_SHARE = 0.6;
+    private const HERO_MIN_RATIO      = 1.8;
+
+    /**
+     * A headline and a standfirst, at most. Beyond that the picture is not a
+     * banner but a page background, and lifting a whole article onto it would
+     * bury the copy in artwork.
+     */
+    private const HERO_MAX_TEXTS = 4;
+
     /** Only these ever leave the archive. Fonts and scripts are useless in email. */
     private const ALLOWED_EXTENSIONS = ['html', 'htm', 'xhtml', 'css', 'png', 'jpg', 'jpeg', 'gif', 'webp'];
 
@@ -290,7 +307,10 @@ class InDesignEmailImporter
         $rules  = [];
         $media  = $this->importImages($items, $uploadedBy, $collection, $warnings, $rules);
         $theme  = $this->deriveTheme($items, $css, $warnings, $this->bands($items, $rules)['colour']);
-        $blocks = $this->buildBlocks($items, $media, $rules, $warnings);
+        // A banner's height has to be expressed against the card it will be
+        // rendered into, and which card that is was decided by the theme a line
+        // above — a FET deck lands on a 680px card, the house preset on 620.
+        $blocks = $this->buildBlocks($items, $media, $rules, $warnings, $this->cardWidthFor($theme));
 
         return [
             'blocks'   => $blocks,
@@ -512,7 +532,11 @@ class InDesignEmailImporter
                 $paragraph = $this->readParagraph($child, $charStyles, $s);
 
                 if ($paragraph !== null) {
-                    $items[] = $paragraph + ['x' => $x, 'y' => $y + $paragraph['offset']];
+                    // The frame's box travels with the paragraph, not just its
+                    // corner. Where a headline sits ACROSS a banner — left,
+                    // centred, right — is a fact about the middle of its frame,
+                    // and the corner alone cannot tell centred from left.
+                    $items[] = $paragraph + ['x' => $x, 'y' => $y + $paragraph['offset'], 'box' => $b];
                 }
 
                 continue;
@@ -1102,7 +1126,7 @@ class InDesignEmailImporter
      * @param  array<int, string>  $warnings
      * @return array<int, array<string, mixed>>
      */
-    private function buildBlocks(array $items, array $media, array $rules, array &$warnings): array
+    private function buildBlocks(array $items, array $media, array $rules, array &$warnings, int $cardWidth = 620): array
     {
         $body      = $this->bodySize($items);
         $headings  = $this->headingSizes($items, $body);
@@ -1156,9 +1180,14 @@ class InDesignEmailImporter
             $paragraph = [];
         };
 
-        $bands = $this->bands($items, $rules);
-        $rows  = $this->imageRows($items, $media);
-        $taken = [];
+        $bands  = $this->bands($items, $rules);
+        $heroes = $this->heroes($items, $media, $cardWidth);
+        $rows   = $this->imageRows($items, $media, $heroes['byImage']);
+
+        // The banner's own words start out claimed, so they cannot ALSO be
+        // emitted as a loose heading under the picture — which is exactly what
+        // was reported.
+        $taken = $heroes['consumed'];
 
         foreach ($items as $index => $item) {
             if (isset($taken[$index])) {
@@ -1190,6 +1219,14 @@ class InDesignEmailImporter
                 }
 
                 $flush();
+
+                // A banner carries its own headline, so it is emitted here
+                // rather than as a picture followed by a stray heading.
+                if (isset($heroes['byImage'][$index])) {
+                    $blocks[] = $heroes['byImage'][$index];
+
+                    continue;
+                }
 
                 // Images sitting beside each other on the page, not under each
                 // other. Rendering them as separate blocks stacks them, which
@@ -1270,7 +1307,207 @@ class InDesignEmailImporter
             $warnings[] = 'The design has no call-to-action button — InDesign exports carry no links. Add one in the editor before sending.';
         }
 
+        if ($heroes['byImage'] !== []) {
+            $warnings[] = 'The banner headline was placed ON the picture rather than under it, in the position it occupied in the design. '
+                . 'If it falls over the wrong part of the artwork, move it with the position control on that block — '
+                . 'and remember mail read with images turned off shows the text on a plain colour, so keep it short.';
+        }
+
         return $blocks;
+    }
+
+    /**
+     * The card width the chosen theme will render into, which is what a
+     * banner's height has to be expressed against.
+     *
+     * @param  array<string, mixed>  $theme
+     */
+    private function cardWidthFor(array $theme): int
+    {
+        $preset = (string) ($theme['preset'] ?? CampaignBlockRenderer::DEFAULT_THEME);
+
+        return (int) (CampaignBlockRenderer::THEMES[$preset]['card_width']
+            ?? CampaignBlockRenderer::THEMES[CampaignBlockRenderer::DEFAULT_THEME]['card_width']);
+    }
+
+    /**
+     * Matches each banner to the words printed on it.
+     *
+     * The reported defect, and the shape of it: the masthead's headline and
+     * standfirst arrived UNDER the picture. They were never under it. In the
+     * export the picture is one frame and each line of type is another, and the
+     * type frames sit inside the picture's box — the relationship is spatial and
+     * nothing read it, so the only ordering left was top-to-bottom by `y`, which
+     * puts a picture starting at y=-3 above a headline starting at y=75.
+     *
+     * The other half of the fix is that there was nowhere to put them: until the
+     * `hero` block existed, no block held text and an image in the same space,
+     * so even a correct reading had to emit them one after the other.
+     *
+     * @param  array<int, array<string, mixed>>  $items
+     * @param  array<string, array<string, mixed>>  $media
+     * @return array{byImage: array<int, array<string, mixed>>, consumed: array<int, true>}
+     */
+    private function heroes(array $items, array $media, int $cardWidth): array
+    {
+        $byImage  = [];
+        $consumed = [];
+
+        foreach ($items as $index => $item) {
+            if ($item['kind'] !== 'image' || ! isset($media[$item['src']])) {
+                continue;
+            }
+
+            $width  = (float) ($item['width'] ?? 0);
+            $height = (float) ($item['height'] ?? 0);
+
+            if ($height <= 0
+                || $width < $this->pageWidth * self::HERO_MIN_PAGE_SHARE
+                || $width / $height < self::HERO_MIN_RATIO) {
+                continue;
+            }
+
+            $left  = (float) $item['x'];
+            $right = $left + $width;
+            $top   = (float) $item['y'];
+
+            // Text has to START above the bottom of the picture by a real
+            // margin, or a caption set immediately beneath the banner — which
+            // is where a caption goes — would be read as sitting on it.
+            $floor = $top + $height - max(6.0, $height * 0.06);
+
+            $on = [];
+
+            foreach ($items as $other => $candidate) {
+                if ($candidate['kind'] !== 'text' || isset($consumed[$other])) {
+                    continue;
+                }
+
+                if ($candidate['y'] < $top - 2 || $candidate['y'] > $floor) {
+                    continue;
+                }
+
+                $frame = (float) ($candidate['box']['width'] ?? 0);
+
+                if ($candidate['x'] < $left - 4 || $candidate['x'] + $frame > $right + 4) {
+                    continue;
+                }
+
+                $on[$other] = $candidate;
+            }
+
+            if ($on === [] || count($on) > self::HERO_MAX_TEXTS) {
+                continue;
+            }
+
+            uasort($on, fn ($a, $b) => [$a['y'], $a['x']] <=> [$b['y'], $b['x']]);
+
+            // The headline is the biggest type on the banner, not the topmost —
+            // a kicker or an eyebrow line often sits above it. `>` rather than
+            // `>=` keeps the first of equals, which is reading order.
+            $headingKey = null;
+
+            foreach ($on as $key => $candidate) {
+                if ($headingKey === null || $candidate['size'] > $on[$headingKey]['size']) {
+                    $headingKey = $key;
+                }
+            }
+
+            $rest = [];
+
+            foreach ($on as $key => $candidate) {
+                if ($key !== $headingKey) {
+                    $rest[] = $candidate['text'];
+                }
+            }
+
+            $block = [
+                'type'       => 'hero',
+                'image'      => $media[$item['src']]['url'],
+                'alt'        => $this->tidy((string) ($item['alt'] ?? '')),
+                'heading'    => $on[$headingKey]['text'],
+                'subheading' => mb_substr(implode("\n", $rest), 0, 600),
+                'position'   => $this->heroPosition($on, $left, $top, $width, $height),
+                'text_color' => $this->heroTextColour($on),
+                'overlay'    => 'soft',
+                // Expressed against the card it will render into, so the email
+                // keeps the proportions of the printed banner instead of a
+                // height someone guessed.
+                'height'     => max(120, min(480, (int) round($height / $this->pageWidth * $cardWidth))),
+            ];
+
+            $byImage[$index] = $block;
+
+            foreach (array_keys($on) as $key) {
+                $consumed[$key] = true;
+            }
+        }
+
+        return ['byImage' => $byImage, 'consumed' => $consumed];
+    }
+
+    /**
+     * Which ninth of the banner the type occupies, from where it actually sits.
+     *
+     * Taken from the whole group's bounding box rather than the headline alone:
+     * a headline and its standfirst are one visual mass, and positioning on the
+     * first line of it puts the pair higher than the designer set them.
+     *
+     * @param  array<int, array<string, mixed>>  $on
+     */
+    private function heroPosition(array $on, float $left, float $top, float $width, float $height): string
+    {
+        $x0 = INF;
+        $x1 = -INF;
+        $y0 = INF;
+        $y1 = -INF;
+
+        foreach ($on as $candidate) {
+            $x0 = min($x0, (float) $candidate['x']);
+            $x1 = max($x1, (float) $candidate['x'] + (float) ($candidate['box']['width'] ?? 0));
+            $y0 = min($y0, (float) $candidate['y']);
+            $y1 = max($y1, (float) $candidate['y'] + (float) ($candidate['box']['height'] ?? 0));
+        }
+
+        $across = $width > 0 ? ((($x0 + $x1) / 2) - $left) / $width : 0.5;
+        $down   = $height > 0 ? ((($y0 + $y1) / 2) - $top) / $height : 0.5;
+
+        $horizontal = $across < 0.38 ? 'left' : ($across > 0.62 ? 'right' : 'center');
+        $vertical   = $down < 0.36 ? 'top' : ($down > 0.72 ? 'bottom' : 'middle');
+
+        return $vertical . '_' . $horizontal;
+    }
+
+    /**
+     * Whether the banner's type is light or dark, by the colour carrying most
+     * of its characters.
+     *
+     * Worth reading rather than assuming: type set light on artwork is the case
+     * deriveTheme already refuses to trust for the page palette, and this is the
+     * one place in the email where that type still has a dark ground to sit on,
+     * so here it should be believed.
+     *
+     * @param  array<int, array<string, mixed>>  $on
+     */
+    private function heroTextColour(array $on): string
+    {
+        $byColour = [];
+
+        foreach ($on as $candidate) {
+            if ($candidate['color'] === null) {
+                continue;
+            }
+
+            $byColour[$candidate['color']] = ($byColour[$candidate['color']] ?? 0) + mb_strlen($candidate['text']);
+        }
+
+        if ($byColour === []) {
+            return 'light';
+        }
+
+        arsort($byColour);
+
+        return $this->luminance((string) array_key_first($byColour)) > 0.5 ? 'light' : 'dark';
     }
 
     /**
@@ -1341,9 +1578,10 @@ class InDesignEmailImporter
      *
      * @param  array<int, array<string, mixed>>  $items
      * @param  array<string, array<string, mixed>>  $media
+     * @param  array<int, mixed>  $skip  item indexes already claimed as banners
      * @return array<int, array<int, int>>  keyed by the row's first item index
      */
-    private function imageRows(array $items, array $media): array
+    private function imageRows(array $items, array $media, array $skip = []): array
     {
         $rows    = [];
         $current = [];
@@ -1372,10 +1610,12 @@ class InDesignEmailImporter
         };
 
         foreach ($items as $index => $item) {
-            if ($item['kind'] !== 'image' || ! isset($media[$item['src']])) {
+            if ($item['kind'] !== 'image' || ! isset($media[$item['src']]) || isset($skip[$index])) {
                 // Anything else between two images — a heading, a paragraph —
                 // means they are not in the same row, whatever their y says.
-                if ($item['kind'] === 'text') {
+                // A banner ends a row for the same reason: it is a full-width
+                // element, so nothing can be beside it.
+                if ($item['kind'] === 'text' || isset($skip[$index])) {
                     $close();
                 }
 

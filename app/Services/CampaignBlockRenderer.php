@@ -144,6 +144,48 @@ class CampaignBlockRenderer
                 'link' => ['type' => 'url', 'label' => 'Link when clicked (optional)'],
             ],
         ],
+        /**
+         * A picture with words ON it, and a say in where on it they sit.
+         *
+         * Every other block stacks: a picture, then whatever comes next under
+         * it. That is why a banner designed with its headline across the
+         * artwork arrived as the artwork followed by a loose heading — there
+         * was no block in which text and image occupy the same space, so the
+         * importer had nowhere to put it but underneath.
+         */
+        'hero' => [
+            'label'       => 'Banner (text on a picture)',
+            'description' => 'A picture with a headline sitting on top of it. Choose which of the nine positions the text sits in.',
+            'fields'      => [
+                'image'      => ['type' => 'image_url', 'label' => 'Background picture', 'required' => true],
+                'alt'        => ['type' => 'text', 'label' => 'Picture description', 'max' => 200],
+                'heading'    => ['type' => 'text', 'label' => 'Headline', 'max' => 300],
+                'subheading' => ['type' => 'textarea', 'label' => 'Sub-headline', 'max' => 600],
+                // One select rather than two, so the editor can draw it as a
+                // 3x3 grid the marketer clicks — the `control` hint below says
+                // so. It stays an ordinary select for any client that ignores
+                // the hint, which is what keeps this deployable without a
+                // frontend release.
+                'position'   => [
+                    'type'    => 'select',
+                    'label'   => 'Where the text sits',
+                    'options' => [
+                        'top_left', 'top_center', 'top_right',
+                        'middle_left', 'middle_center', 'middle_right',
+                        'bottom_left', 'bottom_center', 'bottom_right',
+                    ],
+                    'default' => 'middle_center',
+                    'control' => 'position_grid',
+                ],
+                'text_color' => ['type' => 'select', 'label' => 'Text colour', 'options' => ['light', 'dark'], 'default' => 'light'],
+                // A headline on a photograph is legible or not depending on
+                // what is behind it, and the marketer cannot edit the
+                // photograph. The scrim is the one control that fixes it.
+                'overlay'    => ['type' => 'select', 'label' => 'Shading behind the text', 'options' => ['none', 'soft', 'strong'], 'default' => 'soft'],
+                'height'     => ['type' => 'number', 'label' => 'Banner height in pixels', 'default' => 220, 'min' => 120, 'max' => 480],
+                'link'       => ['type' => 'url', 'label' => 'Link when the text is clicked (optional)'],
+            ],
+        ],
         'image_row' => [
             'label'       => 'Images side by side',
             'description' => 'Two or three pictures in one row. They stack automatically on a phone.',
@@ -267,11 +309,12 @@ class CampaignBlockRenderer
 
         return <<<HTML
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title></title>
+<!--[if gte mso 9]><xml><o:OfficeDocumentSettings><o:AllowPNG/><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml><![endif]-->
 <style type="text/css">
 /* Mobile only. Layout never depends on these — a client that drops the
    <style> block still gets the full-width table layout below.
@@ -289,6 +332,9 @@ class CampaignBlockRenderer
      a wide screen. Stacked, they are empty full-width blocks, so they become
      stray gaps in the middle of the grid. */
   .ok-hide-sm { display: none !important; }
+  /* A banner's side padding is sized for the card, which is most of a phone
+     screen — a headline inside it would otherwise get about half the width. */
+  .ok-hero { padding-left: 16px !important; padding-right: 16px !important; }
   img { max-width: 100% !important; height: auto !important; }
 }
 </style>
@@ -353,6 +399,24 @@ HTML;
                 case 'image':
                     if (! empty($block['alt'])) {
                         $out[] = '[' . $this->plain($block['alt']) . ']';
+                    }
+                    break;
+                case 'hero':
+                    // The words on a banner are the loudest thing in the
+                    // campaign, so they are also the first thing a text-only
+                    // reader must get. The picture behind them is described
+                    // only when it is carrying no words of its own.
+                    $heading    = $this->plain((string) ($block['heading'] ?? ''));
+                    $subheading = $this->plain((string) ($block['subheading'] ?? ''));
+
+                    if ($heading !== '') {
+                        $out[] = strtoupper($heading);
+                    }
+                    if ($subheading !== '') {
+                        $out[] = $subheading;
+                    }
+                    if ($heading === '' && $subheading === '' && ! empty($block['alt'])) {
+                        $out[] = '[' . $this->plain((string) $block['alt']) . ']';
                     }
                     break;
                 case 'image_row':
@@ -582,16 +646,21 @@ HTML;
      * Whether a block runs the full width of the card rather than sitting
      * inside its horizontal padding.
      *
-     * Only a full-bleed section band does. An inset pill is centred inside the
-     * padding by definition, and body content inset by 34px is the entire point
-     * of the card.
+     * A full-bleed section band and a banner do. An inset pill is centred
+     * inside the padding by definition, and body content inset by 34px is the
+     * entire point of the card.
      *
      * @param  array<string, mixed>  $block
      */
     private function bleeds(array $block): bool
     {
-        return ($block['type'] ?? '') === 'section_header'
-            && ($block['style'] ?? 'full_bleed') === 'full_bleed';
+        return match ($block['type'] ?? '') {
+            'section_header' => ($block['style'] ?? 'full_bleed') === 'full_bleed',
+            // A banner inset by 34px is a picture with a white frame round it,
+            // which is not what a banner is.
+            'hero'           => true,
+            default          => false,
+        };
     }
 
     /**
@@ -604,6 +673,7 @@ HTML;
             'heading'        => $this->heading($block, $t),
             'text'           => $this->text($block, $t),
             'image'          => $this->image($block, $t),
+            'hero'           => $this->hero($block, $t),
             'image_row'      => $this->imageRow($block, $t),
             'section_header' => $this->sectionHeader($block, $t),
             'cards'          => $this->cards($block, $t),
@@ -674,6 +744,137 @@ HTML;
 </tr></table>
 
 HTML;
+    }
+
+    /**
+     * A picture with text sitting on it, in one of nine positions.
+     *
+     * Three renderings of the same thing, because no single one works
+     * everywhere:
+     *
+     *   1. `background-image` on the cell — Apple Mail, Gmail, iOS, most of the
+     *      rest. `background-size:cover` so the artwork fills the banner at any
+     *      card width instead of tiling or letterboxing.
+     *   2. a VML `<v:rect>` behind a conditional comment — Outlook 2007-2019
+     *      renders through Word, which supports no CSS background image at all
+     *      and would otherwise show a flat colour under the headline.
+     *   3. `bgcolor` on the cell — every client with images turned off, and any
+     *      of them that strips both of the above. This is why the fallback
+     *      colour is chosen from the TEXT colour rather than from the picture:
+     *      the words have to survive the picture not arriving, which is the
+     *      normal case in a corporate inbox, not an edge case.
+     *
+     * `height` behaves as a minimum: a table cell grows to fit its contents, so
+     * a long headline on a narrow phone lengthens the banner rather than
+     * spilling out of it.
+     */
+    private function hero(array $b, array $t): string
+    {
+        $url = $this->safeUrl((string) ($b['image'] ?? ''));
+
+        if ($url === null) {
+            return '';
+        }
+
+        $heading    = $this->inline((string) ($b['heading'] ?? ''), $t, allowLinks: false);
+        $subheading = $this->inline((string) ($b['subheading'] ?? ''), $t, allowLinks: false);
+
+        $hasHeading = trim(strip_tags($heading)) !== '';
+        $hasSub     = trim(strip_tags($subheading)) !== '';
+
+        // A banner with no words is a picture. Falling through to the image
+        // block renders it as one rather than as an empty coloured strip.
+        if (! $hasHeading && ! $hasSub) {
+            return $this->image(['url' => $url, 'alt' => $b['alt'] ?? '', 'link' => $b['link'] ?? null], $t);
+        }
+
+        $width  = (int) $t['card_width'];
+        $height = max(120, min(480, (int) ($b['height'] ?? 220)));
+
+        [$vertical, $horizontal] = $this->heroPosition((string) ($b['position'] ?? 'middle_center'));
+
+        $light = ((string) ($b['text_color'] ?? 'light')) !== 'dark';
+        $color = $light ? '#FFFFFF' : '#111111';
+
+        // Not sampled from the picture — a picture that never loads cannot be
+        // sampled. A dark tone under light type and a pale one under dark type
+        // is the pair that stays readable whatever arrives.
+        $fallback = $light ? $t['band_dark_background'] : $t['band_muted_background'];
+
+        // Outlook ignores rgba and gets the VML fill instead, which is why the
+        // scrim being invisible there is not a defect.
+        $scrim = match ((string) ($b['overlay'] ?? 'soft')) {
+            'none'   => '',
+            'strong' => $light ? 'background-color:rgba(0,0,0,0.62); ' : 'background-color:rgba(255,255,255,0.74); ',
+            default  => $light ? 'background-color:rgba(0,0,0,0.38); ' : 'background-color:rgba(255,255,255,0.52); ',
+        };
+
+        $stack = '';
+
+        if ($hasHeading) {
+            $stack .= '<div style="font-family:' . $t['font_family'] . '; font-size:26px; line-height:34px; '
+                . 'font-weight:bold; color:' . $color . '; text-align:' . $horizontal . ';">' . $heading . '</div>';
+        }
+
+        if ($hasSub) {
+            $stack .= '<div style="font-family:' . $t['font_family'] . '; font-size:15px; line-height:23px; '
+                . 'color:' . $color . '; text-align:' . $horizontal . '; padding-top:' . ($hasHeading ? '8' : '0') . 'px;">'
+                . $subheading . '</div>';
+        }
+
+        // The picture itself is not the link. A block-level anchor round the
+        // whole banner is the one construct Outlook turns into a page of
+        // underlined whitespace, so the words carry the click.
+        $link = isset($b['link']) ? $this->safeUrl((string) $b['link']) : null;
+
+        if ($link !== null) {
+            $stack = '<a href="' . e($link) . '" style="color:' . $color . '; text-decoration:none;">' . $stack . '</a>';
+        }
+
+        $escaped = e($url);
+
+        // No percentage width on this cell: it is as wide as its own text, so
+        // there is nothing to collapse on a phone.
+        $inner = '<table role="presentation" border="0" cellpadding="0" cellspacing="0" style="max-width:' . max(200, $width - 80) . 'px;"><tr>'
+            . '<td align="' . $horizontal . '" style="' . $scrim . 'padding:14px 18px;">' . $stack . '</td>'
+            . '</tr></table>';
+
+        $vmlOpen = '<!--[if gte mso 9]>'
+            . '<v:rect xmlns:v="urn:schemas-microsoft-com:vml" fill="true" stroke="false" style="width:' . $width . 'px; height:' . $height . 'px;">'
+            . '<v:fill type="frame" src="' . $escaped . '" color="' . $fallback . '" />'
+            . '<v:textbox inset="0,0,0,0">'
+            . '<![endif]-->';
+
+        $vmlClose = '<!--[if gte mso 9]></v:textbox></v:rect><![endif]-->';
+
+        return <<<HTML
+<div>
+{$vmlOpen}
+<table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="{$fallback}" style="background-color:{$fallback};"><tr>
+<td class="ok-hero" valign="{$vertical}" align="{$horizontal}" height="{$height}" bgcolor="{$fallback}" background="{$escaped}" style="height:{$height}px; padding:22px 30px; background-color:{$fallback}; background-image:url('{$escaped}'); background-position:center center; background-size:cover; background-repeat:no-repeat;">{$inner}</td>
+</tr></table>
+{$vmlClose}
+</div>
+<table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%"><tr><td style="height:22px; line-height:22px; font-size:0;">&nbsp;</td></tr></table>
+
+HTML;
+    }
+
+    /**
+     * Splits `middle_center` into a `valign` and an `align`, falling back to
+     * the centre of the banner for anything unrecognised — a mistyped position
+     * must not put the headline somewhere it cannot be seen.
+     *
+     * @return array{0: string, 1: string}
+     */
+    private function heroPosition(string $position): array
+    {
+        $parts = explode('_', $position, 2);
+
+        $vertical   = in_array($parts[0] ?? '', ['top', 'middle', 'bottom'], true) ? $parts[0] : 'middle';
+        $horizontal = in_array($parts[1] ?? '', ['left', 'center', 'right'], true) ? $parts[1] : 'center';
+
+        return [$vertical, $horizontal];
     }
 
     /**

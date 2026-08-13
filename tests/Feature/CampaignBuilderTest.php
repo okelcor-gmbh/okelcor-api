@@ -729,6 +729,188 @@ class CampaignBuilderTest extends TestCase
         $this->assertStringContainsString('img { max-width: 100% !important; height: auto !important; }', $html);
     }
 
+    // ── text on a picture (Session 81) ────────────────────────────────────
+    //
+    // Reported: the headline printed across the masthead in the design turned
+    // up UNDERNEATH the picture. Half of that was the importer not reading the
+    // relationship; the other half was that no block held text and an image in
+    // the same space, so there was nowhere else to put it.
+
+    /** @return array<string, mixed> */
+    private function banner(array $overrides = []): array
+    {
+        return array_merge([
+            'type'       => 'hero',
+            'image'      => 'https://api.okelcor.com/storage/banner.png',
+            'alt'        => 'A fuel conditioner on a dark background',
+            'heading'    => 'The Future of Fuel Savings',
+            'subheading' => 'Advanced inline fuel-efficiency technology',
+        ], $overrides);
+    }
+
+    public function test_a_banner_prints_its_words_on_the_picture(): void
+    {
+        $html = $this->renderer->render([$this->banner()]);
+
+        $document = new \DOMDocument();
+        libxml_use_internal_errors(true);
+        $document->loadHTML($html);
+        libxml_clear_errors();
+
+        $xpath = new \DOMXPath($document);
+
+        // The picture is the cell's background, so the words are INSIDE the
+        // element carrying it rather than in one after it. That containment is
+        // the whole difference between "on the banner" and "under it".
+        $cell = $xpath->query('//td[contains(@style,"background-image")]')->item(0);
+
+        $this->assertNotNull($cell, 'The banner must carry the picture as a background, not as an <img>.');
+        $this->assertStringContainsString('The Future of Fuel Savings', $cell->textContent);
+        $this->assertStringContainsString('Advanced inline fuel-efficiency technology', $cell->textContent);
+
+        // Outlook renders through Word, which supports no CSS background image
+        // at all — without the VML the headline sits on a flat colour there.
+        $this->assertStringContainsString('<v:fill type="frame" src="https://api.okelcor.com/storage/banner.png"', $html);
+        $this->assertSame(substr_count($html, '<v:rect'), substr_count($html, '</v:rect>'));
+    }
+
+    public function test_a_banner_puts_its_text_in_the_position_it_was_given(): void
+    {
+        // Nine positions, and each one has to reach the rendered cell — this is
+        // the control the marketer moves the headline with, so a position that
+        // silently does nothing is the feature not existing.
+        $positions = [
+            'top_left'      => ['top', 'left'],
+            'top_center'    => ['top', 'center'],
+            'top_right'     => ['top', 'right'],
+            'middle_left'   => ['middle', 'left'],
+            'middle_center' => ['middle', 'center'],
+            'middle_right'  => ['middle', 'right'],
+            'bottom_left'   => ['bottom', 'left'],
+            'bottom_center' => ['bottom', 'center'],
+            'bottom_right'  => ['bottom', 'right'],
+        ];
+
+        foreach ($positions as $position => [$vertical, $horizontal]) {
+            $html = $this->renderer->render([$this->banner(['position' => $position])]);
+
+            $this->assertStringContainsString('valign="' . $vertical . '"', $html, $position . ' lost its vertical placement');
+            $this->assertStringContainsString('align="' . $horizontal . '"', $html, $position . ' lost its horizontal placement');
+            $this->assertStringContainsString('text-align:' . $horizontal, $html, $position . ' lost its text alignment');
+        }
+
+        // Every position in the catalogue must be one the renderer understands,
+        // or the editor offers a choice that does nothing.
+        $this->assertSame(
+            array_keys($positions),
+            CampaignBlockRenderer::BLOCKS['hero']['fields']['position']['options']
+        );
+    }
+
+    public function test_an_unrecognised_banner_position_lands_in_the_middle(): void
+    {
+        $html = $this->renderer->render([$this->banner(['position' => 'sideways_upwards'])]);
+
+        // Not an error and not a blank banner: a mistyped position must not put
+        // the headline somewhere it cannot be read.
+        $this->assertStringContainsString('valign="middle"', $html);
+        $this->assertStringContainsString('align="center"', $html);
+    }
+
+    public function test_banner_words_survive_the_picture_never_arriving(): void
+    {
+        // Images off is the normal state of a corporate inbox, not an edge
+        // case. A banner whose text colour is chosen for the photograph and
+        // whose fallback is chosen from the photograph is blank text on blank
+        // background the moment the picture is blocked.
+        $light = $this->renderer->render([$this->banner(['text_color' => 'light'])], ['preset' => 'fet_green']);
+        $dark  = $this->renderer->render([$this->banner(['text_color' => 'dark'])], ['preset' => 'fet_green']);
+
+        $this->assertStringContainsString('bgcolor="' . CampaignBlockRenderer::THEMES['fet_green']['band_dark_background'] . '"', $light);
+        $this->assertStringContainsString('color:#FFFFFF', $light);
+
+        $this->assertStringContainsString('bgcolor="' . CampaignBlockRenderer::THEMES['fet_green']['band_muted_background'] . '"', $dark);
+        $this->assertStringContainsString('color:#111111', $dark);
+    }
+
+    public function test_a_banner_with_no_words_is_just_a_picture(): void
+    {
+        $html = $this->renderer->render([$this->banner(['heading' => '', 'subheading' => ''])]);
+
+        // An empty coloured strip where a photograph should be is worse than
+        // the photograph, so it falls through to the ordinary image block.
+        $this->assertStringContainsString('<img src="https://api.okelcor.com/storage/banner.png"', $html);
+        $this->assertStringNotContainsString('background-image', $html);
+    }
+
+    public function test_a_banner_runs_the_full_width_of_the_card(): void
+    {
+        $html = $this->renderer->render([$this->banner(), ['type' => 'text', 'text' => 'Body copy']]);
+
+        $document = new \DOMDocument();
+        libxml_use_internal_errors(true);
+        $document->loadHTML($html);
+        libxml_clear_errors();
+
+        $bleed = (new \DOMXPath($document))->query('//td[contains(@class,"ok-bleed")]');
+
+        // A masthead inset by 34px is a picture with a white frame round it.
+        $this->assertSame(1, $bleed->length);
+        $this->assertStringContainsString('The Future of Fuel Savings', $bleed->item(0)->textContent);
+    }
+
+    public function test_banner_text_cannot_become_markup(): void
+    {
+        $html = $this->renderer->render([$this->banner([
+            'heading'    => '<script>alert(1)</script>',
+            'subheading' => '<img src=x onerror=alert(1)>',
+            'link'       => 'javascript:alert(1)',
+        ])]);
+
+        $this->assertStringNotContainsString('<script>', $html);
+        $this->assertStringNotContainsString('<img src=x', $html);
+        $this->assertStringNotContainsString('javascript:', $html);
+        $this->assertStringContainsString('&lt;script&gt;', $html);
+        $this->assertStringContainsString('&lt;img src=x onerror=alert(1)&gt;', $html);
+    }
+
+    public function test_a_banner_renders_a_well_formed_document(): void
+    {
+        // The VML lives in a conditional comment and the block is the only one
+        // that emits raw <v:…> tags, so it gets the same check the starters do.
+        $html = $this->renderer->render([$this->banner(['link' => 'https://okelcor.com/fet'])]);
+
+        $this->assertSame(substr_count($html, '<table'), substr_count($html, '</table>'));
+        $this->assertSame(substr_count($html, '<td'), substr_count($html, '</td>'));
+
+        $previous = libxml_use_internal_errors(true);
+        $document = new \DOMDocument();
+        $loaded   = $document->loadHTML($html);
+        $fatal    = array_filter(libxml_get_errors(), fn ($e) => $e->level >= LIBXML_ERR_ERROR);
+        libxml_clear_errors();
+        libxml_use_internal_errors($previous);
+
+        $this->assertTrue($loaded);
+        $this->assertSame([], array_values($fatal));
+    }
+
+    public function test_the_text_part_carries_the_banner_headline(): void
+    {
+        $text = $this->renderer->renderText([$this->banner()]);
+
+        // The loudest words in the campaign must not be the ones a text-only
+        // reader is missing.
+        $this->assertStringContainsString('THE FUTURE OF FUEL SAVINGS', $text);
+        $this->assertStringContainsString('Advanced inline fuel-efficiency technology', $text);
+
+        // A banner carrying its own words does not also need its picture
+        // described — that would read the headline twice.
+        $this->assertStringNotContainsString('[A fuel conditioner', $text);
+
+        $wordless = $this->renderer->renderText([$this->banner(['heading' => '', 'subheading' => ''])]);
+        $this->assertStringContainsString('[A fuel conditioner on a dark background]', $wordless);
+    }
+
     public function test_the_fet_preset_exists_and_is_green(): void
     {
         $this->assertArrayHasKey('fet_green', CampaignBlockRenderer::THEMES);

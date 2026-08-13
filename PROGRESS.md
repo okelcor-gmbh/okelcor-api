@@ -1,18 +1,19 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-12 | Branch: `main` | Latest commit: Session 80 (**pushed, not deployed**)
+Last updated: 2026-08-13 | Branch: `main` | Latest commit: Session 81 (**pushed, not deployed**)
 
 ---
 
-## 🔧 Sessions 78–80 pushed, NOT deployed
+## 🔧 Sessions 78–81 pushed, NOT deployed
 
-Tip is `d7b63a7`. One unapplied migration.
+One unapplied migration.
 
 | Session | What it is | Migration | Routes |
 |---|---|---|---|
 | **78** | Campaign blocks that hold two things side by side (`image_row`, `section_header`, `cards`, `fet_green`) + importer inference | none | none |
 | **79** | Customer behaviour analytics — what people search for and cannot find | **#32** `search_events` | **1 new** (`GET /admin/analytics/behaviour`) |
 | **80** | Campaign email on small screens | none | none |
+| **81** | Text printed ON a picture (`hero` block) + the importer recovering the masthead | none | none |
 
 ```bash
 cd /home/okelvaxj/domains/okelcor.com/public_html/okelcor-api
@@ -32,7 +33,7 @@ two-hour window in which a re-upload looks like the deploy did not happen.
 
 **Nothing here changes customer-facing behaviour.** Session 79 starts recording
 catalogue searches — no PII, and the report is empty until traffic accumulates.
-Sessions 78 and 80 change how campaign emails render; no campaign sends on
+Sessions 78, 80 and 81 change how campaign emails render; no campaign sends on
 deploy.
 
 ---
@@ -1778,6 +1779,54 @@ desktop/mobile toggle; **the first question about a rendering complaint should
 be which of the two it was.**
 
 See `FRONTEND_NOTE_indesign-campaign-import.md`.
+
+---
+
+## Text printed on a picture (Session 81)
+
+> **Deploy status:** built and tested, **not yet deployed**. No migration, no
+> new route, no contract change. One new block type; nothing existing changes
+> shape.
+
+Two complaints, reported together. The second is not a backend problem at all
+and is written up for frontend rather than fixed here.
+
+**"The header text in the banner is below the image after export."** Two causes,
+and the second is the interesting one.
+
+The importer was not reading the relationship: in the export the masthead
+photograph is one frame and each line of type is another, and the type frames sit
+*inside* the picture's box. That containment is the only record that the words
+are printed on the artwork. Nothing read it, so the only ordering left was
+top-to-bottom by `y` — picture at `y=-3`, headline at `y=75`, and down they went.
+
+**But there was also nowhere to put them.** Every block was a single full-width
+element stacked on the one before it, so no block held text and an image in the
+same space. Even a correct reading of the export had no way to express it. Same
+shape as Session 78's side-by-side finding, one layer up: that was two things
+beside each other, this is two things on top of each other.
+
+| Change | Status | Notes |
+|--------|--------|-------|
+| `hero` block | 🔧 | A picture with words on it, in one of **nine positions** (`top_left` … `bottom_right`) — `valign` × `align` on a table cell, which is the entire positioning vocabulary email has that survives Outlook. Plus `text_color`, an `overlay` scrim, a `height` that behaves as a minimum, and a `link` on the text. Full-bleed: a masthead inset by 34px is a picture with a white frame round it. |
+| Three renderings of the same banner | 🔧 | `background-image` + `cover` for Apple/Gmail/iOS; a VML `<v:rect>` behind a conditional comment for Outlook 2007–2019, which renders through Word and supports no CSS background image at all; and `bgcolor` for images-off. The fallback colour is chosen from the **text** colour rather than sampled from the picture — a picture that never loads cannot be sampled, and images-off is the normal state of a corporate inbox, not an edge case. |
+| A banner with no words is a picture | 🔧 | Falls through to the ordinary image block. An empty coloured strip where a photograph should be is worse than the photograph. |
+| **Importer recovers the masthead** | 🔧 | Text frames whose box sits inside a banner-shaped picture's box become its heading and sub-heading, and are **not also emitted underneath** — the duplicate was the actual complaint. Verified against the real marketers' export, not a reconstruction of it. |
+| Position and height are read, not defaulted | 🔧 | `middle_center` and `187px` come off the real page — the type is centred and two-thirds down, and 187 is 160pt of a 595pt page rendered into the 680px FET card. Defaulted, every import would land the headline in the middle and the marketer would move it back by hand every time. |
+| Two things it deliberately will not do | 🔧 | A caption set immediately beneath a picture stays beneath it (under is where a caption goes). A tall photograph with a label crossing it is not a masthead — a banner must be most of the page wide *and* markedly wider than tall, or a paragraph gets buried in artwork. |
+| `control: "position_grid"` hint | 🔧 | `position` is an ordinary `select`, so the editor works with no frontend release. The hint asks for a 3×3 clickable grid instead of a dropdown reading `middle_center`, which is what "easy to move the text anywhere" actually means. Unknown `control` values must fall through to the plain control. |
+| Backend tests (16 new) | ✅ | 9 in `CampaignBuilderTest` (all nine positions reaching the rendered cell, an unrecognised position landing centre, the images-off fallback pair, wordless banner, full bleed, escaping, well-formedness with VML, the text part) + 7 in `InDesignCampaignImportTest` (recovery, no duplicate underneath, position read from the page, proportions, the caption guard, the not-a-banner guard, validation) — plus the real-export test extended to assert the masthead end to end. Full suite **400 passed, 0 failed**, 206 skipped, up from 384. |
+
+**The second complaint is frontend's and is not fixed here.** "Highlighting text
+in a text box drags the whole box sideways" — sideways, not up or down, which is
+a drag ghost following the pointer rather than a layout shift. The drag
+affordance is on the whole block card, so a press-and-move starting inside an
+input is claimed as a block drag before the browser can begin a selection;
+native selection inside a `draggable="true"` subtree is suppressed by the DnD
+spec. The fix is a dedicated drag handle plus a pointer activation distance, and
+it is written up per-library in the note.
+
+See `FRONTEND_NOTE_campaign-text-position.md`.
 
 ---
 

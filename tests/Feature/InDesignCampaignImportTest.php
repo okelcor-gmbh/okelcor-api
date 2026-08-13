@@ -958,6 +958,160 @@ class InDesignCampaignImportTest extends TestCase
         $this->assertSame('Improvements of **15%–35%** depending on the engine.', $text);
     }
 
+    // ── text printed on a banner (Session 81) ──────────────────────────────
+    //
+    // The reported defect: the headline printed across the masthead arrived
+    // UNDER the picture. It was never under it — in the export the picture is
+    // one frame and each line of type is another, and the type frames sit
+    // inside the picture's box. Nothing read that, so the only ordering left
+    // was top-to-bottom by `y`, which puts a picture starting at y=-3 above a
+    // headline starting at y=75.
+
+    /**
+     * A masthead: one wide, shallow photograph with two text frames sitting
+     * inside its box, and a paragraph of body copy well below it.
+     *
+     * @param  array{x: float, y: float, w: float, h: float}  $headline  where the type sits ON the banner
+     */
+    private function bannerExport(array $headline = ['x' => 150.0, 'y' => 70.0, 'w' => 300.0, 'h' => 30.0], float $imageHeight = 160.0): UploadedFile
+    {
+        $sub = ['x' => $headline['x'], 'y' => $headline['y'] + $headline['h'] + 5, 'w' => $headline['w'], 'h' => 24.0];
+
+        $css = '#_idContainer000 { transform:translate(0.000px,0.000px); position:absolute; width:595.28px; height:' . $imageHeight . 'px; }'
+            . '#_idContainer001 { transform:translate(' . $headline['x'] . 'px,' . $headline['y'] . 'px); position:absolute; width:' . $headline['w'] . 'px; height:' . $headline['h'] . 'px; }'
+            . '#_idContainer002 { transform:translate(' . $sub['x'] . 'px,' . $sub['y'] . 'px); position:absolute; width:' . $sub['w'] . 'px; height:' . $sub['h'] . 'px; }'
+            . '#_idContainer003 { transform:translate(36.000px,400.000px); position:absolute; width:523.28px; height:120.00px; }'
+            // White display type, which is what type printed on artwork looks
+            // like — and the reason it cannot be trusted for the page palette.
+            . 'span.CharOverride-1 { color:#FFFFFF; font-size:420px; font-weight:bold; }'
+            . 'span.CharOverride-2 { color:#FFFFFF; font-size:200px; font-weight:normal; }'
+            . 'span.CharOverride-3 { color:#333333; font-size:220px; font-weight:normal; }';
+
+        $frame = function (string $id, string $class, string $text): string {
+            return '<div id="' . $id . '" class="Basic-Text-Frame">'
+                . '<div style="transform: translate(0px,1px) scale(0.05);">'
+                . '<p class="Basic-Paragraph"><span class="' . $class . '" style="position:absolute;top:0px;left:0px;">'
+                . $text . '</span></p></div></div>';
+        };
+
+        $page = '<html><head><link href="../css/idGeneratedStyles.css" rel="stylesheet" /></head>'
+            . '<body style="width:595px;height:1089px;background-color:white;">'
+            . '<div id="_idContainer000"><img src="../image/banner.png" alt="A fuel conditioner" /></div>'
+            . $frame('_idContainer001', 'CharOverride-1', 'The Future of Fuel Savings')
+            . $frame('_idContainer002', 'CharOverride-2', 'Advanced inline fuel-efficiency technology')
+            . $frame('_idContainer003', 'CharOverride-3', 'Fuel costs are a major part of everyday operating expenses and this paragraph is long enough to be read as one rather than as a bullet point.')
+            . '</body></html>';
+
+        return $this->zip([
+            'publication-web-resources/html/publication.html'     => $page,
+            'publication-web-resources/css/idGeneratedStyles.css' => $css,
+            // 3.7:1 — a masthead. Wide enough to be a banner, not thin enough
+            // to be one of InDesign's hairline rules.
+            'publication-web-resources/image/banner.png' => $this->png(800, 215, [20, 18, 16]),
+        ]);
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    private function bannerBlocks(
+        array $headline = ['x' => 150.0, 'y' => 70.0, 'w' => 300.0, 'h' => 30.0],
+        float $imageHeight = 160.0
+    ): array {
+        return $this->withHeaders($this->headers())
+            ->post('/api/v1/admin/campaign-templates/import', [
+                'file'    => $this->bannerExport($headline, $imageHeight),
+                'dry_run' => true,
+            ])
+            ->assertOk()
+            ->json('data.blocks');
+    }
+
+    public function test_a_headline_printed_on_the_banner_comes_back_on_it(): void
+    {
+        $imported = $this->withHeaders($this->headers())
+            ->post('/api/v1/admin/campaign-templates/import', ['file' => $this->bannerExport(), 'dry_run' => true])
+            ->assertOk();
+
+        $hero = collect($imported->json('data.blocks'))->firstWhere('type', 'hero');
+
+        $this->assertNotNull($hero, 'A headline inside the masthead\'s box must import as a banner, not as a heading under it.');
+        $this->assertSame('The Future of Fuel Savings', $hero['heading']);
+        $this->assertSame('Advanced inline fuel-efficiency technology', $hero['subheading']);
+
+        // The banner's picture is the one that went into the Media Library, so
+        // it is reusable in the next campaign like any other imported image.
+        $this->assertSame($imported->json('data.media.0.url'), $hero['image']);
+
+        // White type on artwork is the case deriveTheme refuses to trust for
+        // the page palette — but the banner is the one place it still has a
+        // dark ground, so here it is believed.
+        $this->assertSame('light', $hero['text_color']);
+    }
+
+    public function test_the_banners_headline_is_not_also_emitted_underneath(): void
+    {
+        // The complaint itself. Left in both places the marketer deletes the
+        // duplicate by hand every time, which is worse than the import being
+        // wrong once.
+        $blocks = $this->bannerBlocks();
+        $text   = json_encode($blocks);
+
+        $this->assertSame(1, substr_count($text, 'The Future of Fuel Savings'));
+        $this->assertSame(1, substr_count($text, 'Advanced inline fuel-efficiency technology'));
+
+        // And the picture is the banner, not also a loose image block.
+        $this->assertNotContains('image', array_column($blocks, 'type'));
+
+        // Body copy well below the masthead is untouched by any of this.
+        $this->assertStringContainsString('Fuel costs are a major part', $text);
+    }
+
+    public function test_the_banner_keeps_the_position_the_type_was_set_in(): void
+    {
+        // Position is read from the page, not defaulted — otherwise every
+        // import lands the headline in the middle and the marketer moves it
+        // back by hand.
+        $centred = collect($this->bannerBlocks())->firstWhere('type', 'hero');
+        $this->assertSame('middle_center', $centred['position']);
+
+        $topLeft = collect($this->bannerBlocks(['x' => 10.0, 'y' => 8.0, 'w' => 200.0, 'h' => 24.0]))
+            ->firstWhere('type', 'hero');
+        $this->assertSame('top_left', $topLeft['position']);
+    }
+
+    public function test_the_banner_keeps_the_proportions_it_was_drawn_at(): void
+    {
+        $hero = collect($this->bannerBlocks())->firstWhere('type', 'hero');
+
+        // 160pt of a 595pt page, rendered into a 620px card — not a height
+        // anybody guessed.
+        $this->assertSame((int) round(160 / 595 * 620), $hero['height']);
+    }
+
+    public function test_a_caption_beneath_a_picture_is_not_dragged_onto_it(): void
+    {
+        // Under is where a caption goes. Reading "inside the box" without a
+        // margin at the bottom edge would swallow it into the artwork.
+        $blocks = $this->bannerBlocks(['x' => 150.0, 'y' => 175.0, 'w' => 300.0, 'h' => 30.0]);
+
+        $this->assertNotContains('hero', array_column($blocks, 'type'));
+        $this->assertStringContainsString('The Future of Fuel Savings', json_encode($blocks));
+    }
+
+    public function test_a_picture_that_is_not_a_banner_keeps_its_words_separate(): void
+    {
+        // A tall photograph with a label crossing it is not a masthead, and
+        // lifting the label onto it would bury a paragraph in artwork.
+        $blocks = $this->bannerBlocks(imageHeight: 500.0);
+
+        $this->assertNotContains('hero', array_column($blocks, 'type'));
+        $this->assertContains('image', array_column($blocks, 'type'));
+    }
+
+    public function test_an_imported_banner_passes_the_same_validation_a_hand_built_one_does(): void
+    {
+        $this->assertSame([], app(CampaignBlockRenderer::class)->validateBlocks($this->bannerBlocks()));
+    }
+
     // ── the real export the marketing team actually produced ───────────────
 
     public function test_the_real_marketing_export_converts_end_to_end(): void
@@ -991,6 +1145,32 @@ class InDesignCampaignImportTest extends TestCase
         $this->assertContains('list', array_column($blocks, 'type'));
         $this->assertNotEmpty($response->json('data.media'));
         $this->assertSame([], app(CampaignBlockRenderer::class)->validateBlocks($blocks));
+
+        // The masthead is the reported defect, on the real file rather than a
+        // reconstruction of it: "The Future of Fuel Savings" is printed ACROSS
+        // the picture in the deck and was arriving underneath it.
+        $hero = collect($blocks)->firstWhere('type', 'hero');
+
+        $this->assertNotNull($hero, 'The masthead headline must come back on the banner.');
+        $this->assertSame('The Future of Fuel Savings', $hero['heading']);
+        $this->assertStringContainsString('Advanced inline fuel-efficiency technology', $hero['subheading']);
+        $this->assertSame('light', $hero['text_color']);
+
+        // Once, not once on the banner and once under it.
+        $this->assertSame(1, substr_count($text, 'The Future of Fuel Savings'));
+
+        // And it survives into the HTML that will actually be sent.
+        $html = app(CampaignBlockRenderer::class)->render($blocks, $response->json('data.theme'));
+
+        $document = new \DOMDocument();
+        libxml_use_internal_errors(true);
+        $document->loadHTML($html);
+        libxml_clear_errors();
+
+        $cell = (new \DOMXPath($document))->query('//td[contains(@style,"background-image")]')->item(0);
+
+        $this->assertNotNull($cell);
+        $this->assertStringContainsString('The Future of Fuel Savings', $cell->textContent);
 
         @unlink($path);
     }
