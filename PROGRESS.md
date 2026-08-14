@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-13 | Branch: `main` | Latest commit: Session 87 (**pushed, not deployed**)
+Last updated: 2026-08-13 | Branch: `main` | Latest commit: Session 88 (**pushed, not deployed**)
 
 ---
 
@@ -44,6 +44,7 @@ wrong.
 | **85** | Wix contacts become a `wix` market so campaigns can address them as an audience | none | none |
 | **86** | Clients drill-down, month-to-month report with charts, and one invoice register for both sides | **#37** | **5 new** |
 | **87** | eBay kept beside the website in the report, CSV export, and the fulfilment queue starting before dispatch | none | **1 new** |
+| **88** | `sort` on the order list, so the fulfilment queue can be worked from the back | none | none |
 
 ```bash
 cd /home/okelvaxj/domains/okelcor.com/public_html/okelcor-api
@@ -2151,6 +2152,33 @@ worth telling the order manager before she sees it, and the `ready_to_ship` /
 `shipped` split is there so the old figure is still readable.
 
 See `FRONTEND_NOTE_operations-detail.md`.
+
+### Session 88 — a queue that can be worked from the right end
+
+Frontend built the three Session 87 changes and reported one thing they could
+not do.
+
+| Change | Status | Notes |
+|--------|--------|-------|
+| `?sort=` on `GET /admin/orders` | 🔧 | `newest` (unchanged default), `oldest`, `total_high`, `total_low`, `updated`. The order was hardcoded `orderByDesc('created_at')`, so the fulfilment queue could only be shown in the least useful direction: a browsable index is read newest-first, but a work queue is worked from the back, because the row that has waited longest is the one someone is chasing. |
+| `meta.sort` and `meta.sorts` | 🔧 | Served rather than duplicated, so the control cannot drift from what the endpoint accepts. `meta.sort` reports what was actually applied, not what was asked for — an unrecognised value falls back to `newest` rather than erroring, and echoing it back would render the control in a state the list is not in. |
+| Backend tests (3 new) | ✅ | Every sort including the fallback, the declared options, and the combination that matters — the queue filter with `sort=oldest`. Full suite **474 passed, 0 failed**, 206 skipped. |
+
+**Honest limit, stated rather than papered over:** `oldest` sorts by when the
+order was RAISED, not by how long it has been in its current state. Nothing
+records the latter — `updated_at` moves on any edit and `order_logs` would need
+a scan — and a proxy dressed up as the real thing is worse than the plain fact.
+For the fulfilment queue the two are close enough to be useful; if they diverge
+in practice, the fix is a `status_changed_at` column, not a cleverer query.
+
+**Worth recording about how it was found.** Frontend wrote the control, saw the
+parameter do nothing, and **declined to sort the fetched page client-side** —
+which would have reordered 25 rows and labelled the result "oldest" while the
+genuinely oldest orders sat on page two. Their words: a more convincing version
+of the same lie. That is the second time this month a session has been improved
+by frontend refusing to fake something (the first was `group_list` in Session
+82), and both times the cost of asking was a few hours against a number the
+business would have trusted and been wrong about.
 
 ---
 

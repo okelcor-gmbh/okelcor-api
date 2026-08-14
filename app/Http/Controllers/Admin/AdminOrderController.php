@@ -26,6 +26,24 @@ use Illuminate\Validation\Rule;
 
 class AdminOrderController extends Controller
 {
+    /**
+     * How the order list may be ordered. Served in `meta.sorts` so the control
+     * is generated from this rather than from a hardcoded copy that can drift —
+     * the same reason the campaign block catalogue is served rather than
+     * duplicated.
+     *
+     * `newest` stays the default: it is what this endpoint has always done, and
+     * every existing caller expects it.
+     */
+    public const SORTS = [
+        'newest'     => 'Newest first',
+        'oldest'     => 'Oldest first',
+        'total_high' => 'Largest value first',
+        'total_low'  => 'Smallest value first',
+        'updated'    => 'Recently updated first',
+    ];
+
+
     public function index(Request $request): JsonResponse
     {
         // Document state as aggregates on the row, not a relation. The
@@ -42,7 +60,18 @@ class AdminOrderController extends Controller
                 TradeDocument::selectRaw('MAX(sent_at)')->whereColumn('order_id', 'orders.id'),
                 'last_document_sent_at'
             )
-            ->orderByDesc('created_at');
+            ;
+
+        // A browsable index is read newest-first; a work queue is worked from
+        // the back, because the row that has waited longest is the one someone
+        // is chasing. The order was hardcoded, so the fulfilment queue could
+        // only be shown in the least useful direction — frontend found this by
+        // writing the control and discovering the parameter did nothing.
+        //
+        // `oldest` sorts by when the order was RAISED, not by how long it has
+        // been in its current state. Nothing records the latter, and a proxy
+        // dressed up as the real thing is worse than the plain fact.
+        $this->applySort($query, (string) $request->input('sort', 'newest'));
 
         // eBay orders are a separate book: different fulfilment, different
         // paperwork, and the finance board reports them on their own line. The
@@ -103,6 +132,8 @@ class AdminOrderController extends Controller
                 'total'        => $paginated->total(),
                 'last_page'    => $paginated->lastPage(),
                 'channel'      => $request->input('channel', 'all'),
+                'sort'         => $this->sortKey((string) $request->input('sort', 'newest')),
+                'sorts'        => self::SORTS,
                 // Always present, and always counted across ALL orders rather
                 // than the current filter — so the Orders page can say "42 eBay
                 // orders, view separately" instead of the split being something
@@ -803,6 +834,23 @@ class AdminOrderController extends Controller
     // -------------------------------------------------------------------------
     // Formatters
     // -------------------------------------------------------------------------
+
+    /** Falls back to the default rather than erroring on an unknown value. */
+    private function sortKey(string $sort): string
+    {
+        return array_key_exists($sort, self::SORTS) ? $sort : 'newest';
+    }
+
+    private function applySort($query, string $sort): void
+    {
+        match ($this->sortKey($sort)) {
+            'oldest'     => $query->orderBy('created_at'),
+            'total_high' => $query->orderByDesc('total')->orderByDesc('created_at'),
+            'total_low'  => $query->orderBy('total')->orderByDesc('created_at'),
+            'updated'    => $query->orderByDesc('updated_at'),
+            default      => $query->orderByDesc('created_at'),
+        };
+    }
 
     private function formatOrderList(Order $o): array
     {

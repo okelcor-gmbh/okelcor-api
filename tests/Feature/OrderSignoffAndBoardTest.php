@@ -1430,6 +1430,75 @@ class OrderSignoffAndBoardTest extends TestCase
         $this->assertSame('ebay', $ebay->json('data.0.channel'));
     }
 
+    public function test_the_queue_can_be_worked_from_the_back(): void
+    {
+        // Session 88. The order was hardcoded to newest-first, so the fulfilment
+        // queue could only be shown in the least useful direction — the row
+        // that has waited longest is the one someone is chasing. Frontend found
+        // it by writing the control and discovering the parameter did nothing,
+        // and declined to sort the fetched page client-side, which would have
+        // labelled 25 rows "oldest" while the genuinely oldest sat on page two.
+        $first  = $this->order(['ref' => 'OKL-S1', 'total' => 100, 'created_at' => '2026-08-01 09:00:00']);
+        $second = $this->order(['ref' => 'OKL-S2', 'total' => 900, 'created_at' => '2026-08-05 09:00:00']);
+        $third  = $this->order(['ref' => 'OKL-S3', 'total' => 500, 'created_at' => '2026-08-09 09:00:00']);
+
+        $headers = $this->headers($this->admin('order_manager'));
+
+        $refs = fn (string $query) => collect(
+            $this->withHeaders($headers)->getJson('/api/v1/admin/orders' . $query)->assertOk()->json('data')
+        )->pluck('order_ref')->all();
+
+        // Unchanged default — every existing caller expects newest first.
+        $this->assertSame(['OKL-S3', 'OKL-S2', 'OKL-S1'], $refs(''));
+        $this->assertSame(['OKL-S3', 'OKL-S2', 'OKL-S1'], $refs('?sort=newest'));
+
+        $this->assertSame(['OKL-S1', 'OKL-S2', 'OKL-S3'], $refs('?sort=oldest'));
+        $this->assertSame(['OKL-S2', 'OKL-S3', 'OKL-S1'], $refs('?sort=total_high'));
+        $this->assertSame(['OKL-S1', 'OKL-S3', 'OKL-S2'], $refs('?sort=total_low'));
+
+        // An unknown value falls back rather than erroring — a sort is a view
+        // preference, not something worth failing a page load over.
+        $this->assertSame(['OKL-S3', 'OKL-S2', 'OKL-S1'], $refs('?sort=sideways'));
+
+        unset($first, $second, $third);
+    }
+
+    public function test_the_list_declares_the_sorts_it_offers(): void
+    {
+        // Served rather than duplicated, so the control cannot drift from what
+        // the endpoint actually accepts.
+        $meta = $this->withHeaders($this->headers($this->admin('order_manager')))
+            ->getJson('/api/v1/admin/orders?sort=oldest')
+            ->assertOk()
+            ->json('meta');
+
+        $this->assertSame('oldest', $meta['sort']);
+        $this->assertArrayHasKey('oldest', $meta['sorts']);
+        $this->assertSame('Oldest first', $meta['sorts']['oldest']);
+
+        // An unrecognised value is reported as what was actually applied, not
+        // echoed back — otherwise the control renders a state the list is not in.
+        $this->assertSame('newest', $this->withHeaders($this->headers($this->admin('order_manager')))
+            ->getJson('/api/v1/admin/orders?sort=sideways')->json('meta.sort'));
+    }
+
+    public function test_sorting_works_alongside_the_queue_filter(): void
+    {
+        // The combination that matters: the fulfilment queue, oldest first.
+        $this->order(['ref' => 'OKL-Q1', 'status' => 'confirmed', 'payment_status' => 'paid', 'created_at' => '2026-08-01 09:00:00']);
+        $this->order(['ref' => 'OKL-Q2', 'status' => 'confirmed', 'payment_status' => 'paid', 'created_at' => '2026-08-08 09:00:00']);
+        $this->order(['ref' => 'OKL-Q3', 'status' => 'shipped',   'payment_status' => 'paid', 'created_at' => '2026-08-02 09:00:00']);
+
+        $refs = collect(
+            $this->withHeaders($this->headers($this->admin('order_manager')))
+                ->getJson('/api/v1/admin/orders?fulfilment_stage=ready_to_ship&sort=oldest')
+                ->assertOk()
+                ->json('data')
+        )->pluck('order_ref')->all();
+
+        $this->assertSame(['OKL-Q1', 'OKL-Q2'], $refs);
+    }
+
     public function test_the_order_list_can_show_only_what_is_in_transit(): void
     {
         $this->order(['status' => 'shipped', 'payment_status' => 'paid']);

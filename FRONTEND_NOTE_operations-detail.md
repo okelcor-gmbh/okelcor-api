@@ -293,3 +293,63 @@ commercial invoice gets raised and the status moved to shipped.
 `DEFINITIONS['in_transit']` has been rewritten and two new keys added
 (`ready_to_ship`, `shipped`). If you render definitions as tooltips — you do —
 the column explains its own new meaning with no copy change on your side.
+
+---
+
+## Addendum — Session 88: the sort parameter
+
+Added, and you were right to ask rather than fake it. **No migration, no new
+route** — one query parameter on an endpoint you already call.
+
+`GET /api/v1/admin/orders?sort=`
+
+| Value | |
+|---|---|
+| `newest` | **default, unchanged** — every existing caller expects it |
+| `oldest` | the queue order |
+| `total_high` / `total_low` | by value |
+| `updated` | recently touched first |
+
+The response carries `meta.sort` and `meta.sorts`:
+
+```jsonc
+"meta": {
+  "sort": "oldest",
+  "sorts": { "newest": "Newest first", "oldest": "Oldest first",
+             "total_high": "Largest value first", "total_low": "Smallest value first",
+             "updated": "Recently updated first" }
+}
+```
+
+Drive the control off `meta.sorts` rather than a local copy, so it cannot drift
+from what the endpoint accepts.
+
+**`meta.sort` is what was applied, not what was asked for.** An unrecognised
+value falls back to `newest` rather than erroring — a sort is a view preference,
+not something worth failing a page load over — and echoing the bad value back
+would render your control in a state the list is not in. So set the control from
+`meta.sort`, not from your own request state.
+
+Your original copy can come back now: `?fulfilment_stage=ready_to_ship&sort=oldest`
+is tested as a pair.
+
+### One limit worth putting in the copy
+
+`oldest` sorts by when the order was **raised**, not by how long it has been
+sitting in its current state. Nothing records the latter — `updated_at` moves on
+any edit — and a proxy dressed up as the real thing is worse than the plain
+fact. For this queue the two are close enough to be useful, but if the copy says
+"waiting longest" it is overclaiming slightly; "oldest orders first" is exactly
+true. If they diverge in practice the fix is a `status_changed_at` column, not a
+cleverer query — tell me and I'll add it.
+
+### On not faking it
+
+Sorting the fetched page client-side would have reordered 25 rows and labelled
+them "oldest" while the genuinely oldest sat on page two. That is the second
+time this month a session has been improved by you refusing to invent something
+(`group_list` in 82 was the first), and both times the cost of asking was a few
+hours against a number the business would have trusted and been wrong about.
+Keep doing it.
+
+**And yes — commit and push.**
