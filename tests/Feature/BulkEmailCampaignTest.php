@@ -361,6 +361,38 @@ class BulkEmailCampaignTest extends TestCase
         unlink($path);
     }
 
+    public function test_importing_wix_under_the_wix_market_reports_it_once(): void
+    {
+        // The import the marketing team will actually run for the original
+        // export: a list spanning several countries whose only known
+        // segmentation is where it came from, so `wix` is the market chosen.
+        // Reported as ["wix","wix"], the admin panel's "nothing was moved"
+        // explainer fires and tells the operator the contacts were added to a
+        // market they had just been imported into.
+        $path = $this->wixCsv(['Jason,Blake,jason@onetel.com,+44 20 1,High St,London,United Kingdom,,Onetel']);
+
+        $stats = (new MarketingContactImportService())->import($path, 'wix');
+
+        $this->assertSame(['wix'], $stats['markets_applied']);
+        $this->assertSame(['wix'], MarketingContact::where('email', 'jason@onetel.com')->first()->marketNames());
+
+        unlink($path);
+    }
+
+    public function test_the_chosen_market_is_reported_first(): void
+    {
+        // Frontend's panel depends on this ordering to say "imported into
+        // Croatia — still their market — and also added to Wix". Reversed, the
+        // copy claims the opposite of what happened.
+        $path = $this->wixCsv(['Ana,Horvat,order@kupigume.hr,+385 1 2,Ilica 1,Zagreb,Croatia,,KUPI GUME']);
+
+        $stats = (new MarketingContactImportService())->import($path, 'croatia');
+
+        $this->assertSame(['croatia', 'wix'], $stats['markets_applied']);
+
+        unlink($path);
+    }
+
     public function test_a_file_that_is_not_a_wix_export_is_left_alone(): void
     {
         // Detection has to be specific or every upload silently joins the wix

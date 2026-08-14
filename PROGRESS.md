@@ -2036,7 +2036,17 @@ never instead of it. Contacts have been many-to-many with markets since Session
 | `marketing:tag-wix` for the backlog | 🔧 | The ~1,720 contacts loaded in Session 50 recorded nothing about their origin, so **the command does not guess** — it takes an explicit selector and refuses without one. `--file=contacts.csv` matches on e-mail, which is the only definition of "came from Wix" that is true rather than inferred; `--source`, `--market` and `--all` cover the rest. Reports by default, writes on `--fix`. |
 | The market needs no registration | ✅ | Markets are discovered from membership, so `wix` appears in `GET /marketing-contacts/markets` with a count the moment a contact is in it, and `?market=wix` filters and campaign audiences work with no further change. |
 | Opt-outs still hold | ✅ | A re-import cannot resubscribe an unsubscribed contact, and the tagging does not become a back door around that. Asserted by test. |
-| Backend tests (9 new) | ✅ | `BulkEmailCampaignTest` — detection and its specificity, primary market preserved, re-import adding rather than moving, unsubscribed contacts, the market appearing with its count, a campaign addressed to `market=wix`, and both command paths. Full suite **444 passed, 0 failed**, 206 skipped, up from 435. |
+| **Fix** — `markets_applied` could report a duplicate | 🔧 | `array_unique` was applied to the per-row markets but not to the reported list, so importing a Wix export **under the `wix` market** — the sensible choice for a list whose only known segmentation is where it came from, and the exact import recommended for the original export — reported `["wix","wix"]`. Frontend keys their "nothing was moved" explainer on that array being longer than one entry, so the first real use would have told the operator the contacts were added to a market they had just been imported into. Found by reading their implementation report, not by a test. |
+| The chosen market is reported first | 🔧 | Frontend's copy depends on the ordering to say "imported into Croatia — still their market — and also added to Wix"; reversed it claims the opposite of what happened. Now asserted explicitly rather than being an emergent property of the array literal. |
+| Backend tests (11 new) | ✅ | `BulkEmailCampaignTest` — detection and its specificity, primary market preserved, re-import adding rather than moving, unsubscribed contacts, the market appearing with its count, a campaign addressed to `market=wix`, both command paths, plus the duplicate and the ordering guarantee. Full suite **446 passed, 0 failed**, 206 skipped, up from 435. |
+
+**The Wix list is not on production.** `marketing:tag-wix --file=contacts.csv`
+matched **13 of 1,706** addresses, which is not a backfill result but a finding:
+the Session 50 import was built and deployed but there is no record of anyone
+ever running it, and bulk email was never usable anyway because
+`QUEUE_CONNECTION` is still `sync`. Do NOT run the backfill with `--fix` — it
+would tag 13 contacts and leave the business believing the "all Wix contacts"
+audience exists when it holds thirteen people. The list needs importing first.
 
 **The operational route for the existing list** is the import, not the command:
 re-upload `contacts.csv` with any market and every contact in it gains `wix`

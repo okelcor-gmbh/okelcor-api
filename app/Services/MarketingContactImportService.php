@@ -114,10 +114,16 @@ class MarketingContactImportService
         // export. Order matters: the chosen market is applied first, so it
         // stays the contact's PRIMARY market and nothing appears to have been
         // relocated into `wix`.
-        $markets = array_values(array_filter([
+        // array_unique matters: importing a Wix export UNDER the `wix` market —
+        // which is the sensible choice for a list whose only known
+        // segmentation is where it came from — would otherwise report
+        // ["wix","wix"]. Frontend keys its "nothing was moved" explainer on
+        // this being longer than one entry, so a duplicate makes it say the
+        // contacts were added to a market they were already imported into.
+        $markets = array_values(array_unique(array_filter([
             $defaultMarket,
             $isWixExport ? self::WIX_MARKET : null,
-        ]));
+        ])));
 
         $stats = [
             'imported'         => 0,
