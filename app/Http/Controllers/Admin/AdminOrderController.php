@@ -59,6 +59,13 @@ class AdminOrderController extends Controller
             $query->inTransit();
         }
 
+        // Either half of the fulfilment window on its own — the order manager's
+        // two jobs are different, and one list containing both is worked in the
+        // wrong order.
+        if ($request->filled('fulfilment_stage')) {
+            $query->fulfilmentStage($request->input('fulfilment_stage'));
+        }
+
         if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
@@ -807,6 +814,7 @@ class AdminOrderController extends Controller
             // same thing is a column that can disagree with it.
             'channel'        => $o->channel(),
             'in_transit'     => $o->isInTransit(),
+            'fulfilment_stage' => $o->fulfilmentStage(),
             // Enough to answer "has the paperwork gone out?" without opening
             // the order. Null rather than 0 when the aggregate was not
             // selected, so a caller can tell "none sent" from "not asked".
@@ -837,6 +845,7 @@ class AdminOrderController extends Controller
             'source'             => $o->source ?? 'website',
             'channel'            => $o->channel(),
             'in_transit'         => $o->isInTransit(),
+            'fulfilment_stage'   => $o->fulfilmentStage(),
             // The two signatures on the order confirmation. Always present, so
             // the panel never has to make a second request to find out whether
             // there is anything to show.

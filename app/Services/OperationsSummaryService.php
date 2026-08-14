@@ -42,7 +42,10 @@ class OperationsSummaryService
         'website_invoices'  => 'Invoices this system raised, by issue date.',
         'finance_invoices'  => 'Invoices finance entered from sevDesk, by issue date.',
         'invoice_variance'  => 'Website invoices minus finance invoices. Anything other than zero is one system holding an invoice the other does not.',
-        'in_transit'        => 'Paid and dispatched, not yet delivered — the orders whose trade documents need sending.',
+        'in_transit'        => 'Paid and in fulfilment, not yet delivered — confirmed and being prepared, or already dispatched. '
+            . 'These are the orders whose trade documents need issuing, which happens before a container leaves as often as after.',
+        'ready_to_ship'     => 'Of those, the ones not yet dispatched — paperwork to raise and a status to move.',
+        'shipped'           => 'Of those, the ones already on their way — paperwork to chase rather than raise.',
     ];
 
     /** Order statuses that count as confirmed business. */
@@ -133,6 +136,12 @@ class OperationsSummaryService
             'finance_invoices' => $financeInvoices,
             'invoice_variance' => $websiteInvoices - $financeInvoices,
             'in_transit'       => Order::query()->channel($channel)->inTransit()->count(),
+            // Split, because the count alone now mixes two different jobs —
+            // "raise the paperwork and dispatch this" against "this is on the
+            // water, chase the carrier" — and a queue that cannot tell them
+            // apart gets worked in the wrong order.
+            'ready_to_ship'    => Order::query()->channel($channel)->fulfilmentStage('ready_to_ship')->count(),
+            'shipped'          => Order::query()->channel($channel)->fulfilmentStage('in_transit')->count(),
         ];
     }
 
@@ -261,6 +270,8 @@ class OperationsSummaryService
             'finance_invoices' => $sum('finance_invoices'),
             'invoice_variance' => $sum('invoice_variance'),
             'in_transit'       => $sum('in_transit'),
+            'ready_to_ship'    => $sum('ready_to_ship'),
+            'shipped'          => $sum('shipped'),
             // NOT the sum of the per-channel counts: one buyer who ordered on
             // eBay and on the website is one client, and adding the rows would
             // report two. Counted distinctly across both channels instead.

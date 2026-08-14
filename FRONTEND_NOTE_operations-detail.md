@@ -205,3 +205,91 @@ No existing endpoint changed shape. The whole feature is inert until the
 migration runs — the register checks for its own columns, and an invoice raised
 before it runs still succeeds, because a reporting table must never be able to
 fail the thing it reports on. That is tested.
+
+---
+
+## Addendum — Session 87
+
+Three changes. **No migration; one new route, so the route cache is rebuilt on
+deploy.** One number you already render changes meaning.
+
+### 1. eBay is in the report, beside the website rather than inside it
+
+`GET /admin/operations/report` with no `channel` (or `channel=all`) now returns
+`channel_split: true`, and every period carries both:
+
+```jsonc
+{
+  "key": "2026-08", "label": "Aug 2026",
+  "orders_sent": 2, "orders_confirmed": 2, "amount": 1250, "clients": 2,
+  "channels": {
+    "normal": { "orders_sent": 1, "orders_confirmed": 1, "amount": 1000, "clients": 1 },
+    "ebay":   { "orders_sent": 1, "orders_confirmed": 1, "amount": 250,  "clients": 1 }
+  }
+}
+```
+
+`series.datasets` gains a `channel` field — `all`, `normal`, `ebay` — so each
+metric now has three datasets:
+
+```jsonc
+{ "metric": "orders_sent", "channel": "ebay", "label": "Orders sent — eBay", "data": [...] }
+```
+
+**Filter datasets by `metric` first, then let the user toggle `channel`.** A
+website-vs-eBay comparison is now one chart with a legend, not two requests.
+
+When a specific channel IS requested, `channel_split` is `false`, `periods` have
+no `channels` key, and only `channel: "all"` datasets come back. Three datasets
+per metric where two are empty is a legend full of lines that aren't there —
+branch on `channel_split`, don't assume the key exists.
+
+### 2. The report exports
+
+`GET /api/v1/admin/operations/report/export` — **`orders.export`**, not
+`orders.view`. Same query parameters as the JSON report, so an "Export" button
+next to the filters can pass the filter state straight through.
+
+Returns a streamed CSV attachment. One row per period per channel plus a
+combined row, with a `Channel` column of `all` / `website` / `ebay` — read by
+filtering a column rather than by opening three files.
+
+Note the permission difference: `support` can see the report and cannot export
+it. Hide the button rather than letting it 403.
+
+### 3. "In transit" now starts before dispatch — and splits in two
+
+**This changes a number you already render.** `in_transit` meant `shipped`
+only. It now means the whole fulfilment window: `confirmed`, `processing` or
+`shipped`, still requiring payment far enough along, still stopping at
+`delivered`.
+
+The reason is the order manager's actual workflow: trade documents get issued
+*before* a container leaves as often as after, so a queue that only appears once
+an order is dispatched shows the work after the moment to do it has passed.
+
+The count on the board will jump on deploy. That's the requested change, not a
+regression — but the old figure is still readable, because the board now also
+returns:
+
+```jsonc
+{ "in_transit": 12, "ready_to_ship": 7, "shipped": 5 }
+```
+
+And every order row and detail payload carries:
+
+```jsonc
+{ "in_transit": true, "fulfilment_stage": "ready_to_ship" }   // or "in_transit", or null
+```
+
+with a matching list filter: `?fulfilment_stage=ready_to_ship|in_transit`.
+
+**Build the queue as two sections, not one list.** They are different jobs —
+*raise the paperwork and move the status* against *this is on the water, chase
+the carrier* — and one list containing both gets worked in the wrong order. The
+`ready_to_ship` section is the one the order manager asked for: it is where the
+commercial invoice gets raised and the status moved to shipped.
+
+`DEFINITIONS['in_transit']` has been rewritten and two new keys added
+(`ready_to_ship`, `shipped`). If you render definitions as tooltips — you do —
+the column explains its own new meaning with no copy change on your side.

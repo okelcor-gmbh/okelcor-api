@@ -761,21 +761,64 @@ class OrderSignoffAndBoardTest extends TestCase
         $this->assertSame([['currency' => 'USD', 'amount' => 800.0, 'orders' => 1]], $normal['amount_other_currencies']);
     }
 
-    public function test_in_transit_is_paid_and_shipped_and_nothing_else(): void
+    public function test_the_fulfilment_queue_starts_before_dispatch(): void
     {
-        $paidShipped     = $this->order(['status' => 'shipped',   'payment_status' => 'paid']);
-        $unpaidShipped   = $this->order(['status' => 'shipped',   'payment_status' => 'unpaid']);
-        $paidDelivered   = $this->order(['status' => 'delivered', 'payment_status' => 'paid']);
-        $depositShipped  = $this->order(['status' => 'shipped',   'payment_stage' => 'deposit_paid']);
+        // Session 87. The queue originally began at `shipped`, which showed the
+        // work after the moment to do it had passed: trade documents are issued
+        // BEFORE a container leaves as often as after, so an order confirmed
+        // and being prepared is exactly the one whose commercial invoice needs
+        // raising.
+        $confirmed = $this->order(['status' => 'confirmed',  'payment_status' => 'paid']);
+        $processing = $this->order(['status' => 'processing', 'payment_status' => 'paid']);
+        $shipped   = $this->order(['status' => 'shipped',    'payment_status' => 'paid']);
 
-        $this->assertTrue($paidShipped->isInTransit());
-        $this->assertFalse($unpaidShipped->isInTransit());
-        $this->assertFalse($paidDelivered->isInTransit());
-        $this->assertTrue($depositShipped->isInTransit());
+        $unpaid    = $this->order(['status' => 'confirmed',  'payment_status' => 'unpaid']);
+        $delivered = $this->order(['status' => 'delivered',  'payment_status' => 'paid']);
+        $deposit   = $this->order(['status' => 'processing', 'payment_stage'  => 'deposit_paid']);
+
+        $this->assertTrue($confirmed->isInTransit());
+        $this->assertTrue($processing->isInTransit());
+        $this->assertTrue($shipped->isInTransit());
+        $this->assertTrue($deposit->isInTransit(), 'A deposit is far enough along to raise documents against.');
+
+        // An unpaid order is a different and more urgent problem than a
+        // documentation one; a delivered order has left the queue whatever its
+        // paperwork.
+        $this->assertFalse($unpaid->isInTransit());
+        $this->assertFalse($delivered->isInTransit());
 
         // The scope and the accessor have to agree, or the board's count and
         // the order's badge tell different stories about the same order.
-        $this->assertSame(2, Order::query()->inTransit()->count());
+        $this->assertSame(4, Order::query()->inTransit()->count());
+    }
+
+    public function test_the_queue_separates_paperwork_to_raise_from_paperwork_to_chase(): void
+    {
+        // The count alone now mixes two different jobs, and a queue that cannot
+        // tell them apart gets worked in the wrong order.
+        $ready   = $this->order(['status' => 'confirmed', 'payment_status' => 'paid']);
+        $shipped = $this->order(['status' => 'shipped',   'payment_status' => 'paid']);
+
+        $this->assertSame('ready_to_ship', $ready->fulfilmentStage());
+        $this->assertSame('in_transit', $shipped->fulfilmentStage());
+        $this->assertNull($this->order(['status' => 'delivered', 'payment_status' => 'paid'])->fulfilmentStage());
+
+        $board = collect(app(OperationsSummaryService::class)->build()['channels'])
+            ->firstWhere('channel', 'normal');
+
+        $this->assertSame(2, $board['in_transit']);
+        $this->assertSame(1, $board['ready_to_ship']);
+        $this->assertSame(1, $board['shipped']);
+
+        $headers = $this->headers($this->admin('order_manager'));
+
+        $this->assertSame(1, $this->withHeaders($headers)
+            ->getJson('/api/v1/admin/orders?fulfilment_stage=ready_to_ship')->assertOk()->json('meta.total'));
+
+        $row = $this->withHeaders($headers)
+            ->getJson('/api/v1/admin/orders?fulfilment_stage=in_transit')->assertOk()->json('data.0');
+
+        $this->assertSame('in_transit', $row['fulfilment_stage']);
     }
 
     // ── invoices: ours against the finance system's ───────────────────────
@@ -1059,6 +1102,94 @@ class OrderSignoffAndBoardTest extends TestCase
 
         $this->assertSame([1, 1], $clients);
         $this->assertSame(1, $data['totals']['clients'], 'The total must be counted over the range, not summed.');
+    }
+
+    public function test_the_report_keeps_ebay_beside_the_website_rather_than_inside_it(): void
+    {
+        // Two books: different fulfilment, different paperwork. A total that
+        // hides which one moved answers nothing.
+        $this->order(['source' => 'website', 'status' => 'confirmed', 'total' => 1000,
+            'created_at' => '2026-08-05 10:00:00', 'customer_email' => 'w@x.de']);
+        $this->order(['source' => 'ebay', 'status' => 'confirmed', 'total' => 250,
+            'created_at' => '2026-08-06 10:00:00', 'customer_email' => 'e@x.de']);
+
+        $data = $this->withHeaders($this->headers($this->admin('order_manager')))
+            ->getJson('/api/v1/admin/operations/report?from=2026-08-01&to=2026-08-31')
+            ->assertOk()
+            ->json('data');
+
+        $this->assertTrue($data['channel_split']);
+
+        $august = $data['periods'][0];
+
+        // Combined AND both channels, in one period row.
+        $this->assertSame(2, $august['orders_sent']);
+        $this->assertSame(1, $august['channels']['normal']['orders_sent']);
+        $this->assertSame(1, $august['channels']['ebay']['orders_sent']);
+        $this->assertEquals(1000, $august['channels']['normal']['amount']);
+        $this->assertEquals(250, $august['channels']['ebay']['amount']);
+
+        // And plottable as three lines per metric without a second request.
+        $sets = collect($data['series']['datasets'])->where('metric', 'orders_sent');
+
+        $this->assertEqualsCanonicalizing(['all', 'normal', 'ebay'], $sets->pluck('channel')->all());
+        $this->assertSame('Orders sent — eBay', $sets->firstWhere('channel', 'ebay')['label']);
+    }
+
+    public function test_asking_for_one_channel_does_not_return_the_split(): void
+    {
+        // Three datasets per metric where two of them are empty is a chart
+        // legend full of lines that are not there.
+        $data = $this->withHeaders($this->headers($this->admin('order_manager')))
+            ->getJson('/api/v1/admin/operations/report?channel=ebay')
+            ->assertOk()
+            ->json('data');
+
+        $this->assertFalse($data['channel_split']);
+        $this->assertArrayNotHasKey('channels', $data['periods'][0]);
+        $this->assertSame(['all'], collect($data['series']['datasets'])->pluck('channel')->unique()->values()->all());
+    }
+
+    public function test_the_report_downloads_as_a_spreadsheet(): void
+    {
+        $this->order(['source' => 'website', 'status' => 'confirmed', 'total' => 1000,
+            'created_at' => '2026-08-05 10:00:00', 'customer_email' => 'w@x.de']);
+        $this->order(['source' => 'ebay', 'status' => 'confirmed', 'total' => 250,
+            'created_at' => '2026-08-06 10:00:00', 'customer_email' => 'e@x.de']);
+
+        $response = $this->withHeaders($this->headers($this->admin('order_manager')))
+            ->get('/api/v1/admin/operations/report/export?from=2026-08-01&to=2026-08-31');
+
+        $response->assertOk();
+        $response->assertHeader('content-type', 'text/csv; charset=UTF-8');
+
+        $csv = $response->streamedContent();
+
+        // Excel reads a UTF-8 CSV as Latin-1 without the BOM, which turns every
+        // € and every accented customer name into mojibake — and this file is
+        // going to a finance team who will open it in Excel.
+        $this->assertStringStartsWith("\xEF\xBB\xBF", $csv);
+
+        $this->assertStringContainsString('Orders sent', $csv);
+        // One line per period per channel plus the combined line, so the sheet
+        // is read by filtering a column rather than opening three files.
+        // Not asserting the label column: fputcsv quotes any field containing
+        // a space, so "Aug 2026" arrives quoted and the assertion would be
+        // about PHP's quoting rules rather than about the report.
+        $this->assertStringContainsString('2026-08,all,2,2,1250', $csv);
+        $this->assertStringContainsString('2026-08,website,1,1,1000', $csv);
+        $this->assertStringContainsString('2026-08,ebay,1,1,250', $csv);
+
+        // The caveat travels with the file: a spreadsheet outlives the page it
+        // came from and is where someone will try to sum that column.
+        $this->assertStringContainsString('double-counts', $csv);
+    }
+
+    public function test_exporting_needs_the_export_permission(): void
+    {
+        $this->withHeaders($this->headers($this->admin('support')))
+            ->get('/api/v1/admin/operations/report/export')
+            ->assertStatus(403);
     }
 
     // ── the invoice register ──────────────────────────────────────────────

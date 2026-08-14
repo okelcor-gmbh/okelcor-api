@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-13 | Branch: `main` | Latest commit: Session 86 (**pushed, not deployed**)
+Last updated: 2026-08-13 | Branch: `main` | Latest commit: Session 87 (**pushed, not deployed**)
 
 ---
 
@@ -43,6 +43,7 @@ wrong.
 | **84** | Frontend's three findings: `you_may_sign`/`you_may_revoke` embedded, document state on the order row, `support` given `orders.view` | none | none |
 | **85** | Wix contacts become a `wix` market so campaigns can address them as an audience | none | none |
 | **86** | Clients drill-down, month-to-month report with charts, and one invoice register for both sides | **#37** | **5 new** |
+| **87** | eBay kept beside the website in the report, CSV export, and the fulfilment queue starting before dispatch | none | **1 new** |
 
 ```bash
 cd /home/okelvaxj/domains/okelcor.com/public_html/okelcor-api
@@ -2123,6 +2124,31 @@ invoice, but it has no `invoices` row, so it appeared on neither side.
 | Auto-registered rows are read-only | 🔧 | 409 on edit or delete. Deleting one would only mean it reappears the next time the invoice behind it is saved, while the reconciliation reports a gap that is not real. Finance also cannot hand-create an `okelcor` row — that would put a number on our side that nothing on our side issued. |
 | **Fix found by test** — the register was polluting finance's column | 🔧 | The board's `finance_invoices` count and the reconciliation's finance side now scope to `MANUAL_SYSTEMS`. Without it our own auto-registered invoices were counted as finance's, so the variance read zero however far apart the two systems actually were — worse than having no column at all. Caught by an existing Session 83 test, not by a new one. |
 | Backend tests (18 new) | ✅ | Clients drill-down and its agreement with the board, client detail and the 404, gap-free series, change and the zero-baseline null, clients not summed, registration from both sources, packing lists excluded, supersede cleanup, no double registration, read-only rows, file attach/download, and the register being inert before its migration. Full suite **466 passed, 0 failed**, 206 skipped, up from 448. |
+
+See `FRONTEND_NOTE_operations-detail.md`.
+
+---
+
+## eBay in the report, an export, and a queue that starts earlier (Session 87)
+
+> **Deploy status:** built and tested, **not yet deployed**. No migration.
+> **1 new route**, so `route:cache` must be rebuilt. One number already on the
+> board changes meaning — see below.
+
+| Change | Status | Notes |
+|--------|--------|-------|
+| **eBay recorded beside the website, not inside it** | 🔧 | Every period in the report now carries the combined figure AND both channels, and the chart series gain a dataset per metric per channel. Two books — different fulfilment, different paperwork — and a total that hides which one moved answers nothing. Asking for one channel returns only its datasets: three per metric where two are empty is a legend full of lines that are not there. |
+| `GET /admin/operations/report/export` | 🔧 | `orders.export`. One line per period per channel plus the combined line — a spreadsheet is read by filtering a column, not by opening three files. Carries a UTF-8 BOM, because Excel reads a UTF-8 CSV as Latin-1 without one and turns every € and every accented customer name into mojibake, and this file goes to a finance team who will open it in Excel. The clients caveat travels inside the file: a spreadsheet outlives the page it came from and is where someone will eventually try to sum that column. |
+| **The fulfilment queue starts before dispatch** | 🔧 | `in_transit` meant `shipped` only, which showed the work after the moment to do it had passed — trade documents are issued BEFORE a container leaves as often as after, so an order confirmed and being prepared is exactly the one whose commercial invoice needs raising. Now `confirmed`, `processing` or `shipped`, still requiring payment far enough along, still stopping at `delivered`. |
+| Split into the two jobs it now contains | 🔧 | `fulfilment_stage` on every order (`ready_to_ship` / `in_transit`), a matching `?fulfilment_stage=` filter, and `ready_to_ship` / `shipped` counts beside `in_transit` on the board. The single count would otherwise mix "raise the paperwork and dispatch this" with "this is on the water, chase the carrier", and a queue that cannot tell them apart gets worked in the wrong order. |
+| The definition string was rewritten with it | 🔧 | `DEFINITIONS['in_transit']` is rendered in the UI, so the column explains its own new meaning where it is read rather than in a note nobody has open. |
+| Backend tests (5 new, 1 rewritten) | ✅ | Channel split and its absence when one channel is asked for, the CSV including its BOM and all three row kinds and the caveat, export permission, the widened queue, and the two stages agreeing between accessor, scope, board and list filter. The old `in_transit is paid and shipped and nothing else` was replaced rather than patched — its name had become a lie. Full suite **471 passed, 0 failed**, 206 skipped, up from 466. |
+
+**One number changes meaning on deploy.** `in_transit` on the board will jump,
+because it now counts orders that are confirmed and being prepared as well as
+dispatched ones. That is the requested change, not a regression — but it is
+worth telling the order manager before she sees it, and the `ready_to_ship` /
+`shipped` split is there so the old figure is still readable.
 
 See `FRONTEND_NOTE_operations-detail.md`.
 

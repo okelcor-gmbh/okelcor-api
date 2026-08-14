@@ -541,6 +541,10 @@ Route::prefix('v1')->group(function () {
             // fell into in Session 77.
             Route::get('operations/summary', [AdminOperationsSummaryController::class, 'summary']);
             Route::get('operations/report', [AdminOperationsSummaryController::class, 'report']);
+            // Static segment before nothing else claims it; kept next to its
+            // JSON twin so the two cannot drift apart in scope or filters.
+            Route::get('operations/report/export', [AdminOperationsSummaryController::class, 'exportReport'])
+                ->middleware('permission:orders.export');
             // 'clients/detail' before 'clients' is not needed — they are
             // distinct paths — but the detail route is keyed on ?email= rather
             // than a path segment, because an e-mail in a path means encoding

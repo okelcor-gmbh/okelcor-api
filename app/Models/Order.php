@@ -161,32 +161,66 @@ class Order extends Model
     }
 
     /**
-     * Paid for, dispatched, not yet arrived.
+     * Paid for, on its way out, not yet arrived — the fulfilment window.
      *
-     * The order manager's cue to send trade documents, which is the whole
-     * reason it is on the board: a paid order in transit with no commercial
-     * invoice attached is a container that will reach a port without its
-     * paperwork.
+     * Originally this meant `shipped` only. The order manager asked for it to
+     * start earlier, and the reason is the whole point of the queue: trade
+     * documents are issued BEFORE a container leaves as often as after, so a
+     * list that only appears once an order is already dispatched shows the work
+     * after the moment to do it has passed. An order confirmed and being
+     * prepared is exactly the one whose commercial invoice needs raising.
      *
-     * Deliberately does not include `processing` — nothing has moved yet — nor
-     * an unpaid shipped order, which is a different and more urgent problem
-     * than a documentation one.
+     * Still excludes an UNPAID order — that is a different and more urgent
+     * problem than a documentation one — and stops at `delivered`, because a
+     * delivered order has left the queue whatever its paperwork.
      */
+    public const FULFILMENT_STATUSES = ['confirmed', 'processing', 'shipped'];
+
+    /** Money far enough along to start issuing documents against. */
+    public const FULFILMENT_PAYMENT_STAGES = ['deposit_paid', 'balance_due', 'balance_paid', 'shipment_released'];
+
     public function isInTransit(): bool
     {
-        if ($this->status !== 'shipped') {
+        if (! in_array($this->status, self::FULFILMENT_STATUSES, true)) {
             return false;
         }
 
-        return $this->isFullyPaid() || in_array($this->payment_stage, ['deposit_paid', 'balance_due'], true);
+        return $this->isFullyPaid() || in_array($this->payment_stage, self::FULFILMENT_PAYMENT_STAGES, true);
+    }
+
+    /**
+     * Where in that window the order sits.
+     *
+     * The count alone would now mix two different jobs — "raise the paperwork
+     * and dispatch this" against "this is on the water, chase the carrier" —
+     * and a queue that cannot tell them apart is a queue that gets worked in
+     * the wrong order.
+     */
+    public function fulfilmentStage(): ?string
+    {
+        if (! $this->isInTransit()) {
+            return null;
+        }
+
+        return $this->status === 'shipped' ? 'in_transit' : 'ready_to_ship';
     }
 
     /** @see isInTransit() — the same rule, expressed for a query. */
     public function scopeInTransit(Builder $query): Builder
     {
-        return $query->where('status', 'shipped')
+        return $query->whereIn('status', self::FULFILMENT_STATUSES)
             ->where(fn ($q) => $q->where('payment_status', 'paid')
-                ->orWhereIn('payment_stage', ['deposit_paid', 'balance_due', 'balance_paid', 'shipment_released']));
+                ->orWhereIn('payment_stage', self::FULFILMENT_PAYMENT_STAGES));
+    }
+
+    /** Narrows the fulfilment window to one of its two halves. */
+    public function scopeFulfilmentStage(Builder $query, ?string $stage): Builder
+    {
+        return match ($stage) {
+            'ready_to_ship' => $query->inTransit()->whereIn('status', ['confirmed', 'processing']),
+            'in_transit'    => $query->inTransit()->where('status', 'shipped'),
+            default         => $query,
+        };
     }
 
     /**

@@ -13,6 +13,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * The operations board, and the invoice reconciliation behind its two invoice
@@ -167,6 +168,68 @@ class AdminOperationsSummaryController extends Controller
         )['meta']['total'];
 
         return response()->json(['data' => $data, 'message' => 'success']);
+    }
+
+    // -------------------------------------------------------------------------
+    // GET /api/v1/admin/operations/report/export — orders.export
+    //
+    // The same report as a CSV. One line per period per channel plus the
+    // combined line, because a spreadsheet is read by filtering a column rather
+    // than by opening three files.
+    // -------------------------------------------------------------------------
+    public function exportReport(Request $request, OperationsReportService $report): StreamedResponse
+    {
+        $request->validate([
+            'from'        => ['nullable', 'date'],
+            'to'          => ['nullable', 'date'],
+            'granularity' => ['nullable', 'in:day,week,month'],
+            'channel'     => ['nullable', 'in:normal,ebay,all'],
+        ]);
+
+        $channel = $request->input('channel');
+        $channel = $channel === 'all' ? null : $channel;
+
+        $data = $report->build(
+            $request->input('from'),
+            $request->input('to'),
+            $request->input('granularity', 'month'),
+            $channel,
+        );
+
+        $rows     = $report->rows($data);
+        $filename = 'okelcor-transactions-' . $data['period']['from'] . '_to_' . $data['period']['to'] . '.csv';
+
+        return response()->streamDownload(function () use ($rows, $data) {
+            $out = fopen('php://output', 'w');
+
+            // Excel opens a UTF-8 CSV as Latin-1 without this, which turns
+            // every € and every accented customer name into mojibake — and the
+            // file is going to a finance team who will open it in Excel.
+            fwrite($out, "\xEF\xBB\xBF");
+
+            fputcsv($out, ['Okelcor transaction report']);
+            fputcsv($out, ['Period', $data['period']['from'] . ' to ' . $data['period']['to']]);
+            fputcsv($out, ['Granularity', $data['granularity']]);
+            fputcsv($out, ['Channel', $data['channel']]);
+            fputcsv($out, []);
+
+            fputcsv($out, ['Period', 'Period key', 'Channel', 'Orders sent', 'Orders confirmed', 'Amount (EUR)', 'Clients']);
+
+            foreach ($rows as $row) {
+                fputcsv($out, array_values($row));
+            }
+
+            fputcsv($out, []);
+            // Carried into the file rather than left on the screen it was
+            // exported from: a spreadsheet outlives the page, gets forwarded,
+            // and is where someone will eventually try to sum that column.
+            fputcsv($out, ['Note', $data['note']]);
+
+            fclose($out);
+        }, $filename, [
+            'Content-Type'        => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+        ]);
     }
 
     // -------------------------------------------------------------------------

@@ -44,22 +44,36 @@ class OperationsReportService
         [$start, $end] = $this->window($from, $to, $granularity);
 
         $buckets = $this->buckets($start, $end, $granularity);
-        $rows    = $this->aggregate($start, $end, $granularity, $channel);
+
+        // eBay is recorded in the report and kept apart from the website
+        // orders, because they are two books: different fulfilment, different
+        // paperwork, and a total that hides which one moved answers nothing.
+        // Every period therefore carries the combined figure AND both channels.
+        $split = $channel === null;
+
+        $rows = ['all' => $this->aggregate($start, $end, $granularity, $channel)];
+
+        if ($split) {
+            foreach (Order::CHANNELS as $each) {
+                $rows[$each] = $this->aggregate($start, $end, $granularity, $each);
+            }
+        }
 
         $periods = [];
 
         foreach ($buckets as $key => $label) {
-            $row = $rows[$key] ?? null;
+            $period = ['key' => $key, 'label' => $label]
+                + $this->figures($rows['all'][$key] ?? null);
 
-            $periods[] = [
-                'key'              => $key,
-                'label'            => $label,
-                'orders_sent'      => (int) ($row->orders_sent ?? 0),
-                'orders_confirmed' => (int) ($row->orders_confirmed ?? 0),
-                'amount'           => round((float) ($row->amount_eur ?? 0), 2),
-                'currency'         => 'EUR',
-                'clients'          => (int) ($row->clients ?? 0),
-            ];
+            if ($split) {
+                $period['channels'] = [];
+
+                foreach (Order::CHANNELS as $each) {
+                    $period['channels'][$each] = $this->figures($rows[$each][$key] ?? null);
+                }
+            }
+
+            $periods[] = $period;
         }
 
         // Every bucket in the range is present, including the empty ones. A
@@ -70,10 +84,11 @@ class OperationsReportService
             'period'      => ['from' => $start->toDateString(), 'to' => $end->toDateString()],
             'granularity' => $granularity,
             'channel'     => $channel ?? 'all',
+            'channel_split' => $split,
             'periods'     => $periods,
             'change'      => $this->change($periods),
             'totals'      => $this->totals($periods),
-            'series'      => $this->series($periods),
+            'series'      => $this->series($periods, $split),
             'note'        => 'Clients are counted distinctly WITHIN each period. Summing the client '
                 . 'column across periods double-counts anyone who ordered in more than one — the '
                 . 'total below is counted over the whole range instead.',
@@ -138,26 +153,107 @@ class OperationsReportService
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    private function figures(?object $row): array
+    {
+        return [
+            'orders_sent'      => (int) ($row->orders_sent ?? 0),
+            'orders_confirmed' => (int) ($row->orders_confirmed ?? 0),
+            'amount'           => round((float) ($row->amount_eur ?? 0), 2),
+            'currency'         => 'EUR',
+            'clients'          => (int) ($row->clients ?? 0),
+        ];
+    }
+
+    private function metricLabel(string $metric): string
+    {
+        return match ($metric) {
+            'orders_sent'      => 'Orders sent',
+            'orders_confirmed' => 'Orders confirmed',
+            'amount'           => 'Amount (EUR)',
+            'clients'          => 'Clients',
+            default            => $metric,
+        };
+    }
+
+    /**
      * Parallel arrays on a shared axis — what every charting library wants.
+     *
+     * One dataset per metric for the combined figure, and one per metric per
+     * channel when both are in scope, so "website against eBay" is a chart the
+     * client filters into rather than a second request.
      *
      * @param  array<int, array<string, mixed>>  $periods
      * @return array<string, mixed>
      */
-    private function series(array $periods): array
+    private function series(array $periods, bool $split): array
     {
-        return [
-            'labels'   => array_column($periods, 'label'),
-            'datasets' => array_map(fn (string $metric) => [
-                'metric' => $metric,
-                'label'  => match ($metric) {
-                    'orders_sent'      => 'Orders sent',
-                    'orders_confirmed' => 'Orders confirmed',
-                    'amount'           => 'Amount (EUR)',
-                    'clients'          => 'Clients',
-                },
-                'data' => array_map(fn ($p) => $p[$metric], $periods),
-            ], self::METRICS),
-        ];
+        $datasets = [];
+
+        foreach (self::METRICS as $metric) {
+            $datasets[] = [
+                'metric'  => $metric,
+                'channel' => 'all',
+                'label'   => $this->metricLabel($metric),
+                'data'    => array_map(fn ($p) => $p[$metric], $periods),
+            ];
+
+            if (! $split) {
+                continue;
+            }
+
+            foreach (Order::CHANNELS as $each) {
+                $datasets[] = [
+                    'metric'  => $metric,
+                    'channel' => $each,
+                    'label'   => $this->metricLabel($metric) . ' — '
+                        . ($each === Order::CHANNEL_EBAY ? 'eBay' : 'Website'),
+                    'data'    => array_map(fn ($p) => $p['channels'][$each][$metric] ?? 0, $periods),
+                ];
+            }
+        }
+
+        return ['labels' => array_column($periods, 'label'), 'datasets' => $datasets];
+    }
+
+    /**
+     * The report as rows, for CSV. One line per period per channel, plus the
+     * combined line — a spreadsheet is read by filtering a column, not by
+     * reading three files.
+     *
+     * @param  array<string, mixed>  $report
+     * @return array<int, array<string, mixed>>
+     */
+    public function rows(array $report): array
+    {
+        $out = [];
+
+        foreach ($report['periods'] as $period) {
+            $out[] = [
+                'period'           => $period['label'],
+                'period_key'       => $period['key'],
+                'channel'          => 'all',
+                'orders_sent'      => $period['orders_sent'],
+                'orders_confirmed' => $period['orders_confirmed'],
+                'amount_eur'       => $period['amount'],
+                'clients'          => $period['clients'],
+            ];
+
+            foreach ($period['channels'] ?? [] as $channel => $figures) {
+                $out[] = [
+                    'period'           => $period['label'],
+                    'period_key'       => $period['key'],
+                    'channel'          => $channel === Order::CHANNEL_EBAY ? 'ebay' : 'website',
+                    'orders_sent'      => $figures['orders_sent'],
+                    'orders_confirmed' => $figures['orders_confirmed'],
+                    'amount_eur'       => $figures['amount'],
+                    'clients'          => $figures['clients'],
+                ];
+            }
+        }
+
+        return $out;
     }
 
     /**
