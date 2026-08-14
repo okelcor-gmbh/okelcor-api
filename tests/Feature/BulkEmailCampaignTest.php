@@ -311,6 +311,240 @@ class BulkEmailCampaignTest extends TestCase
         unlink($path);
     }
 
+    // ── the wix audience (Session 85) ─────────────────────────────────────
+    //
+    // Marketing want to mail "everyone who came across from Wix" as an
+    // audience of its own. That is a question about where a contact came from,
+    // not where it is, so `wix` is a market held ALONGSIDE the geographic one.
+
+    /** The header shape only a Wix contact export has. */
+    private function wixCsv(array $rows): string
+    {
+        $csv = "First Name,Last Name,Email 1,Phone 1,Address 1 - Street,Address 1 - City,"
+            . "Address 1 - Country,Address 2 - Country,Company
+";
+
+        foreach ($rows as $row) {
+            $csv .= $row . "
+";
+        }
+
+        $path = tempnam(sys_get_temp_dir(), 'wix') . '.csv';
+        file_put_contents($path, $csv);
+
+        return $path;
+    }
+
+    public function test_a_wix_export_joins_the_wix_market_as_well_as_the_chosen_one(): void
+    {
+        $path = $this->wixCsv(['Ana,Horvat,ana@kupigume.hr,+385 1 234,Ilica 1,Zagreb,Croatia,,KUPI GUME']);
+
+        $stats = (new MarketingContactImportService())->import($path, 'croatia');
+
+        $contact = MarketingContact::where('email', 'ana@kupigume.hr')->first();
+
+        // Both, and croatia stays PRIMARY — nothing has been relocated into
+        // wix, which is what an operator would see as their import going wrong.
+        $this->assertSame('croatia', $contact->market);
+        $this->assertEqualsCanonicalizing(['croatia', 'wix'], $contact->marketNames());
+
+        // Reported back, so the UI can say what happened rather than leaving
+        // the operator to notice a market they did not ask for.
+        $this->assertSame('wix', $stats['source_detected']);
+        $this->assertSame(['croatia', 'wix'], $stats['markets_applied']);
+
+        // And the origin is recorded on the row, which nothing did before —
+        // Wix's export carries no source column, so every contact imported
+        // until now has a null one.
+        $this->assertSame('wix', $contact->source);
+
+        unlink($path);
+    }
+
+    public function test_a_file_that_is_not_a_wix_export_is_left_alone(): void
+    {
+        // Detection has to be specific or every upload silently joins the wix
+        // audience and "send to all Wix contacts" stops meaning anything.
+        $csv  = "Email,Company
+plain@example.com,Example
+";
+        $path = tempnam(sys_get_temp_dir(), 'plain') . '.csv';
+        file_put_contents($path, $csv);
+
+        $stats   = (new MarketingContactImportService())->import($path, 'germany');
+        $contact = MarketingContact::where('email', 'plain@example.com')->first();
+
+        $this->assertNull($stats['source_detected']);
+        $this->assertSame(['germany'], $contact->marketNames());
+        $this->assertNull($contact->source);
+
+        unlink($path);
+    }
+
+    public function test_one_wix_shaped_column_is_not_enough_to_tag_a_list(): void
+    {
+        // A spreadsheet that happens to name its column "Email 1" is not a Wix
+        // export. Three signature headers are required.
+        $csv  = "Email 1,Company
+single@example.com,Example
+";
+        $path = tempnam(sys_get_temp_dir(), 'onecol') . '.csv';
+        file_put_contents($path, $csv);
+
+        $stats = (new MarketingContactImportService())->import($path, 'germany');
+
+        $this->assertNull($stats['source_detected']);
+        $this->assertSame(['germany'], MarketingContact::where('email', 'single@example.com')->first()->marketNames());
+
+        unlink($path);
+    }
+
+    public function test_re_importing_wix_adds_the_market_without_moving_an_existing_contact(): void
+    {
+        // The path the marketing team will actually take with the ~1,720
+        // contacts already loaded: re-upload the export and have them GAIN wix
+        // while staying in the market they were put in.
+        MarketingContact::create([
+            'email'             => 'existing@kupigume.hr',
+            'market'            => 'croatia',
+            'status'            => 'subscribed',
+            'unsubscribe_token' => 'tok-existing',
+        ]);
+
+        $path = $this->wixCsv(['Ivan,Novak,existing@kupigume.hr,+385 1 999,Ilica 2,Zagreb,Croatia,,KUPI GUME']);
+
+        (new MarketingContactImportService())->import($path, 'wix');
+
+        $contact = MarketingContact::where('email', 'existing@kupigume.hr')->first();
+
+        $this->assertSame('croatia', $contact->market, 'The primary market must not move.');
+        $this->assertEqualsCanonicalizing(['croatia', 'wix'], $contact->marketNames());
+
+        unlink($path);
+    }
+
+    public function test_an_unsubscribed_wix_contact_is_still_never_resubscribed(): void
+    {
+        // The tagging must not become a back door around an opt-out.
+        MarketingContact::create([
+            'email'             => 'gone@kupigume.hr',
+            'market'            => 'croatia',
+            'status'            => 'unsubscribed',
+            'unsubscribe_token' => 'tok-gone',
+        ]);
+
+        $path = $this->wixCsv(['Marko,Kovac,gone@kupigume.hr,+385 1 111,Ilica 3,Zagreb,Croatia,,KUPI GUME']);
+
+        (new MarketingContactImportService())->import($path, 'croatia');
+
+        $contact = MarketingContact::where('email', 'gone@kupigume.hr')->first();
+
+        $this->assertSame('unsubscribed', $contact->status);
+        $this->assertContains('wix', $contact->marketNames());
+
+        unlink($path);
+    }
+
+    public function test_the_wix_market_shows_up_in_the_markets_list_with_its_count(): void
+    {
+        $path = $this->wixCsv([
+            'A,One,one@kupigume.hr,+385 1 1,S 1,Zagreb,Croatia,,One',
+            'B,Two,two@kupigume.hr,+385 1 2,S 2,Zagreb,Croatia,,Two',
+        ]);
+
+        (new MarketingContactImportService())->import($path, 'croatia');
+
+        $markets = collect(
+            $this->actingAs($this->admin('order_manager'), 'sanctum')
+                ->getJson('/api/v1/admin/marketing-contacts/markets')
+                ->assertOk()
+                ->json('data')
+        );
+
+        // Markets are discovered from membership, so `wix` needs no
+        // registration anywhere — it exists because contacts are in it.
+        $this->assertSame(2, $markets->firstWhere('market', 'wix')['contact_count']);
+        $this->assertSame(2, $markets->firstWhere('market', 'croatia')['contact_count']);
+
+        unlink($path);
+    }
+
+    public function test_a_campaign_can_be_addressed_to_the_whole_wix_audience(): void
+    {
+        // The reason any of this exists.
+        $path = $this->wixCsv([
+            'A,One,w1@kupigume.hr,+385 1 1,S 1,Zagreb,Croatia,,One',
+            'B,Two,w2@kupigume.hr,+385 1 2,S 2,Zagreb,Croatia,,Two',
+        ]);
+        (new MarketingContactImportService())->import($path, 'croatia');
+
+        MarketingContact::create([
+            'email' => 'notwix@example.com', 'market' => 'germany',
+            'status' => 'subscribed', 'unsubscribe_token' => 'tok-nw',
+        ]);
+
+        $count = $this->actingAs($this->admin('order_manager'), 'sanctum')
+            ->getJson('/api/v1/admin/bulk-emails/recipient-count?market=wix')
+            ->assertOk()
+            ->json('data.count');
+
+        $this->assertSame(2, $count);
+
+        unlink($path);
+    }
+
+    public function test_the_backfill_command_reports_before_it_writes(): void
+    {
+        // The ~1,720 contacts loaded in Session 50 recorded nothing about
+        // where they came from, so the command takes an explicit selector and
+        // will not guess.
+        MarketingContact::create([
+            'email' => 'old@kupigume.hr', 'market' => 'croatia',
+            'status' => 'subscribed', 'unsubscribe_token' => 'tok-old',
+        ]);
+
+        $this->artisan('marketing:tag-wix')
+            ->expectsOutputToContain('Pick what to tag')
+            ->assertExitCode(1);
+
+        $this->artisan('marketing:tag-wix --market=croatia')
+            ->expectsOutputToContain('Would tag 1')
+            ->assertExitCode(0);
+
+        // Reported, not written.
+        $this->assertSame(['croatia'], MarketingContact::where('email', 'old@kupigume.hr')->first()->marketNames());
+
+        $this->artisan('marketing:tag-wix --market=croatia --fix --stamp-source')
+            ->assertExitCode(0);
+
+        $contact = MarketingContact::where('email', 'old@kupigume.hr')->first();
+
+        $this->assertEqualsCanonicalizing(['croatia', 'wix'], $contact->marketNames());
+        $this->assertSame('croatia', $contact->market, 'Backfilling must not relocate anyone.');
+        $this->assertSame('wix', $contact->source);
+    }
+
+    public function test_the_backfill_matches_the_original_export_by_email(): void
+    {
+        // The only definition of "came from Wix" that is true rather than
+        // inferred: the addresses in the export file itself.
+        foreach (['in@kupigume.hr' => 'croatia', 'out@example.com' => 'germany'] as $email => $market) {
+            MarketingContact::create([
+                'email' => $email, 'market' => $market,
+                'status' => 'subscribed', 'unsubscribe_token' => 'tok-' . md5($email),
+            ]);
+        }
+
+        $path = $this->wixCsv(['A,One,in@kupigume.hr,+385 1 1,S 1,Zagreb,Croatia,,One']);
+
+        $this->artisan("marketing:tag-wix --file={$path} --fix")->assertExitCode(0);
+
+        $this->assertContains('wix', MarketingContact::where('email', 'in@kupigume.hr')->first()->marketNames());
+        $this->assertNotContains('wix', MarketingContact::where('email', 'out@example.com')->first()->marketNames());
+
+        unlink($path);
+    }
+
     public function test_admin_can_manually_add_a_contact_to_a_market(): void
     {
         $response = $this->actingAs($this->admin('order_manager'), 'sanctum')

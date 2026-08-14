@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-13 | Branch: `main` | Latest commit: Session 84 (**pushed, not deployed**)
+Last updated: 2026-08-13 | Branch: `main` | Latest commit: Session 85 (**pushed, not deployed**)
 
 ---
 
@@ -41,6 +41,7 @@ wrong.
 | **82** | `group_list` served in one shape; a `url()` injection in `hero`; empty group rows | none | none |
 | **83** | Operations board, dual sign-off, finance-system invoices, eBay split | **#33–36** | **9 new** |
 | **84** | Frontend's three findings: `you_may_sign`/`you_may_revoke` embedded, document state on the order row, `support` given `orders.view` | none | none |
+| **85** | Wix contacts become a `wix` market so campaigns can address them as an audience | none | none |
 
 ```bash
 cd /home/okelvaxj/domains/okelcor.com/public_html/okelcor-api
@@ -2013,6 +2014,36 @@ call that will 403. Told them so rather than listing `analytics.view`'s roles fo
 them to hardcode a second time.
 
 See `FRONTEND_NOTE_operations-board.md`.
+
+---
+
+## The Wix audience (Session 85)
+
+> **Deploy status:** built and tested, **not yet deployed**. No migration, no
+> new route, no contract change. One new artisan command.
+
+Marketing want to send to "everyone who came across from Wix" as an audience in
+its own right. That is a question about where a contact came FROM, not where it
+is — so `wix` is a market a contact holds **alongside** its geographic one,
+never instead of it. Contacts have been many-to-many with markets since Session
+72 precisely so overlapping audiences like this are possible.
+
+| Change | Status | Notes |
+|--------|--------|-------|
+| Wix exports are detected from their own headers | 🔧 | Wix numbers its repeated fields — `Email 1`, `Phone 1`, `Address 1 - Country` — and nothing else the team uploads does. Detecting the format rather than asking the operator to tick a box means the tagging cannot be forgotten on an upload, which is the only way a "send to all Wix contacts" audience stays true over time. **Three** signature headers required, so a spreadsheet that happens to name a column `Email 1` does not tag a whole list as Wix. |
+| The chosen market stays primary | 🔧 | `wix` is appended, so a Croatia upload produces contacts in `croatia` AND `wix` with `croatia` still their primary market. Anything else would look to the operator like their import went to the wrong place. |
+| `source` is stamped `wix` | 🔧 | Wix's export carries no source column, so `source` has been null on every contact imported since Session 50. Filled only when the file has no source column of its own. |
+| `marketing:tag-wix` for the backlog | 🔧 | The ~1,720 contacts loaded in Session 50 recorded nothing about their origin, so **the command does not guess** — it takes an explicit selector and refuses without one. `--file=contacts.csv` matches on e-mail, which is the only definition of "came from Wix" that is true rather than inferred; `--source`, `--market` and `--all` cover the rest. Reports by default, writes on `--fix`. |
+| The market needs no registration | ✅ | Markets are discovered from membership, so `wix` appears in `GET /marketing-contacts/markets` with a count the moment a contact is in it, and `?market=wix` filters and campaign audiences work with no further change. |
+| Opt-outs still hold | ✅ | A re-import cannot resubscribe an unsubscribed contact, and the tagging does not become a back door around that. Asserted by test. |
+| Backend tests (9 new) | ✅ | `BulkEmailCampaignTest` — detection and its specificity, primary market preserved, re-import adding rather than moving, unsubscribed contacts, the market appearing with its count, a campaign addressed to `market=wix`, and both command paths. Full suite **444 passed, 0 failed**, 206 skipped, up from 435. |
+
+**The operational route for the existing list** is the import, not the command:
+re-upload `contacts.csv` with any market and every contact in it gains `wix`
+while keeping the market it already had — import has been additive since Session
+72. The command exists for the case where the original file is not to hand.
+
+See `FRONTEND_NOTE_wix-audience.md`.
 
 ---
 
