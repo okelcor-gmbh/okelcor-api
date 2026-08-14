@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-13 | Branch: `main` | Latest commit: Session 85 (**pushed, not deployed**)
+Last updated: 2026-08-13 | Branch: `main` | Latest commit: Session 86 (**pushed, not deployed**)
 
 ---
 
@@ -42,6 +42,7 @@ wrong.
 | **83** | Operations board, dual sign-off, finance-system invoices, eBay split | **#33–36** | **9 new** |
 | **84** | Frontend's three findings: `you_may_sign`/`you_may_revoke` embedded, document state on the order row, `support` given `orders.view` | none | none |
 | **85** | Wix contacts become a `wix` market so campaigns can address them as an audience | none | none |
+| **86** | Clients drill-down, month-to-month report with charts, and one invoice register for both sides | **#37** | **5 new** |
 
 ```bash
 cd /home/okelvaxj/domains/okelcor.com/public_html/okelcor-api
@@ -2071,6 +2072,62 @@ See `FRONTEND_NOTE_wix-audience.md`.
 
 ---
 
+## Clients, the report, and one invoice register (Session 86)
+
+> **Deploy status:** built and tested, **not yet deployed**. Migration **#37**
+> (additive columns on `finance_invoices`) unapplied. **5 new routes**, so
+> `route:cache` must be rebuilt. Deploy-order safe — the register checks for its
+> own columns and an invoice raised before the migration runs still succeeds.
+
+Four asks against the operations board built in Session 83: open the Clients
+figure, add a month-to-month report, give the section real charts, and let
+finance attach the sevDesk PDF — with customer-facing invoices stored in the
+same record format so the two sides cannot mismatch.
+
+### Opening the Clients figure
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `GET /admin/operations/clients` | 🔧 | `orders.view`. Names, spend, order count, first/last order, channels held, and the linked customer account where one exists. Sortable by amount / orders / recency / name, searchable, paginated. |
+| `GET /admin/operations/clients/detail?email=` | 🔧 | One client's orders in the period, with their in-transit count — the number that tells an order manager there is paperwork to send. Keyed on a query parameter, not a path segment: the identifier is an e-mail, and a path means encoding dots, plus signs and slashes through every proxy in between. |
+| **The same definition as the board** | 🔧 | A distinct lower-cased `customer_email` on a confirmed order. Asserted by a test that reads the board and the drill-down and requires them equal — two definitions of "client" that disagree by one is what two departments spend a morning on. |
+| No account is not an error | 🔧 | Plenty of confirmed orders belong to buyers who never registered. `customer_id` is null and `has_account` false rather than invented, so the UI does not render a link that 404s. |
+
+### The transaction report
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `GET /admin/operations/report?from=&to=&granularity=&channel=` | 🔧 | Day, week or month. Defaults to six months, because one period is a board and the question this answers needs something to compare against. |
+| Gap-free axis | 🔧 | Every bucket in the range is present, empty ones as zero. "We sold nothing in July" and "July is missing from this chart" look identical when the empty bucket is simply absent. |
+| `change` — latest period against the one before | 🔧 | Delta, direction and percent. **Percent is null when the previous period was zero**: a change from nothing is not a large number, it is an undefined one, and rendering it as +100% reads as a fact. |
+| Clients are not summed across periods | 🔧 | One buyer ordering in two months is one client. The per-period counts are distinct within their period; the total is counted over the whole range by its own query, and the payload carries a `note` saying so. |
+| `series` is chart-ready | 🔧 | Parallel arrays on a shared label axis. Two places that aggregate are two places that can disagree about a number the business is reading — the same choice Session 79 made. |
+| SQL bucketing written for both drivers | 🔧 | sqlite has no `DATE_FORMAT` and MySQL has no `strftime`. A report that only works on the driver the test harness uses is a report found broken in production. |
+
+### One invoice register, so the two sides cannot mismatch
+
+The reconciliation compared two differently-shaped things — our `invoices`
+table against finance's typed-in rows — and anything that needs translating to
+be compared is where a mismatch hides. It also left a category out entirely: a
+commercial invoice an order manager issues and sends is, to the customer, an
+invoice, but it has no `invoices` row, so it appeared on neither side.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| **#37** file + origin columns on `finance_invoices` | 🔧 | Additive and guarded; nothing existing is read or backfilled. |
+| `POST /admin/finance-invoices` accepts the PDF | 🔧 | One request, not two — finance has the document in front of them when they type the number, and a separate "now attach it" step is a step that gets skipped. |
+| `POST /{id}/file` and `GET /{id}/download` | 🔧 | Private disk. Download asks the disk for the path rather than assembling `storage_path()`: the root is configuration, and hardcoding it silently 404s wherever it differs. Replacing a document deletes the one it replaced. |
+| `InvoiceRegistrar` — our side, same shape | 🔧 | Every tax invoice this API raises, and every commercial invoice or proforma issued to a customer, is written into the register as `system = 'okelcor'`. **Driven by model events, not call sites**: there are five places a trade document is created and more than one that raises an invoice, and a guarantee that depends on each future one remembering to call a registrar is not a guarantee. |
+| A packing list is not an invoice | 🔧 | Only `commercial_invoice` and `proforma` register. Anything else would inflate our side with documents finance would never have raised in sevDesk, which reads as a discrepancy that is not one. |
+| Superseding removes the row | 🔧 | A document that was withdrawn is not an invoice that was issued; leaving it counted invents a discrepancy rather than finding one. |
+| Auto-registered rows are read-only | 🔧 | 409 on edit or delete. Deleting one would only mean it reappears the next time the invoice behind it is saved, while the reconciliation reports a gap that is not real. Finance also cannot hand-create an `okelcor` row — that would put a number on our side that nothing on our side issued. |
+| **Fix found by test** — the register was polluting finance's column | 🔧 | The board's `finance_invoices` count and the reconciliation's finance side now scope to `MANUAL_SYSTEMS`. Without it our own auto-registered invoices were counted as finance's, so the variance read zero however far apart the two systems actually were — worse than having no column at all. Caught by an existing Session 83 test, not by a new one. |
+| Backend tests (18 new) | ✅ | Clients drill-down and its agreement with the board, client detail and the 404, gap-free series, change and the zero-baseline null, clients not summed, registration from both sources, packing lists excluded, supersede cleanup, no double registration, read-only rows, file attach/download, and the register being inert before its migration. Full suite **466 passed, 0 failed**, 206 skipped, up from 448. |
+
+See `FRONTEND_NOTE_operations-detail.md`.
+
+---
+
 ## eBay Integration (Sessions 15–25)
 
 | Phase | Feature | Status |
@@ -2431,6 +2488,8 @@ detail and the item-edit path all work unchanged before the migration runs — a
 existing test (`OrderTotalFromItemsTest`) caught the one path where that was not
 true. The finance column on the board reads a structural zero and says so in
 `meta.finance_recording_available`. `route:cache` must be rebuilt: 9 new routes.
+
+37. `2026_08_14_000001_add_file_and_origin_to_finance_invoices` (Session 86 — adds `file_path`/`original_filename`/`mime_type`/`file_size`/`uploaded_at` so finance can attach the sevDesk PDF, and `source_type`/`source_id` so a row auto-registered from an invoice or a trade document can be traced back to it rather than being an orphan number. Every column guarded with `Schema::hasColumn`; nothing existing is read, altered or backfilled. The code is deploy-order safe — `FinanceInvoice::registerAvailable()` checks for `source_type` and registration silently no-ops without it, so raising an invoice still works before this runs.)
 
 ⚠️ Bulk email is deployed but **not yet safe to use for a real send**: `.env`
 still has `QUEUE_CONNECTION=sync`, so `SendBulkEmailCampaignJob` would run

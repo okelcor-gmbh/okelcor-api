@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\AdminUser;
+use App\Models\Customer;
 use App\Models\FinanceInvoice;
 use App\Models\Order;
 use App\Models\OrderLog;
@@ -37,7 +38,7 @@ class OrderSignoffAndBoardTest extends TestCase
         foreach ([
             'order_signoffs', 'finance_invoices', 'order_logs', 'invoices',
             'trade_documents', 'order_items', 'order_shipment_events', 'eu_declarations',
-            'orders', 'personal_access_tokens', 'admin_users',
+            'customers', 'orders', 'personal_access_tokens', 'admin_users',
         ] as $table) {
             Schema::dropIfExists($table);
         }
@@ -70,6 +71,7 @@ class OrderSignoffAndBoardTest extends TestCase
             $table->string('source', 20)->default('website');
             $table->string('customer_name')->nullable();
             $table->string('customer_email')->nullable();
+            $table->string('country')->nullable();
             $table->decimal('subtotal', 12, 2)->default(0);
             $table->decimal('delivery_cost', 12, 2)->default(0);
             $table->decimal('total', 12, 2)->default(0);
@@ -106,6 +108,17 @@ class OrderSignoffAndBoardTest extends TestCase
             $table->timestamp('issued_at')->nullable();
             $table->timestamp('due_at')->nullable();
             $table->timestamp('released_at')->nullable();
+            $table->timestamps();
+        });
+
+        // The client drill-down joins orders to accounts by e-mail — orders
+        // carry no customer foreign key.
+        Schema::create('customers', function (Blueprint $table) {
+            $table->id();
+            $table->string('email')->unique();
+            $table->string('company_name')->nullable();
+            $table->string('buyer_tier', 30)->nullable();
+            $table->string('onboarding_status', 30)->nullable();
             $table->timestamps();
         });
 
@@ -162,12 +175,14 @@ class OrderSignoffAndBoardTest extends TestCase
         // table would be testing a different schema from the one that ships.
         $this->runMigration('2026_08_13_000002_create_order_signoffs_table');
         $this->runMigration('2026_08_13_000003_create_finance_invoices_table');
+        $this->runMigration('2026_08_14_000001_add_file_and_origin_to_finance_invoices');
 
         Schema::enableForeignKeyConstraints();
 
         // The service memoises whether its table exists, and the harness
         // creates it after the container boots.
         OrderSignoffService::forgetTableCheck();
+        \App\Models\FinanceInvoice::forgetRegisterCheck();
     }
 
     private function runMigration(string $name): void
@@ -881,6 +896,376 @@ class OrderSignoffAndBoardTest extends TestCase
         $this->withHeaders($this->headers($this->admin('order_manager')))
             ->getJson('/api/v1/admin/finance-invoices')
             ->assertOk();
+    }
+
+    // ── clients, opened up (Session 86) ───────────────────────────────────
+
+    public function test_the_clients_figure_opens_into_the_people_behind_it(): void
+    {
+        // A count on a board is something to trust or doubt. Names with what
+        // they spent is something to act on — and the only way anyone checks
+        // the figure without asking a developer to run a query.
+        Customer::create(['email' => 'big@acme.de', 'company_name' => 'Acme GmbH', 'buyer_tier' => 'wholesale']);
+
+        $this->order(['customer_email' => 'big@acme.de', 'customer_name' => 'Acme', 'total' => 8000, 'status' => 'confirmed']);
+        $this->order(['customer_email' => 'BIG@acme.de', 'customer_name' => 'Acme', 'total' => 2000, 'status' => 'delivered']);
+        $this->order(['customer_email' => 'small@shop.fr', 'customer_name' => 'Petit', 'total' => 500, 'status' => 'confirmed']);
+        $this->order(['customer_email' => 'never@lead.com', 'total' => 9999, 'status' => 'pending']);
+
+        $response = $this->withHeaders($this->headers($this->admin('order_manager')))
+            ->getJson('/api/v1/admin/operations/clients')
+            ->assertOk();
+
+        $clients = $response->json('data');
+
+        // Two clients, not three: a pending order is not confirmed business,
+        // which is the board's own definition and has to stay the same one.
+        $this->assertCount(2, $clients);
+        $this->assertSame(2, $response->json('meta.total'));
+
+        // Sorted by spend, and the two casings of one address are one client.
+        $this->assertSame('big@acme.de', $clients[0]['email']);
+        $this->assertSame(2, $clients[0]['orders_count']);
+        $this->assertEquals(10000, $clients[0]['amount']);
+
+        // Linked to the account when there is one, so the UI gets a real link.
+        $this->assertTrue($clients[0]['has_account']);
+        $this->assertSame('Acme GmbH', $clients[0]['company']);
+
+        // And null rather than invented when there is not — plenty of
+        // confirmed orders belong to buyers who never registered.
+        $this->assertFalse($clients[1]['has_account']);
+        $this->assertNull($clients[1]['customer_id']);
+    }
+
+    public function test_the_client_count_matches_the_board_exactly(): void
+    {
+        // Two definitions of "client" that disagree by one is precisely what
+        // two departments spend a morning on.
+        $this->order(['customer_email' => 'a@x.de', 'status' => 'confirmed']);
+        $this->order(['customer_email' => 'b@x.de', 'status' => 'shipped']);
+        $this->order(['customer_email' => 'c@x.de', 'status' => 'cancelled']);
+
+        $headers = $this->headers($this->admin('order_manager'));
+
+        $board = $this->withHeaders($headers)->getJson('/api/v1/admin/operations/summary')
+            ->assertOk()->json('data.total.clients');
+
+        $drill = $this->withHeaders($headers)->getJson('/api/v1/admin/operations/clients')
+            ->assertOk()->json('meta.total');
+
+        $this->assertSame($board, $drill);
+        $this->assertSame(2, $board);
+    }
+
+    public function test_a_client_opens_into_their_orders(): void
+    {
+        $this->order(['customer_email' => 'buyer@acme.de', 'ref' => 'OKL-CL1', 'total' => 3000, 'status' => 'shipped', 'payment_status' => 'paid']);
+        $this->order(['customer_email' => 'buyer@acme.de', 'ref' => 'OKL-CL2', 'total' => 1000, 'status' => 'confirmed']);
+
+        $data = $this->withHeaders($this->headers($this->admin('order_manager')))
+            ->getJson('/api/v1/admin/operations/clients/detail?email=BUYER@acme.de')
+            ->assertOk()
+            ->json('data');
+
+        $this->assertSame('buyer@acme.de', $data['email']);
+        $this->assertSame(2, $data['totals']['orders_count']);
+        $this->assertEquals(4000, $data['totals']['amount']);
+        // The number that tells an order manager there is paperwork to send.
+        $this->assertSame(1, $data['totals']['in_transit']);
+        $this->assertCount(2, $data['orders']);
+    }
+
+    public function test_an_address_with_no_orders_in_the_period_says_so(): void
+    {
+        $this->withHeaders($this->headers($this->admin('order_manager')))
+            ->getJson('/api/v1/admin/operations/clients/detail?email=nobody@nowhere.com')
+            ->assertStatus(404)
+            ->assertJsonPath('code', 'no_orders_in_period');
+    }
+
+    // ── the transaction report ────────────────────────────────────────────
+
+    public function test_the_report_returns_a_gap_free_series_ready_to_plot(): void
+    {
+        $this->order(['status' => 'confirmed', 'total' => 1000, 'created_at' => '2026-06-10 10:00:00', 'customer_email' => 'a@x.de']);
+        $this->order(['status' => 'confirmed', 'total' => 2000, 'created_at' => '2026-08-05 10:00:00', 'customer_email' => 'b@x.de']);
+
+        $data = $this->withHeaders($this->headers($this->admin('order_manager')))
+            ->getJson('/api/v1/admin/operations/report?from=2026-06-01&to=2026-08-31&granularity=month')
+            ->assertOk()
+            ->json('data');
+
+        // June, July, August — July is a zero, not a missing point. "We sold
+        // nothing in July" and "July is missing from this chart" look identical
+        // when the empty bucket is simply absent.
+        $this->assertCount(3, $data['periods']);
+        $this->assertSame(['Jun 2026', 'Jul 2026', 'Aug 2026'], $data['series']['labels']);
+        $this->assertSame([1, 0, 1], collect($data['series']['datasets'])->firstWhere('metric', 'orders_sent')['data']);
+        $this->assertEquals([1000, 0, 2000], collect($data['series']['datasets'])->firstWhere('metric', 'amount')['data']);
+
+        // Every plotted metric has a dataset of the same length as the axis.
+        foreach ($data['series']['datasets'] as $dataset) {
+            $this->assertCount(3, $dataset['data'], $dataset['metric'] . ' is not the length of the axis');
+        }
+    }
+
+    public function test_the_report_says_what_changed_between_the_last_two_periods(): void
+    {
+        $this->order(['status' => 'confirmed', 'total' => 1000, 'created_at' => '2026-07-10 10:00:00', 'customer_email' => 'a@x.de']);
+        $this->order(['status' => 'confirmed', 'total' => 1500, 'created_at' => '2026-08-05 10:00:00', 'customer_email' => 'b@x.de']);
+        $this->order(['status' => 'confirmed', 'total' => 500,  'created_at' => '2026-08-06 10:00:00', 'customer_email' => 'c@x.de']);
+
+        $change = $this->withHeaders($this->headers($this->admin('order_manager')))
+            ->getJson('/api/v1/admin/operations/report?from=2026-07-01&to=2026-08-31')
+            ->assertOk()
+            ->json('data.change');
+
+        $this->assertSame('Jul 2026', $change['from']);
+        $this->assertSame('Aug 2026', $change['to']);
+        $this->assertSame(1, $change['metrics']['orders_sent']['previous']);
+        $this->assertSame(2, $change['metrics']['orders_sent']['current']);
+        $this->assertSame('up', $change['metrics']['orders_sent']['direction']);
+        $this->assertEquals(100, $change['metrics']['orders_sent']['percent']);
+    }
+
+    public function test_a_change_from_zero_is_reported_as_undefined_not_as_a_percentage(): void
+    {
+        // A percentage change from nothing is not a large number, it is an
+        // undefined one, and rendering it as +100% reads as a fact.
+        $this->order(['status' => 'confirmed', 'total' => 1000, 'created_at' => '2026-08-05 10:00:00', 'customer_email' => 'a@x.de']);
+
+        $change = $this->withHeaders($this->headers($this->admin('order_manager')))
+            ->getJson('/api/v1/admin/operations/report?from=2026-07-01&to=2026-08-31')
+            ->assertOk()
+            ->json('data.change');
+
+        $this->assertNull($change['metrics']['orders_sent']['percent']);
+        $this->assertSame(1, $change['metrics']['orders_sent']['delta']);
+    }
+
+    public function test_the_report_does_not_sum_clients_across_periods(): void
+    {
+        // One buyer ordering in two months is one client, not two.
+        $this->order(['status' => 'confirmed', 'customer_email' => 'repeat@acme.de', 'created_at' => '2026-07-10 10:00:00']);
+        $this->order(['status' => 'confirmed', 'customer_email' => 'repeat@acme.de', 'created_at' => '2026-08-10 10:00:00']);
+
+        $data = $this->withHeaders($this->headers($this->admin('order_manager')))
+            ->getJson('/api/v1/admin/operations/report?from=2026-07-01&to=2026-08-31')
+            ->assertOk()
+            ->json('data');
+
+        $clients = collect($data['series']['datasets'])->firstWhere('metric', 'clients')['data'];
+
+        $this->assertSame([1, 1], $clients);
+        $this->assertSame(1, $data['totals']['clients'], 'The total must be counted over the range, not summed.');
+    }
+
+    // ── the invoice register ──────────────────────────────────────────────
+
+    public function test_an_invoice_this_system_raises_registers_itself(): void
+    {
+        // The reconciliation compared two differently-shaped things, and
+        // anything that needs translating to be compared is where a mismatch
+        // hides.
+        $order = $this->order(['ref' => 'OKL-REG1', 'total' => 4000]);
+
+        \App\Models\Invoice::create([
+            'invoice_number' => 'INV-2026-0100',
+            'order_ref'      => 'OKL-REG1',
+            'amount'         => 4000,
+            'issued_at'      => now(),
+        ]);
+
+        $row = FinanceInvoice::where('system', 'okelcor')->where('external_number', 'INV-2026-0100')->first();
+
+        $this->assertNotNull($row, 'A tax invoice must register itself.');
+        $this->assertSame('OKL-REG1', $row->order_ref);
+        $this->assertSame('4000.00', (string) $row->amount);
+        $this->assertSame('invoice', $row->source_type);
+
+        unset($order);
+    }
+
+    public function test_an_invoice_sent_to_a_customer_registers_even_though_it_has_no_invoice_row(): void
+    {
+        // The category that appeared on neither side of the reconciliation
+        // while being, to the customer, an invoice.
+        $order = $this->order(['ref' => 'OKL-REG2', 'total' => 7500]);
+
+        \App\Models\TradeDocument::create([
+            'order_id'  => $order->id,
+            'order_ref' => 'OKL-REG2',
+            'type'      => 'commercial_invoice',
+            'number'    => 'CI-2026-0007',
+            'status'    => 'issued',
+            'issued_at' => now(),
+        ]);
+
+        $row = FinanceInvoice::where('system', 'okelcor')->where('external_number', 'CI-2026-0007')->first();
+
+        $this->assertNotNull($row);
+        $this->assertSame('trade_document', $row->source_type);
+        $this->assertSame('7500.00', (string) $row->amount);
+        // Deliberately null: a commercial invoice is not the tax invoice, and
+        // putting its number here would match it against a sevDesk row for a
+        // different document.
+        $this->assertNull($row->invoice_number);
+    }
+
+    public function test_a_packing_list_is_not_an_invoice(): void
+    {
+        // Registering one would inflate our side with documents finance would
+        // never have raised, which reads as a discrepancy that is not one.
+        $order = $this->order(['ref' => 'OKL-REG3']);
+
+        \App\Models\TradeDocument::create([
+            'order_id' => $order->id, 'order_ref' => 'OKL-REG3', 'type' => 'packing_list',
+            'number' => 'PL-2026-0001', 'status' => 'issued', 'issued_at' => now(),
+        ]);
+
+        $this->assertSame(0, FinanceInvoice::where('system', 'okelcor')->count());
+    }
+
+    public function test_a_superseded_document_stops_being_counted(): void
+    {
+        // A document that was withdrawn is not an invoice that was issued.
+        $order = $this->order(['ref' => 'OKL-REG4', 'total' => 100]);
+
+        $document = \App\Models\TradeDocument::create([
+            'order_id' => $order->id, 'order_ref' => 'OKL-REG4', 'type' => 'commercial_invoice',
+            'number' => 'CI-2026-0009', 'status' => 'issued', 'issued_at' => now(),
+        ]);
+
+        $this->assertSame(1, FinanceInvoice::where('system', 'okelcor')->count());
+
+        $document->update(['status' => 'superseded']);
+
+        $this->assertSame(0, FinanceInvoice::where('system', 'okelcor')->count());
+    }
+
+    public function test_re_saving_an_invoice_does_not_register_it_twice(): void
+    {
+        $order = $this->order(['ref' => 'OKL-REG5', 'total' => 200]);
+
+        $invoice = \App\Models\Invoice::create([
+            'invoice_number' => 'INV-2026-0200', 'order_ref' => 'OKL-REG5',
+            'amount' => 200, 'issued_at' => now(),
+        ]);
+
+        $invoice->update(['amount' => 250]);
+
+        $rows = FinanceInvoice::where('external_number', 'INV-2026-0200')->get();
+
+        $this->assertCount(1, $rows, 'One invoice must not be reported as two.');
+        $this->assertSame('250.00', (string) $rows->first()->amount);
+
+        unset($order);
+    }
+
+    public function test_an_auto_registered_row_cannot_be_hand_edited_or_deleted(): void
+    {
+        // Deleting it would only mean it reappears the next time the invoice
+        // behind it is saved, and meanwhile the reconciliation reports a gap
+        // that is not real.
+        $order = $this->order(['ref' => 'OKL-REG6', 'total' => 300]);
+
+        \App\Models\Invoice::create([
+            'invoice_number' => 'INV-2026-0300', 'order_ref' => 'OKL-REG6',
+            'amount' => 300, 'issued_at' => now(),
+        ]);
+
+        $row     = FinanceInvoice::where('external_number', 'INV-2026-0300')->first();
+        $headers = $this->headers($this->admin('finance'));
+
+        $this->withHeaders($headers)
+            ->patchJson("/api/v1/admin/finance-invoices/{$row->id}", ['amount' => 1])
+            ->assertStatus(409)
+            ->assertJsonPath('code', 'auto_registered');
+
+        $this->withHeaders($headers)
+            ->deleteJson("/api/v1/admin/finance-invoices/{$row->id}")
+            ->assertStatus(409);
+
+        unset($order);
+    }
+
+    public function test_finance_cannot_hand_create_a_row_on_our_side_of_the_comparison(): void
+    {
+        $this->withHeaders($this->headers($this->admin('finance')))
+            ->postJson('/api/v1/admin/finance-invoices', [
+                'system'          => 'okelcor',
+                'external_number' => 'FAKE-1',
+                'issued_on'       => now()->toDateString(),
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('system');
+    }
+
+    public function test_finance_can_attach_and_download_the_sevdesk_document(): void
+    {
+        \Illuminate\Support\Facades\Storage::fake('local');
+
+        $headers = $this->headers($this->admin('finance'));
+
+        $created = $this->withHeaders($headers)->post('/api/v1/admin/finance-invoices', [
+            'external_number' => 'SD-900',
+            'issued_on'       => now()->toDateString(),
+            'amount'          => 1200,
+            'file'            => \Illuminate\Http\UploadedFile::fake()->create('sd-900.pdf', 40, 'application/pdf'),
+        ])->assertStatus(201);
+
+        // Recorded in one request — finance has the PDF in front of them when
+        // they type the number, and a separate "now attach it" step is a step
+        // that gets skipped.
+        $this->assertTrue($created->json('data.has_file'));
+        $this->assertSame('sd-900.pdf', $created->json('data.file_name'));
+
+        $this->withHeaders($headers)
+            ->get('/api/v1/admin/finance-invoices/' . $created->json('data.id') . '/download')
+            ->assertOk();
+    }
+
+    public function test_an_invoice_with_no_document_says_so_rather_than_failing(): void
+    {
+        $headers = $this->headers($this->admin('finance'));
+
+        $created = $this->withHeaders($headers)->postJson('/api/v1/admin/finance-invoices', [
+            'external_number' => 'SD-901',
+            'issued_on'       => now()->toDateString(),
+        ])->assertStatus(201);
+
+        $this->assertFalse($created->json('data.has_file'));
+
+        $this->withHeaders($headers)
+            ->getJson('/api/v1/admin/finance-invoices/' . $created->json('data.id') . '/download')
+            ->assertStatus(404);
+    }
+
+    public function test_the_register_is_inert_until_its_migration_runs(): void
+    {
+        // Registration runs off model events on the money path. An invoice
+        // that generated correctly must not fail because a reporting row could
+        // not be written.
+        Schema::drop('finance_invoices');
+        FinanceInvoice::forgetRegisterCheck();
+
+        try {
+            $order = $this->order(['ref' => 'OKL-REG7', 'total' => 400]);
+
+            $invoice = \App\Models\Invoice::create([
+                'invoice_number' => 'INV-2026-0400', 'order_ref' => 'OKL-REG7',
+                'amount' => 400, 'issued_at' => now(),
+            ]);
+
+            $this->assertNotNull($invoice->fresh(), 'Raising an invoice must survive the register being absent.');
+
+            unset($order);
+        } finally {
+            $this->runMigration('2026_08_13_000003_create_finance_invoices_table');
+            $this->runMigration('2026_08_14_000001_add_file_and_origin_to_finance_invoices');
+            FinanceInvoice::forgetRegisterCheck();
+        }
     }
 
     // ── the order list ────────────────────────────────────────────────────

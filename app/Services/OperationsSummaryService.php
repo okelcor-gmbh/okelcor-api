@@ -223,6 +223,12 @@ class OperationsSummaryService
         }
 
         return (int) FinanceInvoice::query()
+            // MANUAL_SYSTEMS only. The register now also holds a row for every
+            // invoice THIS system issued, and counting those here would put our
+            // own invoices on finance's side of the comparison — the variance
+            // would then read zero however far apart the two systems actually
+            // were, which is worse than no column at all.
+            ->whereIn('system', FinanceInvoice::MANUAL_SYSTEMS)
             ->where('channel', $channel)
             // whereDate, not whereBetween on the raw column: `issued_on` is a
             // DATE in MySQL but Eloquent's date cast writes a full timestamp on

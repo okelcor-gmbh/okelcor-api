@@ -540,6 +540,13 @@ Route::prefix('v1')->group(function () {
             // as an order id and 404s — the same trap the campaign import route
             // fell into in Session 77.
             Route::get('operations/summary', [AdminOperationsSummaryController::class, 'summary']);
+            Route::get('operations/report', [AdminOperationsSummaryController::class, 'report']);
+            // 'clients/detail' before 'clients' is not needed — they are
+            // distinct paths — but the detail route is keyed on ?email= rather
+            // than a path segment, because an e-mail in a path means encoding
+            // dots, plus signs and slashes through every proxy in between.
+            Route::get('operations/clients', [AdminOperationsSummaryController::class, 'clients']);
+            Route::get('operations/clients/detail', [AdminOperationsSummaryController::class, 'client']);
             Route::get('orders', [AdminOrderController::class, 'index']);
             Route::get('orders/export', [OrderImportController::class, 'export']);
 
@@ -776,10 +783,12 @@ Route::prefix('v1')->group(function () {
         Route::middleware('permission:finance.view')->group(function () {
             Route::get('operations/invoice-reconciliation', [AdminOperationsSummaryController::class, 'reconciliation']);
             Route::get('finance-invoices', [AdminFinanceInvoiceController::class, 'index']);
+            Route::get('finance-invoices/{id}/download', [AdminFinanceInvoiceController::class, 'download']);
         });
 
         Route::middleware('permission:finance.manage')->group(function () {
             Route::post('finance-invoices', [AdminFinanceInvoiceController::class, 'store']);
+            Route::post('finance-invoices/{id}/file', [AdminFinanceInvoiceController::class, 'uploadFile']);
             Route::patch('finance-invoices/{id}', [AdminFinanceInvoiceController::class, 'update']);
             Route::delete('finance-invoices/{id}', [AdminFinanceInvoiceController::class, 'destroy']);
         });

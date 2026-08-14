@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\FinanceInvoice;
 use App\Models\Invoice;
 use App\Models\Order;
+use App\Services\OperationsClientService;
+use App\Services\OperationsReportService;
 use App\Services\OperationsSummaryService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
@@ -53,6 +55,121 @@ class AdminOperationsSummaryController extends Controller
     }
 
     // -------------------------------------------------------------------------
+    // GET /api/v1/admin/operations/clients — orders.view
+    //
+    // The board's "Clients" figure, opened up. A count is something to trust or
+    // doubt; names with what they spent is something to act on, and the only
+    // way anyone checks the figure without asking a developer to run a query.
+    // -------------------------------------------------------------------------
+    public function clients(Request $request, OperationsClientService $clients): JsonResponse
+    {
+        $request->validate([
+            'from'     => ['nullable', 'date'],
+            'to'       => ['nullable', 'date'],
+            'channel'  => ['nullable', 'in:normal,ebay,all'],
+            'q'        => ['nullable', 'string', 'max:120'],
+            'sort'     => ['nullable', 'in:amount,orders,recent,name'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
+            'page'     => ['nullable', 'integer', 'min:1'],
+        ]);
+
+        $channel = $request->input('channel');
+
+        $result = $clients->list(
+            $request->input('from'),
+            $request->input('to'),
+            $channel === 'all' ? null : $channel,
+            $request->input('q'),
+            $request->input('sort', 'amount'),
+            (int) $request->input('per_page', 25),
+            (int) $request->input('page', 1),
+        );
+
+        return response()->json([
+            'data'    => $result['clients'],
+            'meta'    => $result['meta'] + ['period' => $result['period']],
+            'message' => 'success',
+        ]);
+    }
+
+    // -------------------------------------------------------------------------
+    // GET /api/v1/admin/operations/clients/detail?email= — orders.view
+    //
+    // Keyed on a query parameter rather than a path segment: the identifier is
+    // an e-mail address, and putting one in a path means encoding dots, plus
+    // signs and slashes through every proxy between here and the browser.
+    // -------------------------------------------------------------------------
+    public function client(Request $request, OperationsClientService $clients): JsonResponse
+    {
+        $request->validate([
+            'email'   => ['required', 'string', 'max:255'],
+            'from'    => ['nullable', 'date'],
+            'to'      => ['nullable', 'date'],
+            'channel' => ['nullable', 'in:normal,ebay,all'],
+        ]);
+
+        $channel = $request->input('channel');
+
+        $client = $clients->detail(
+            $request->input('email'),
+            $request->input('from'),
+            $request->input('to'),
+            $channel === 'all' ? null : $channel,
+        );
+
+        if ($client === null) {
+            return response()->json([
+                'message' => 'That address has no confirmed orders in this period.',
+                'code'    => 'no_orders_in_period',
+            ], 404);
+        }
+
+        return response()->json(['data' => $client, 'message' => 'success']);
+    }
+
+    // -------------------------------------------------------------------------
+    // GET /api/v1/admin/operations/report?from=&to=&granularity=&channel=
+    //   — orders.view
+    //
+    // The board's figures period by period, with what changed between them,
+    // and the series already shaped for a chart.
+    // -------------------------------------------------------------------------
+    public function report(Request $request, OperationsReportService $report, OperationsClientService $clients): JsonResponse
+    {
+        $request->validate([
+            'from'        => ['nullable', 'date'],
+            'to'          => ['nullable', 'date'],
+            'granularity' => ['nullable', 'in:day,week,month'],
+            'channel'     => ['nullable', 'in:normal,ebay,all'],
+        ]);
+
+        $channel = $request->input('channel');
+        $channel = $channel === 'all' ? null : $channel;
+
+        $data = $report->build(
+            $request->input('from'),
+            $request->input('to'),
+            $request->input('granularity', 'month'),
+            $channel,
+        );
+
+        // Counted over the whole range rather than summed from the periods —
+        // adding per-period client counts double-counts anyone who ordered in
+        // more than one, which is most repeat customers.
+        $data['totals']['clients'] = $clients->list(
+            $data['period']['from'],
+            $data['period']['to'],
+            $channel,
+            null,
+            'amount',
+            1,
+            1,
+        )['meta']['total'];
+
+        return response()->json(['data' => $data, 'message' => 'success']);
+    }
+
+    // -------------------------------------------------------------------------
     // GET /api/v1/admin/operations/invoice-reconciliation?from=&to=&channel=
     //   — finance.view
     //
@@ -94,6 +211,8 @@ class AdminOperationsSummaryController extends Controller
             ->get(['id', 'invoice_number', 'order_ref', 'amount', 'issued_at']);
 
         $theirs = FinanceInvoice::query()
+            // Finance's side only — see OperationsSummaryService::financeInvoices.
+            ->whereIn('system', FinanceInvoice::MANUAL_SYSTEMS)
             ->whereDate('issued_on', '>=', $start->toDateString())
             ->whereDate('issued_on', '<=', $end->toDateString())
             ->when($channel !== 'all', fn ($q) => $q->where('channel', $channel))

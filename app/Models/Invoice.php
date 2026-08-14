@@ -40,6 +40,37 @@ class Invoice extends Model
         'discount_amount'   => 'decimal:2',
     ];
 
+    /**
+     * Every tax invoice this system raises is written into the invoice
+     * register, so finance's sevDesk row and ours sit in one table with one
+     * shape and can be compared without translating between them.
+     *
+     * On the model rather than at the call sites: an invoice is created from
+     * the Stripe webhook, from the admin mark-paid path and from the
+     * self-healing download, and a guarantee that depends on each of them
+     * remembering to call a registrar is not a guarantee.
+     *
+     * Never allowed to fail the invoice — the register is downstream of the
+     * money, never in front of it.
+     */
+    protected static function booted(): void
+    {
+        static::saved(function (Invoice $invoice) {
+            if (! $invoice->wasRecentlyCreated && ! $invoice->wasChanged(['amount', 'issued_at', 'invoice_number'])) {
+                return;
+            }
+
+            try {
+                app(\App\Services\InvoiceRegistrar::class)->registerInvoice($invoice);
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('Invoice register hook failed', [
+                    'invoice' => $invoice->invoice_number,
+                    'error'   => $e->getMessage(),
+                ]);
+            }
+        });
+    }
+
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);
