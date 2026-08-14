@@ -1,6 +1,135 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-13 | Branch: `main` | Latest commit: Session 88 (**pushed, not deployed**)
+Last updated: 2026-08-14 | Branch: `main` | Latest commit: Session 88 (`17ff1e7`, **pushed, not deployed**)
+
+---
+
+## 🔧 Sessions 86–88 pushed, NOT deployed
+
+Tip is `17ff1e7`. **One unapplied migration (#37), six new routes.**
+
+| Session | What it is | Migration | Routes |
+|---|---|---|---|
+| **86** | Clients drill-down, month-to-month report with charts, one invoice register for both sides | **#37** | **5 new** |
+| **87** | eBay kept beside the website in the report, CSV export, fulfilment queue starting before dispatch | none | **1 new** |
+| **88** | `sort` on the order list, so the queue can be worked from the back | none | none |
+
+```bash
+cd /home/okelvaxj/domains/okelcor.com/public_html/okelcor-api
+pwd                                     # okelvaxj, not u978121777
+git fetch origin && git reset --hard origin/main
+/opt/alt/php83/usr/bin/php /opt/alt/php83/usr/bin/composer.phar install --no-dev
+
+/opt/alt/php83/usr/bin/php artisan backup:okelcor
+/opt/alt/php83/usr/bin/php artisan migrate --pretend    # read before the next line
+/opt/alt/php83/usr/bin/php artisan migrate --force
+
+/opt/alt/php83/usr/bin/php artisan config:clear && /opt/alt/php83/usr/bin/php artisan config:cache
+/opt/alt/php83/usr/bin/php artisan route:cache
+/opt/alt/php83/usr/bin/php artisan view:clear && /opt/alt/php83/usr/bin/php artisan cache:clear
+```
+
+**Verify with a SHA and an assertion against the running code**, never with
+`migrate:status` alone — see the Sessions 78–80 note for why:
+
+```bash
+git rev-parse --short HEAD                                   # expect 17ff1e7
+/opt/alt/php83/usr/bin/php artisan tinker --execute="echo Schema::hasColumn('finance_invoices','source_type') ? 'register live' : 'NOT LIVE';"
+```
+
+**One number changes meaning on this deploy.** Session 87 widens `in_transit`
+from "dispatched" to the whole fulfilment window, so the board's figure will
+jump. That is the change the order manager asked for, not a regression — trade
+documents are issued before a container leaves as often as after — and the new
+`ready_to_ship` / `shipped` columns keep the old figure readable. **Tell her
+before she opens the board.**
+
+Nothing else here is customer-facing. Session 86's invoice register does **not**
+backfill: it fills from the moment an invoice or trade document is next saved,
+so the reconciliation shows history only from the deploy forward. An
+`invoices:register-existing` command with a dry run would close that; offered,
+not yet asked for.
+
+---
+
+## ⚠️ Outstanding on production (as of 2026-08-14)
+
+Besides the pending deploy above, these are live data and configuration items —
+none of them is fixed by shipping code.
+
+| # | Action | Why it matters |
+|---|--------|----------------|
+| 1 | **Import the Wix contact list** — `marketing:import contacts.csv --market=wix` (survey first, then `--fix`) | The `wix` audience the marketing team asked for **does not exist yet**: `marketing:tag-wix --file=contacts.csv` matched **13 of 1,706**. Production holds 1,443 curated B2B contacts across seven markets (`asia` 176, `austria` 252, `croatia` 199, `czech` 300, `france` 300, `germany` 212, `test` 4) — a different population entirely. The Wix consumer export was never imported. Do NOT run `marketing:tag-wix --fix`: it would tag thirteen people and leave the business believing the audience is complete. |
+| 2 | **`QUEUE_CONNECTION=database`** + a queue worker under Supervisor | Still `sync`. Outstanding since Session 50 and now the last thing between marketing and their first real send — once item 1 lands, the Wix audience is ~1,700 people and `SendBulkEmailCampaignJob` would run inline in the HTTP request and time out. |
+| 3 | **Create the finance admin account** with the new `finance` role | Live since the 2026-08-14 deploy. Until someone holds it, no order confirmation can collect its second signature, and every new order stops at the gate. |
+| 4 | **Restore order 10112** — `orders:restore-total 10112 371.88 371.88 --reason="undo bad automated repair, Session 75"` | The first `orders:repair-totals --fix` run cut it from **371.88 → 312.50** on a wrong diagnosis, then died before writing the log. Still at the wrong figure with no record of the change. Migration #30 is applied, so the restore can write its audit row — unblocked. |
+| 5 | Re-run `orders:repair-totals` (survey, no `--fix`), then `--fix` | Confirms the rewritten classifier flags only the 2 lump-sum orders, not 21. Then corrects **AB-1150** (16,250 → 8,125) and **AB - 1182** (30,000 → 15,000). Read the survey before the fix. |
+| 6 | *(optional, business call)* `PARTNER_EDIT_WINDOW_HOURS=72` in `.env` before `config:cache` | See Session 75 partner-correction note. Config-only, reversible. |
+| 7 | *(human, not a command)* Reconcile orders **10075, 10076, 10077, 10079, 10080** | Items exceed the stored total on inconsistent ratios. No tooling will fix these — someone has to compare each against what was actually invoiced. Tracked in Known Gaps. |
+| 8 | *(offered, not asked for)* `invoices:register-existing` backfill | Session 86's invoice register fills forward only. Without a backfill the reconciliation shows history from the deploy onward rather than from the start of the year. Small command, dry run first — say the word. |
+
+---
+
+## ✅ Sessions 81–85 deployed to production (2026-08-14)
+
+Deployed as `dad8997`. Migrations **#33–36 applied as batch 103**, confirmed by
+`migrate:status`, and by the assertion that actually settles it:
+
+```
+$ /opt/alt/php83/usr/bin/php artisan tinker --execute="echo in_array('finance', …::ROLES) && Schema::hasTable('order_signoffs') ? 'live' : 'NOT LIVE';"
+live
+```
+
+`route:cache` rebuilt for Session 83's nine routes. The `finance` role and the
+sign-off tables are now real on production, so the admin panel work can go live
+whenever frontend ships.
+
+**Two things this deploy needs from a person, neither of them a command:**
+create the finance user's account with the new `finance` role, and tell the
+order manager that sending an order confirmation now requires finance's
+signature. Orders raised before 2026-08-13 are exempt, so nothing in flight is
+frozen, but the first new order will stop and she should know why.
+`ORDER_SIGNOFF_REQUIRED=false` stands the control down from `.env` without a
+deploy if it blocks something urgent.
+
+---
+
+## 🔴 Production outage — Namecheap, 2026-08-13
+
+Recorded because the diagnosis is reusable, not because the fix was.
+
+**Symptoms:** SSH refused, admin panel reporting "login failed". Both are the
+same fault seen from two ends.
+
+**What it actually was, and how that was established from outside the server:**
+
+| Check | Result |
+|---|---|
+| DNS for `api.okelcor.com` | resolved (Cloudflare is authoritative for the domain) |
+| Cloudflare edge | up, returning **HTTP 522** — "origin connection timed out" |
+| Origin `business194.web-hosting.com` (`192.64.118.18`) | no ICMP; ports 22, 21098, 443, 80, 2083 all timed out |
+| `traceroute` | reached **inside** Namecheap's network (`131.125.129.85` → `10.255.68.18`), then died at the final hop |
+| `okelcor.com` frontend (Vercel) | up |
+| E-mail (MX → Microsoft 365) | unaffected — nothing to do with Namecheap |
+
+Routing into their datacentre was fine; the host was not answering. That ruled
+out our DNS, Cloudflare and the local network in one pass — and ruled out an
+IP-level firewall block on the office address, because probes from an unrelated
+address failed identically.
+
+**The useful signal was 522.** It says Cloudflare reached its edge and the
+origin did not answer, which is a different fault from a 5xx the application
+produced. Worth reaching for first on any "the site is down" report.
+
+Namecheap showed a major disruption that day (133 reports in 24h) alongside
+published shared-server and VPS maintenance, but **`business194` was never named
+in an incident** — so it was specific to this account, and the ticket had to say
+so rather than pointing at the published notice.
+
+Service returned on 2026-08-14, verified before anything was announced:
+`/api/v1/categories` returned the four fixed slugs and `/admin/campaign-design`
+returned Laravel's own 401. **Nothing we had deployed caused it** — production
+was at `d7b63a7` and had not changed that day.
 
 ---
 
@@ -28,58 +157,6 @@ git rev-parse --short HEAD
 recorded as deployed after that came back, and the earlier draft of this section
 that marked Session 81 deployed on the strength of the migration alone was
 wrong.
-
----
-
-## 🔧 Sessions 81–83 pushed, NOT deployed
-
-**Four migrations (#33–36), nine new routes.**
-
-| Session | What it is | Migration | Routes |
-|---|---|---|---|
-| **81** | Text printed ON a picture (`hero` block) + the importer recovering the masthead | none | none |
-| **82** | `group_list` served in one shape; a `url()` injection in `hero`; empty group rows | none | none |
-| **83** | Operations board, dual sign-off, finance-system invoices, eBay split | **#33–36** | **9 new** |
-| **84** | Frontend's three findings: `you_may_sign`/`you_may_revoke` embedded, document state on the order row, `support` given `orders.view` | none | none |
-| **85** | Wix contacts become a `wix` market so campaigns can address them as an audience | none | none |
-| **86** | Clients drill-down, month-to-month report with charts, and one invoice register for both sides | **#37** | **5 new** |
-| **87** | eBay kept beside the website in the report, CSV export, and the fulfilment queue starting before dispatch | none | **1 new** |
-| **88** | `sort` on the order list, so the fulfilment queue can be worked from the back | none | none |
-
-```bash
-cd /home/okelvaxj/domains/okelcor.com/public_html/okelcor-api
-pwd                                     # okelvaxj, not u978121777
-git fetch origin && git reset --hard origin/main
-composer install --no-dev
-
-/opt/alt/php83/usr/bin/php artisan backup:okelcor
-/opt/alt/php83/usr/bin/php artisan migrate --pretend    # read before the next line
-/opt/alt/php83/usr/bin/php artisan migrate --force
-
-/opt/alt/php83/usr/bin/php artisan config:clear && /opt/alt/php83/usr/bin/php artisan config:cache
-/opt/alt/php83/usr/bin/php artisan route:cache
-/opt/alt/php83/usr/bin/php artisan view:clear && /opt/alt/php83/usr/bin/php artisan cache:clear
-```
-
-**Verify with a SHA and an assertion against the running code**, not with
-`migrate:status` — see the Sessions 78–80 note below for why that is not enough:
-
-```bash
-git rev-parse --short HEAD
-/opt/alt/php83/usr/bin/php artisan tinker --execute="echo in_array('finance', App\Support\AdminPermissions::ROLES) && Schema::hasTable('order_signoffs') ? 'session 83 live' : 'NOT LIVE';"
-```
-
-`cache:clear` is the one that matters. The InDesign conversion cache is keyed on
-a fingerprint of the converting code, which Session 81 changes — skip it and a
-re-upload of the same export inside two hours returns the **old** reading,
-headline under the picture, indistinguishable from the deploy not having
-happened. Re-uploading is the first thing the marketers will do to check.
-
-**Customer-facing behaviour is unchanged.** Sessions 81–82 change how campaign
-emails render; no campaign sends on deploy. Session 83 is admin-side only — the
-one rule that touches a customer is that an order confirmation now needs two
-signatures before it can be e-mailed, and orders raised before 2026-08-13 are
-exempt so nothing in flight is frozen.
 
 ---
 
@@ -111,22 +188,6 @@ not a side effect): generating a proforma no longer e-mails the customer a
 deposit request, and the EU entry certificate now accepts milestone-paid orders
 it was refusing. **Tell the order manager the proforma button no longer
 notifies anyone**, or she will assume it still does.
-
----
-
-## ⚠️ Outstanding on production (as of 2026-08-12)
-
-Besides the pending deploy above, these are live data and configuration items —
-none of them is fixed by shipping code.
-
-| # | Action | Why it matters |
-|---|--------|----------------|
-| 1 | **Restore order 10112** — `orders:restore-total 10112 371.88 371.88 --reason="undo bad automated repair, Session 75"` | The first `orders:repair-totals --fix` run cut it from **371.88 → 312.50** on a wrong diagnosis, then died before writing the log. It is still at the wrong figure and there is no record of the change. Migration #30 is now applied, so the restore can write its audit row — this is unblocked. |
-| 2 | Re-run `orders:repair-totals` (survey, no `--fix`) | Confirms the rewritten classifier now flags only the 2 lump-sum orders, not 21. Read the output before step 3. |
-| 3 | `orders:repair-totals --fix` | Corrects **AB-1150** (16,250 → 8,125) and **AB - 1182** (30,000 → 15,000) — the two real double counts. |
-| 4 | **`QUEUE_CONNECTION=database`** + a queue worker under Supervisor | Still `sync`. A campaign sent to the full contact list would run `SendBulkEmailCampaignJob` inline in the HTTP request and time out. Blocks any real use of bulk email — including the InDesign import shipped in Session 77. |
-| 5 | *(optional, business call)* `PARTNER_EDIT_WINDOW_HOURS=72` in `.env` before `config:cache` | See Session 75 partner-correction note. Config-only, reversible. |
-| 6 | *(human, not a command)* Reconcile orders **10075, 10076, 10077, 10079, 10080** | Items exceed the stored total on inconsistent ratios. No tooling will fix these — someone has to compare them against what was actually invoiced. Tracked in Known Gaps. |
 
 ---
 
@@ -2153,7 +2214,12 @@ worth telling the order manager before she sees it, and the `ready_to_ship` /
 
 See `FRONTEND_NOTE_operations-detail.md`.
 
-### Session 88 — a queue that can be worked from the right end
+---
+
+## A queue that can be worked from the right end (Session 88)
+
+> **Deploy status:** built and tested, **not yet deployed**. No migration, no
+> new route — one query parameter on an endpoint that already existed.
 
 Frontend built the three Session 87 changes and reported one thing they could
 not do.
