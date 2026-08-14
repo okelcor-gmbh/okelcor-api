@@ -2040,18 +2040,32 @@ never instead of it. Contacts have been many-to-many with markets since Session
 | The chosen market is reported first | 🔧 | Frontend's copy depends on the ordering to say "imported into Croatia — still their market — and also added to Wix"; reversed it claims the opposite of what happened. Now asserted explicitly rather than being an emergent property of the array literal. |
 | Backend tests (11 new) | ✅ | `BulkEmailCampaignTest` — detection and its specificity, primary market preserved, re-import adding rather than moving, unsubscribed contacts, the market appearing with its count, a campaign addressed to `market=wix`, both command paths, plus the duplicate and the ordering guarantee. Full suite **446 passed, 0 failed**, 206 skipped, up from 435. |
 
-**The Wix list is not on production.** `marketing:tag-wix --file=contacts.csv`
-matched **13 of 1,706** addresses, which is not a backfill result but a finding:
-the Session 50 import was built and deployed but there is no record of anyone
-ever running it, and bulk email was never usable anyway because
-`QUEUE_CONNECTION` is still `sync`. Do NOT run the backfill with `--fix` — it
-would tag 13 contacts and leave the business believing the "all Wix contacts"
-audience exists when it holds thirteen people. The list needs importing first.
+**The Wix list is not on production, and the reason is not what it first
+looked like.** `marketing:tag-wix --file=contacts.csv` matched **13 of 1,706**
+addresses. The first reading — that the contact list had never been imported —
+was wrong: production holds **1,443 contacts** across seven markets
+(`asia` 176, `austria` 252, `croatia` 199, `czech` 300, `france` 300,
+`germany` 212, `test` 4). Those are curated B2B prospect lists built market by
+market in Sessions 69 and 72; the round counts give them away. `contacts.csv`
+is a Wix **consumer** export and is a different population entirely — thirteen
+people appear in both.
 
-**The operational route for the existing list** is the import, not the command:
-re-upload `contacts.csv` with any market and every contact in it gains `wix`
-while keeping the market it already had — import has been additive since Session
-72. The command exists for the case where the original file is not to hand.
+So the curated lists were imported and the Wix export never was. Do NOT run
+`marketing:tag-wix --fix`: it would tag thirteen contacts and leave the business
+believing the "all Wix contacts" audience exists when it holds thirteen people.
+The export has to be imported, which is what `marketing:import` is for.
+
+**`marketing:import` — the CLI half of the upload screen.** The same service the
+admin upload uses, without a browser. Not a convenience: ~1,950 rows each cost a
+lookup, a write and a membership write, which on shared hosting runs long enough
+to hit a web-server timeout while PHP keeps going — a 504 over a list that is
+still half-importing, with nobody able to say how far it got. Reports by
+default (`valid` / `already present` / `new`, and whether the file reads as a
+Wix export); writes on `--fix`.
+
+Contacts already present keep the market they were in and gain the new ones,
+which is what makes running this over a file that overlaps the curated markets
+safe — the thirteen shared addresses end up in their existing market AND `wix`.
 
 See `FRONTEND_NOTE_wix-audience.md`.
 

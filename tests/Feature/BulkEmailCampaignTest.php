@@ -525,6 +525,57 @@ single@example.com,Example
         unlink($path);
     }
 
+    public function test_the_cli_import_reports_before_it_writes(): void
+    {
+        // The original Wix export is ~1,950 rows. Pushed through a browser on
+        // shared hosting that runs long enough to hit a web-server timeout
+        // while PHP keeps going — a 504 over a half-imported list that nobody
+        // can then say how far it got.
+        MarketingContact::create([
+            'email' => 'already@kupigume.hr', 'market' => 'croatia',
+            'status' => 'subscribed', 'unsubscribe_token' => 'tok-already',
+        ]);
+
+        $path = $this->wixCsv([
+            'A,One,already@kupigume.hr,+385 1 1,S 1,Zagreb,Croatia,,One',
+            'B,Two,brandnew@kupigume.hr,+385 1 2,S 2,Zagreb,Croatia,,Two',
+            'C,Bad,not-an-email,+385 1 3,S 3,Zagreb,Croatia,,Three',
+        ]);
+
+        $this->artisan("marketing:import {$path} --market=wix")
+            ->expectsOutputToContain('a Wix export')
+            ->expectsOutputToContain('Already in the database:    1')
+            ->expectsOutputToContain('New contacts:               1')
+            ->assertExitCode(0);
+
+        // Reported, not written.
+        $this->assertNull(MarketingContact::where('email', 'brandnew@kupigume.hr')->first());
+
+        $this->artisan("marketing:import {$path} --market=wix --fix")->assertExitCode(0);
+
+        $this->assertNotNull(MarketingContact::where('email', 'brandnew@kupigume.hr')->first());
+
+        // The contact that was already here kept croatia and gained wix —
+        // which is the whole reason this import is safe to run over a list
+        // that overlaps the curated markets.
+        $existing = MarketingContact::where('email', 'already@kupigume.hr')->first();
+        $this->assertSame('croatia', $existing->market);
+        $this->assertEqualsCanonicalizing(['croatia', 'wix'], $existing->marketNames());
+
+        unlink($path);
+    }
+
+    public function test_the_cli_import_refuses_without_a_market(): void
+    {
+        $path = $this->wixCsv(['A,One,nomarket@kupigume.hr,+385 1 1,S 1,Zagreb,Croatia,,One']);
+
+        $this->artisan("marketing:import {$path}")
+            ->expectsOutputToContain('--market is required')
+            ->assertExitCode(1);
+
+        unlink($path);
+    }
+
     public function test_the_backfill_command_reports_before_it_writes(): void
     {
         // The ~1,720 contacts loaded in Session 50 recorded nothing about
