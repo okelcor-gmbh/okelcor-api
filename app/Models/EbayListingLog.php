@@ -2,11 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\RecordsStaffActivity;
+use App\Services\StaffActivityRecorder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class EbayListingLog extends Model
 {
+    use RecordsStaffActivity;
+
     // Append-only audit table — no updated_at column
     const UPDATED_AT = null;
 
@@ -36,5 +40,10 @@ class EbayListingLog extends Model
     public function adminUser(): BelongsTo
     {
         return $this->belongsTo(AdminUser::class);
+    }
+
+    public function recordStaffActivity(StaffActivityRecorder $recorder): void
+    {
+        $recorder->fromEbayListingLog($this);
     }
 }

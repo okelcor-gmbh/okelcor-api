@@ -2,10 +2,13 @@
 
 namespace App\Services;
 
+use App\Models\AdminSecurityEvent;
 use App\Models\AdminUser;
 use App\Models\BulkEmailCampaign;
 use App\Models\CustomerCommunication;
+use App\Models\EbayListingLog;
 use App\Models\FinanceInvoice;
+use App\Models\Media;
 use App\Models\Order;
 use App\Models\OrderLog;
 use App\Models\OrderSignoff;
@@ -266,6 +269,124 @@ class StaffActivityRecorder
             'occurred_at'   => $audit->created_at ?? now(),
             'metadata'      => [],
         ], $audit->actor_id, $audit->actor_label);
+    }
+
+
+    /**
+     * Security-event types that are somebody doing administrative work.
+     *
+     * A whitelist rather than a blocklist, because most of this table is not
+     * work at all: logins, 2FA challenges and permission denials describe
+     * presence and accidents, and counting them would put exactly the thing
+     * this ledger refuses to measure back in through a side door.
+     */
+    private const SYSTEM_EVENT_TYPES = [
+        'admin_created',
+        'admin_deleted',
+        'role_changed',
+    ];
+
+    /**
+     * An upload. Attributed through `media.uploaded_by`, which has been filled
+     * since the media library shipped.
+     */
+    public function fromMedia(Media $media): ?StaffActivity
+    {
+        return $this->write([
+            'category'      => 'system',
+            'action'        => 'media_uploaded',
+            'subject_type'  => 'media',
+            'subject_id'    => $media->id,
+            'subject_label' => $media->original_filename ?: ($media->filename ?: ('Media #' . $media->id)),
+            'source_type'   => 'media',
+            'source_id'     => $media->id,
+            'occurred_at'   => $media->created_at ?? now(),
+            'metadata'      => array_filter(['mime' => $media->mime_type]),
+        ], $media->uploaded_by);
+    }
+
+    public function fromEbayListingLog(EbayListingLog $log): ?StaffActivity
+    {
+        return $this->write([
+            'category'      => 'system',
+            'action'        => 'ebay_' . $log->action,
+            'subject_type'  => 'product',
+            'subject_id'    => $log->product_id,
+            'subject_label' => $log->sku ?: ('Product #' . $log->product_id),
+            'source_type'   => 'ebay_listing_log',
+            'source_id'     => $log->id,
+            'occurred_at'   => $log->created_at ?? now(),
+            'metadata'      => array_filter(['status' => $log->status]),
+        ], $log->admin_user_id);
+    }
+
+    /**
+     * Administering the system itself — creating an account, changing somebody's
+     * role. Only the whitelisted types above; the rest of this table is presence
+     * data.
+     */
+    public function fromSecurityEvent(AdminSecurityEvent $event): ?StaffActivity
+    {
+        if (! in_array($event->type, self::SYSTEM_EVENT_TYPES, true)) {
+            return null;
+        }
+
+        return $this->write([
+            'category'      => 'system',
+            'action'        => $event->type,
+            'subject_type'  => 'admin_user',
+            'subject_id'    => null,
+            'subject_label' => $event->description ?: $event->type,
+            'source_type'   => 'admin_security_event',
+            'source_id'     => $event->id,
+            'occurred_at'   => $event->created_at ?? now(),
+            'metadata'      => [],
+        ], $event->admin_id);
+    }
+
+    /**
+     * A commit.
+     *
+     * Development has a system of record too — it simply is not this database.
+     * Everything else in the ledger is read from a trail the API already keeps;
+     * this reads the one git keeps, on exactly the same terms: attributed to a
+     * person, idempotent, and never invented.
+     *
+     * `source_id` is derived from the sha rather than being a row id, because
+     * git has no integer key and the ledger's idempotency index needs one. The
+     * first 15 hex digits give 60 bits, which is far more than enough to keep
+     * a repository's history distinct, and the full sha travels in
+     * `subject_label` and `metadata` so a row can always be traced back to the
+     * commit it describes.
+     *
+     * @param  array{sha: string, email: string, name: string, date: string, subject: string, repo: string, files?: int, insertions?: int, deletions?: int}  $commit
+     */
+    public function fromGitCommit(array $commit, ?int $adminUserId): ?StaffActivity
+    {
+        $sha = trim($commit['sha']);
+
+        if ($sha === '' || $adminUserId === null) {
+            return null;
+        }
+
+        return $this->write([
+            'category'      => 'development',
+            'action'        => 'code_committed',
+            'subject_type'  => 'commit',
+            'subject_id'    => null,
+            'subject_label' => substr($sha, 0, 9) . ' — ' . mb_substr($commit['subject'] ?? '', 0, 120),
+            'source_type'   => 'git_commit',
+            'source_id'     => hexdec(substr($sha, 0, 15)),
+            'occurred_at'   => $commit['date'],
+            'metadata'      => array_filter([
+                'sha'        => $sha,
+                'repo'       => $commit['repo'] ?? null,
+                'subject'    => $commit['subject'] ?? null,
+                'files'      => $commit['files'] ?? null,
+                'insertions' => $commit['insertions'] ?? null,
+                'deletions'  => $commit['deletions'] ?? null,
+            ], fn ($v) => $v !== null && $v !== ''),
+        ], $adminUserId);
     }
 
     // -------------------------------------------------------------------------

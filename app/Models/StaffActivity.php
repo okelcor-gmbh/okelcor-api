@@ -35,6 +35,14 @@ class StaffActivity extends Model
         'marketing',
         'support',
         'partners',
+
+        // Technical work. Added once it was pointed out that the seven
+        // categories above are all business operations — a developer or system
+        // administrator touches almost none of those tables, so their record
+        // read as an empty month when the truth was that the ledger had no idea
+        // what their work looks like.
+        'development',
+        'system',
     ];
 
     public const CATEGORY_LABELS = [
@@ -45,6 +53,8 @@ class StaffActivity extends Model
         'marketing' => 'Marketing',
         'support'   => 'Customer support',
         'partners'  => 'Partner sales',
+        'development' => 'Development',
+        'system'      => 'System administration',
     ];
 
     protected $fillable = [

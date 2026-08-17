@@ -346,3 +346,93 @@ super_admin, admin, order_manager).
 
 The team table links each name to `/admin/contribution?admin_user_id=N`, which
 the personal page now reads.
+
+---
+
+# Addendum 2 — technical work (same session)
+
+**No migration.** No new routes. Two new ledger categories and four new sources.
+
+## The gap this closes
+
+The ledger's seven original sources are all business operations. Somebody who
+**builds** the system rather than operating it touches almost none of those
+tables, so their month came back empty — which was never true about their work,
+only about what the ledger knew how to look at.
+
+Two new categories, which arrive automatically in `meta.categories` and
+`by_category` (both are served, not hardcoded, so **no frontend change is
+needed to display them**):
+
+| Category | Label | What lands in it |
+|---|---|---|
+| `development` | Development | Commits, imported from git |
+| `system` | System administration | Media uploads, eBay listing actions, account/role administration |
+
+## Where development work comes from
+
+Development has a system of record; it is just not this database. `staff:import-commits`
+reads git on the same terms as every other source — attributed to a named person,
+idempotent, nothing invented.
+
+Rows look like any other activity:
+
+```json
+{
+  "category": "development", "category_label": "Development",
+  "action": "code_committed", "action_label": "Code committed",
+  "subject_type": "commit", "subject_id": null,
+  "subject_label": "64fe4afd9 — feat: name people by the job they do",
+  "occurred_at": "2026-08-17T15:28:48+03:00",
+  "metadata": { "sha": "64fe4afd9c06…", "repo": "okelcor-api", "subject": "feat: …" },
+  "verified": true
+}
+```
+
+**`subject_type: "commit"` has a null `subject_id`** — git has no integer key.
+`SubjectLink` already falls back to rendering the label as plain mono text when
+it cannot build an href, so nothing breaks. If you want these clickable later,
+`metadata.sha` and `metadata.repo` are enough to build a GitHub URL; that is a
+frontend-only change whenever someone wants it.
+
+## What is deliberately *not* counted
+
+`admin_security_events` is now a source, but only three types reach the ledger:
+`admin_created`, `admin_deleted`, `role_changed`. Logins, 2FA challenges and
+permission denials stay out — that table is mostly presence data, and counting it
+would put the one thing this ledger refuses to measure back in through a side
+door. A whitelist rather than a blocklist, so a new event type has to be
+deliberately added rather than silently included.
+
+## Manual side
+
+`development` is now a contribution category too — "Development & technical" —
+for the technical work that leaves no commit: an architecture decision, a spec,
+an afternoon pairing on somebody else's bug. Commits themselves are automatic and
+appear under **Recorded**, not here.
+
+## Running it
+
+On the server, for the API repo:
+
+```bash
+php artisan staff:import-commits --since="12 months ago"        # survey
+php artisan staff:import-commits --since="12 months ago" --fix
+```
+
+The frontend is on Vercel and is not checked out beside the API, so its history
+comes in through a file. Locally:
+
+```bash
+cd ~/okelcor-website
+git log --no-merges --since="12 months ago" \
+  --pretty=format:'%H%x1f%aE%x1f%aN%x1f%aI%x1f%s' > commits.tsv
+# upload commits.tsv to the server, then:
+php artisan staff:import-commits --file=commits.tsv --repo-name=okelcor-website --fix
+```
+
+Attribution is by **author e-mail** against the account e-mail. A commit whose
+author matches nothing is reported *by identity with a count* rather than
+silently dropped, so it is obvious what to add to `staff.git_aliases`
+(git address → login address) — committing from a personal address is the normal
+case, and mapping it beats asking anyone to rewrite history.

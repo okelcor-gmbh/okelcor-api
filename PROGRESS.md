@@ -15,6 +15,7 @@ Last updated: 2026-08-17 | Branch: `main` | Latest commit: Session 89 (**pushed,
 | **88** | `sort` on the order list, so the queue can be worked from the back | none | none |
 | **89** | Staff contribution ledger — phases 1 and 2 of the performance system | **#38** | **10 new** |
 | **89b** | Job titles separated from roles, team report, monthly digest, admin nav search | **#39** | **1 new** |
+| **89c** | Technical work — git commits, media, eBay, account administration | none | none |
 
 ```bash
 cd /home/okelvaxj/domains/okelcor.com/public_html/okelcor-api
@@ -52,6 +53,11 @@ until this runs, and every source it reads has months of attributable work in it
 
 # Check the report before anyone receives it by e-mail.
 /opt/alt/php83/usr/bin/php artisan staff:digest --dry-run
+
+# Development work. The ledger's other sources are all business operations, so
+# without this a developer's month reads as empty.
+/opt/alt/php83/usr/bin/php artisan staff:import-commits --since="12 months ago"
+/opt/alt/php83/usr/bin/php artisan staff:import-commits --since="12 months ago" --fix
 ```
 
 Read the survey before the fix. It prints the split per person and per category,
@@ -2395,6 +2401,44 @@ permission gate, its alphabetical order under unequal workloads, and four digest
 cases — dry run, per-recipient send, no recipients, and stood down by config.
 
 See the addendum in `FRONTEND_NOTE_staff-contribution-ledger.md`.
+
+---
+
+## Technical work is work (Session 89c)
+
+> **Deploy status:** built and tested, **not yet deployed**. **No migration, no
+> new routes** — two new category values in a VARCHAR column, four new sources,
+> one new command.
+
+The ledger's seven original sources are all business operations. Somebody who
+**builds** the system rather than operating it touches almost none of those
+tables, so their month came back empty — which was never true about their work,
+only about what the ledger knew how to look at. Raised by the person it was
+wrong about, which is the fastest way these things get found.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `development` + `system` categories | 🔧 | `category` is `VARCHAR(30)`, so this needs no migration. Both arrive in `meta.categories` and `by_category`, which are served rather than hardcoded — the frontend displays them with no change. |
+| `staff:import-commits` | 🔧 | **Development has a system of record; it is just not this database.** Reads git on the same terms as every other source: attributed to a named person, idempotent, nothing invented. Survey by default, `--fix` to write. |
+| Attribution by author e-mail | 🔧 | Plus `staff.git_aliases` (git address → login address). Committing from a personal address is the normal case, not an edge case, and mapping it beats asking anybody to rewrite history. Unmatched authors are reported **by identity with a count** — "412 commits skipped" tells you nothing, "412 from noreply@github.com" tells you exactly what to add. |
+| Two repositories, two routes in | 🔧 | `--repo=` reads git directly (the API repo is on the server); `--file=` reads an exported log (the frontend is on Vercel and is not checked out beside the API). The command prints the exact `git log` line that generates the file. |
+| `source_id` derived from the sha | 🔧 | git has no integer key and the idempotency index needs one. First 15 hex digits, 60 bits — ample to keep a repository distinct — and the full sha travels in `subject_label` and `metadata`, so a row is always traceable back to the commit. The trade-off is named in the code rather than left for someone to discover. |
+| `media.uploaded_by` | 🔧 | Uploading is real work and that column has recorded it since the media library shipped. |
+| `ebay_listing_logs.admin_user_id` | 🔧 | Listing actions, already attributed. |
+| `admin_security_events` — **whitelisted** | 🔧 | Only `admin_created`, `admin_deleted`, `role_changed`. Logins, 2FA challenges and permission denials stay out: that table is mostly presence data, and counting it would put the one thing this ledger refuses to measure back in through a side door. A whitelist rather than a blocklist, so a new event type has to be deliberately added rather than silently included. |
+| `development` contribution category | 🔧 | For technical work that leaves no commit — an architecture decision, a spec, an afternoon pairing on somebody else's bug. Commits are automatic and appear under Recorded, not here. |
+
+### Tests
+
+**8 new** (50 in the file, 524 in the suite, up from 516): both categories exist,
+media/eBay/account-administration recorded, **logins still excluded**, commits
+imported and attributed, the survey writing nothing, re-running not doubling,
+the full sha surviving into metadata, an unmatched author reported rather than
+guessed at, an alias mapping a personal address, and — the one that answers the
+original question — a developer's summary coming back with a non-zero
+`development` count instead of an empty month.
+
+See addendum 2 in `FRONTEND_NOTE_staff-contribution-ledger.md`.
 
 ---
 

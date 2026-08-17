@@ -35,6 +35,42 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Repositories
+    |--------------------------------------------------------------------------
+    |
+    | Where `staff:import-commits` reads development work from, as
+    | label => absolute path. Defaults to this project when the list is empty.
+    |
+    | Only repositories that exist on the machine running the command can be
+    | read directly. The frontend lives on Vercel and is not checked out beside
+    | the API, so its history comes in through `--file=` instead — export it
+    | locally, upload, import.
+    |
+    */
+    'repositories' => array_filter([
+        'okelcor-api' => base_path(),
+        'okelcor-website' => env('STAFF_FRONTEND_REPO_PATH'),
+    ]),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Git identities
+    |--------------------------------------------------------------------------
+    |
+    | git e-mail => admin login e-mail.
+    |
+    | Committing from a personal address is the normal case, not an edge case —
+    | people do it for years before they have a work account. Mapping the two
+    | beats asking anybody to rewrite history, and a commit whose author matches
+    | nothing is reported by identity so it is obvious what to add here.
+    |
+    */
+    'git_aliases' => [
+        // 'john@personal.example' => 'leojohnseyi@gmail.com',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Contribution digest
     |--------------------------------------------------------------------------
     |

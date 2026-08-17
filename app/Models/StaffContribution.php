@@ -28,6 +28,9 @@ class StaffContribution extends Model
         'trade_fair',
         'training',
         'internal',
+        // Design and technical work that leaves no commit — an architecture
+        // decision, a spec, a session pairing on someone else's bug.
+        'development',
         'other',
     ];
 
@@ -38,6 +41,7 @@ class StaffContribution extends Model
         'trade_fair'     => 'Trade fair & events',
         'training'       => 'Training & learning',
         'internal'       => 'Internal & admin',
+        'development'    => 'Development & technical',
         'other'          => 'Other',
     ];
 

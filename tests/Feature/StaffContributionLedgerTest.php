@@ -43,6 +43,7 @@ class StaffContributionLedgerTest extends TestCase
 
         foreach ([
             'staff_contributions', 'staff_activities', 'partner_sale_audits',
+            'media', 'ebay_listing_logs', 'admin_security_events',
             'bulk_email_campaigns', 'finance_invoices', 'customer_communications',
             'order_signoffs', 'trade_documents', 'order_logs', 'orders',
             'personal_access_tokens', 'admin_users',
@@ -163,6 +164,39 @@ class StaffContributionLedgerTest extends TestCase
             $table->string('actor_label')->nullable();
             $table->text('changes')->nullable();
             $table->string('ip_address', 45)->nullable();
+            $table->timestamp('created_at')->nullable();
+        });
+
+        Schema::create('media', function (Blueprint $table) {
+            $table->id();
+            $table->string('filename')->nullable();
+            $table->string('original_filename')->nullable();
+            $table->string('mime_type')->nullable();
+            $table->unsignedBigInteger('uploaded_by')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::create('ebay_listing_logs', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('product_id')->nullable();
+            $table->unsignedBigInteger('admin_user_id')->nullable();
+            $table->string('sku')->nullable();
+            $table->string('action');
+            $table->string('status')->nullable();
+            $table->timestamp('created_at')->nullable();
+        });
+
+        Schema::create('admin_security_events', function (Blueprint $table) {
+            $table->id();
+            $table->string('type');
+            $table->string('severity')->nullable();
+            $table->unsignedBigInteger('admin_id')->nullable();
+            $table->string('admin_email')->nullable();
+            $table->string('admin_role')->nullable();
+            $table->string('ip_address', 45)->nullable();
+            $table->text('user_agent')->nullable();
+            $table->text('description')->nullable();
+            $table->text('metadata')->nullable();
             $table->timestamp('created_at')->nullable();
         });
 
@@ -1012,5 +1046,170 @@ class StaffContributionLedgerTest extends TestCase
         $this->artisan('staff:digest')->assertSuccessful();
 
         \Illuminate\Support\Facades\Mail::assertNothingSent();
+    }
+
+    // ── technical work ────────────────────────────────────────────────────
+
+    public function test_development_and_system_are_categories_the_ledger_knows(): void
+    {
+        // The original seven were all business operations, which is why a
+        // developer's month came back empty.
+        $this->assertContains('development', StaffActivity::CATEGORIES);
+        $this->assertContains('system', StaffActivity::CATEGORIES);
+    }
+
+    public function test_uploading_media_is_recorded_as_work(): void
+    {
+        $dev = $this->admin('super_admin', 'System Administrator');
+
+        \App\Models\Media::create([
+            'filename'          => 'tbr-hero.jpg',
+            'original_filename' => 'tbr-hero.jpg',
+            'mime_type'         => 'image/jpeg',
+            'uploaded_by'       => $dev->id,
+        ]);
+
+        $activity = StaffActivity::where('source_type', 'media')->first();
+
+        $this->assertNotNull($activity);
+        $this->assertSame('system', $activity->category);
+        $this->assertSame($dev->id, $activity->admin_user_id);
+    }
+
+    public function test_administering_accounts_is_work_but_logging_in_is_not(): void
+    {
+        $dev = $this->admin('super_admin', 'System Administrator');
+
+        // Presence. Excluded by design, and the whitelist is what keeps it out
+        // rather than a reviewer remembering to ignore it.
+        \App\Models\AdminSecurityEvent::create([
+            'type' => 'login_success', 'admin_id' => $dev->id, 'created_at' => now(),
+        ]);
+        $this->assertSame(0, StaffActivity::where('source_type', 'admin_security_event')->count());
+
+        \App\Models\AdminSecurityEvent::create([
+            'type' => 'admin_created', 'admin_id' => $dev->id,
+            'description' => 'Admin user created: edinah@okelcor.com', 'created_at' => now(),
+        ]);
+
+        $this->assertSame(1, StaffActivity::where('source_type', 'admin_security_event')->count());
+        $this->assertSame('system', StaffActivity::where('source_type', 'admin_security_event')->value('category'));
+    }
+
+    public function test_an_ebay_listing_action_is_recorded(): void
+    {
+        $person = $this->admin('admin');
+
+        \App\Models\EbayListingLog::create([
+            'product_id' => 7, 'admin_user_id' => $person->id,
+            'sku' => 'TBR-315-80', 'action' => 'listed', 'status' => 'ok',
+            'created_at' => now(),
+        ]);
+
+        $this->assertSame('system', StaffActivity::where('source_type', 'ebay_listing_log')->value('category'));
+    }
+
+    // ── git ───────────────────────────────────────────────────────────────
+
+    private function commitLog(array $rows): string
+    {
+        // The same \x1f-separated format the command asks git for. A unit
+        // separator rather than a pipe or tab, because a commit subject
+        // contains both often enough to matter.
+        return implode("\n", array_map(
+            fn ($r) => implode("\x1f", $r),
+            $rows
+        ));
+    }
+
+    public function test_commits_are_imported_and_attributed_by_author_email(): void
+    {
+        $dev = $this->admin('super_admin', 'System Administrator');
+
+        $file = sys_get_temp_dir() . '/commits-' . uniqid() . '.tsv';
+        file_put_contents($file, $this->commitLog([
+            ['a1b2c3d4e5f60718293a4b5c6d7e8f9012345678', $dev->email, $dev->name, '2026-08-15T09:00:00+00:00', 'feat: the contribution ledger'],
+            ['b2c3d4e5f60718293a4b5c6d7e8f901234567890', $dev->email, $dev->name, '2026-08-16T11:30:00+00:00', 'fix: whereBetween dropped the last day'],
+        ]));
+
+        $this->artisan("staff:import-commits --file={$file} --repo-name=okelcor-api")->assertSuccessful();
+        $this->assertSame(0, StaffActivity::where('category', 'development')->count(), 'The survey must not write.');
+
+        $this->artisan("staff:import-commits --file={$file} --repo-name=okelcor-api --fix")->assertSuccessful();
+
+        $commits = StaffActivity::where('category', 'development')->get();
+        $this->assertCount(2, $commits);
+        $this->assertSame($dev->id, $commits->first()->admin_user_id);
+        $this->assertSame('code_committed', $commits->first()->action);
+
+        // The full sha survives, so a row can always be traced back to the
+        // commit it describes even though source_id is derived from it.
+        $first = $commits->first(fn ($c) => str_starts_with((string) $c->subject_label, 'a1b2c3d4e'));
+        $this->assertSame('a1b2c3d4e5f60718293a4b5c6d7e8f9012345678', $first->metadata['sha']);
+        $this->assertSame('okelcor-api', $first->metadata['repo']);
+
+        // Re-running cannot double anybody's month.
+        $this->artisan("staff:import-commits --file={$file} --repo-name=okelcor-api --fix")->assertSuccessful();
+        $this->assertSame(2, StaffActivity::where('category', 'development')->count());
+
+        @unlink($file);
+    }
+
+    public function test_a_commit_by_a_stranger_is_reported_rather_than_guessed_at(): void
+    {
+        $this->admin('super_admin', 'System Administrator');
+
+        $file = sys_get_temp_dir() . '/commits-' . uniqid() . '.tsv';
+        file_put_contents($file, $this->commitLog([
+            ['c3d4e5f60718293a4b5c6d7e8f90123456789012', 'noreply@github.com', 'GitHub', '2026-08-15T09:00:00+00:00', 'chore: bot commit'],
+        ]));
+
+        $this->artisan("staff:import-commits --file={$file} --fix")
+            ->expectsOutputToContain('noreply@github.com')
+            ->assertSuccessful();
+
+        $this->assertSame(0, StaffActivity::where('category', 'development')->count());
+
+        @unlink($file);
+    }
+
+    public function test_a_git_alias_maps_a_personal_address_to_the_account(): void
+    {
+        $dev = $this->admin('super_admin', 'System Administrator');
+
+        config(['staff.git_aliases' => ['john@personal.example' => $dev->email]]);
+
+        $file = sys_get_temp_dir() . '/commits-' . uniqid() . '.tsv';
+        file_put_contents($file, $this->commitLog([
+            ['d4e5f60718293a4b5c6d7e8f9012345678901234', 'john@personal.example', 'John', '2026-08-15T09:00:00+00:00', 'feat: something'],
+        ]));
+
+        $this->artisan("staff:import-commits --file={$file} --fix")->assertSuccessful();
+
+        // Committing from a personal address is normal; mapping it beats asking
+        // anybody to rewrite history.
+        $this->assertSame(1, StaffActivity::where('admin_user_id', $dev->id)->where('category', 'development')->count());
+
+        @unlink($file);
+    }
+
+    public function test_a_developers_summary_is_no_longer_empty(): void
+    {
+        $dev = $this->admin('super_admin', 'System Administrator');
+
+        $file = sys_get_temp_dir() . '/commits-' . uniqid() . '.tsv';
+        file_put_contents($file, $this->commitLog([
+            ['e5f60718293a4b5c6d7e8f901234567890123456', $dev->email, $dev->name, now()->toIso8601String(), 'feat: a feature'],
+        ]));
+        $this->artisan("staff:import-commits --file={$file} --fix")->assertSuccessful();
+
+        $categories = $this->getJson('/api/v1/admin/staff/summary', $this->headers($dev))
+            ->assertOk()
+            ->assertJsonPath('data.recorded.total', 1)
+            ->json('data.recorded.by_category');
+
+        $this->assertSame(1, collect($categories)->firstWhere('category', 'development')['total']);
+
+        @unlink($file);
     }
 }

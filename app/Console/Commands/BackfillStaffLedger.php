@@ -2,10 +2,13 @@
 
 namespace App\Console\Commands;
 
+use App\Models\AdminSecurityEvent;
 use App\Models\BulkEmailCampaign;
+use App\Models\EbayListingLog;
 use App\Models\CustomerCommunication;
 use App\Models\FinanceInvoice;
 use App\Models\OrderLog;
+use App\Models\Media;
 use App\Models\OrderSignoff;
 use App\Models\PartnerSaleAudit;
 use App\Models\StaffActivity;
@@ -58,6 +61,13 @@ class BackfillStaffLedger extends Command
             'Email campaigns'    => ['model' => BulkEmailCampaign::class,    'method' => 'fromCampaign'],
             'Finance invoices'   => ['model' => FinanceInvoice::class,       'method' => 'fromFinanceInvoice'],
             'Partner sale audit' => ['model' => PartnerSaleAudit::class,     'method' => 'fromPartnerSaleAudit'],
+
+            // Technical work. Added once it was clear the list above is all
+            // business operations — somebody who builds the system rather than
+            // operating it appeared to have done nothing.
+            'Media uploads'      => ['model' => Media::class,                'method' => 'fromMedia'],
+            'eBay listing log'   => ['model' => EbayListingLog::class,       'method' => 'fromEbayListingLog'],
+            'Admin events'       => ['model' => AdminSecurityEvent::class,   'method' => 'fromSecurityEvent'],
         ];
     }
 
@@ -142,9 +152,12 @@ class BackfillStaffLedger extends Command
 
         $this->newLine();
         $this->line(sprintf(
-            '%s source rows carried no member of staff and were skipped — customer decisions, webhooks and scheduled jobs.',
+            '%s source rows carried no member of staff and were skipped — customer decisions, webhooks, scheduled jobs, and logins (which are presence, not work).',
             number_format($skipped)
         ));
+
+        $this->newLine();
+        $this->line('Development work is not in any of these tables. Import it with `staff:import-commits`.');
 
         if (! $write) {
             $this->newLine();
