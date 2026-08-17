@@ -2,12 +2,16 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\RecordsStaffActivity;
+use App\Services\StaffActivityRecorder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class BulkEmailCampaign extends Model
 {
+    use RecordsStaffActivity;
+
     protected $fillable = [
         'subject',
         'body_html',
@@ -42,5 +46,10 @@ class BulkEmailCampaign extends Model
     public function recipients(): HasMany
     {
         return $this->hasMany(BulkEmailCampaignRecipient::class, 'campaign_id');
+    }
+
+    public function recordStaffActivity(StaffActivityRecorder $recorder): void
+    {
+        $recorder->fromCampaign($this);
     }
 }

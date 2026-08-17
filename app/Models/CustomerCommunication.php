@@ -2,11 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\RecordsStaffActivity;
+use App\Services\StaffActivityRecorder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class CustomerCommunication extends Model
 {
+    use RecordsStaffActivity;
+
     protected $fillable = [
         'customer_id',
         'quote_request_id',
@@ -61,5 +65,14 @@ class CustomerCommunication extends Model
     public function adminUser(): BelongsTo
     {
         return $this->belongsTo(AdminUser::class, 'admin_user_id');
+    }
+
+    /**
+     * Outbound only. Recording an inbound message would credit whoever it was
+     * addressed to for the customer having written in.
+     */
+    public function recordStaffActivity(StaffActivityRecorder $recorder): void
+    {
+        $recorder->fromCommunication($this);
     }
 }

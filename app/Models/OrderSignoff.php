@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\RecordsStaffActivity;
+use App\Services\StaffActivityRecorder;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -18,6 +20,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class OrderSignoff extends Model
 {
+    use RecordsStaffActivity;
+
     public const SLOT_OPS     = 'ops';
     public const SLOT_FINANCE = 'finance';
 
@@ -78,5 +82,14 @@ class OrderSignoff extends Model
     public function revokedBy(): BelongsTo
     {
         return $this->belongsTo(AdminUser::class, 'revoked_by');
+    }
+
+    /**
+     * A signature is the clearest single piece of evidence of work in the whole
+     * system: one named person, one moment, one order.
+     */
+    public function recordStaffActivity(StaffActivityRecorder $recorder): void
+    {
+        $recorder->fromSignoff($this);
     }
 }

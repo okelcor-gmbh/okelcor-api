@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\RecordsStaffActivity;
+use App\Services\StaffActivityRecorder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -14,6 +16,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class PartnerSaleAudit extends Model
 {
+    use RecordsStaffActivity;
+
     /** Append-only — there is no updated_at and nothing ever updates a row. */
     public $timestamps = false;
 
@@ -60,5 +64,14 @@ class PartnerSaleAudit extends Model
             'ip_address'      => $ip,
             'created_at'      => now(),
         ]);
+    }
+
+    /**
+     * Staff-side rows only — a partner entering their own sale is their work,
+     * not ours.
+     */
+    public function recordStaffActivity(StaffActivityRecorder $recorder): void
+    {
+        $recorder->fromPartnerSaleAudit($this);
     }
 }

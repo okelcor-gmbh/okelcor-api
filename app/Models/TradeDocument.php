@@ -2,11 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\RecordsStaffActivity;
+use App\Services\StaffActivityRecorder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class TradeDocument extends Model
 {
+    use RecordsStaffActivity;
+
     protected $fillable = [
         'order_id',
         'order_ref',
@@ -92,6 +96,18 @@ class TradeDocument extends Model
     public function issuedBy(): BelongsTo
     {
         return $this->belongsTo(AdminUser::class, 'issued_by');
+    }
+
+    /**
+     * Note the difference from the invoice register above: superseding a
+     * document removes it from the register but leaves it in the ledger.
+     * Withdrawing a document does not undo the work of having raised it, and a
+     * month that quietly loses its entries because a customer asked for a
+     * correction reads as though nothing was done.
+     */
+    public function recordStaffActivity(StaffActivityRecorder $recorder): void
+    {
+        $recorder->fromTradeDocument($this);
     }
 
     public function supersededBy(): BelongsTo

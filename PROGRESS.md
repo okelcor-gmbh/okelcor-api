@@ -1,18 +1,19 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-14 | Branch: `main` | Latest commit: Session 88 (`17ff1e7`, **pushed, not deployed**)
+Last updated: 2026-08-17 | Branch: `main` | Latest commit: Session 89 (**pushed, not deployed**)
 
 ---
 
-## 🔧 Sessions 86–88 pushed, NOT deployed
+## 🔧 Sessions 86–89 pushed, NOT deployed
 
-Tip is `17ff1e7`. **One unapplied migration (#37), six new routes.**
+**Two unapplied migrations (#37, #38), sixteen new routes.**
 
 | Session | What it is | Migration | Routes |
 |---|---|---|---|
 | **86** | Clients drill-down, month-to-month report with charts, one invoice register for both sides | **#37** | **5 new** |
 | **87** | eBay kept beside the website in the report, CSV export, fulfilment queue starting before dispatch | none | **1 new** |
 | **88** | `sort` on the order list, so the queue can be worked from the back | none | none |
+| **89** | Staff contribution ledger — phases 1 and 2 of the performance system | **#38** | **10 new** |
 
 ```bash
 cd /home/okelvaxj/domains/okelcor.com/public_html/okelcor-api
@@ -33,9 +34,22 @@ git fetch origin && git reset --hard origin/main
 `migrate:status` alone — see the Sessions 78–80 note for why:
 
 ```bash
-git rev-parse --short HEAD                                   # expect 17ff1e7
-/opt/alt/php83/usr/bin/php artisan tinker --execute="echo Schema::hasColumn('finance_invoices','source_type') ? 'register live' : 'NOT LIVE';"
+git rev-parse --short HEAD
+/opt/alt/php83/usr/bin/php artisan tinker --execute="echo Schema::hasColumn('finance_invoices','source_type') && Schema::hasTable('staff_activities') ? 'both live' : 'NOT LIVE';"
 ```
+
+**Then build the ledger from existing history** — Session 89's page opens empty
+until this runs, and every source it reads has months of attributable work in it:
+
+```bash
+/opt/alt/php83/usr/bin/php artisan staff:backfill-ledger          # survey, writes nothing
+/opt/alt/php83/usr/bin/php artisan staff:backfill-ledger --fix    # then this
+```
+
+Read the survey before the fix. It prints the split per person and per category,
+which is worth checking against what the business believes happened before
+anything lands in a table people will be judged on. Re-runnable — it cannot
+double anybody's month.
 
 **One number changes meaning on this deploy.** Session 87 widens `in_transit`
 from "dispatched" to the whole fulfilment window, so the board's figure will
@@ -2248,6 +2262,84 @@ business would have trusted and been wrong about.
 
 ---
 
+## Staff contribution ledger (Session 89)
+
+> **Deploy status:** built and tested, **not yet deployed**. Migration **#38**
+> (two new tables) unapplied. **10 new routes**, so `route:cache` must be
+> rebuilt. Deploy-order safe in both directions, proved by test.
+
+Phases 1 and 2 of a five-phase performance system: a per-person record of work
+the API already watched happen, and a place to enter the work it cannot see.
+Scorecards, AI-written monthly reports and skills intelligence are phases 3–5
+and are deliberately not here — see the bottom of this section.
+
+### The Ledger — work the system watched
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `staff_activities` table | 🔧 | Append-only. `admin_name` and `admin_role` copied onto the row rather than read through the relation, for the same reason `OrderSignoff` copies them: a record of what someone did is a statement about who they were at the time, and reading it live would rewrite last year's report the day somebody changes role. |
+| Driven by model events, not call sites | 🔧 | A `RecordsStaffActivity` trait on seven models. There are dozens of places an order log is written and five that create a trade document — a guarantee depending on each future one remembering to call a recorder is not a guarantee. Same reasoning as `InvoiceRegistrar`. |
+| Seven sources, all pre-existing | 🔧 | `order_logs` (the richest — it has stamped `admin_user_id` since Session 5), `trade_documents`, `order_signoffs`, outbound `customer_communications`, `bulk_email_campaigns`, hand-entered `finance_invoices`, `admin_user` rows in `partner_sale_audits`. No new instrumentation anywhere. |
+| **No person, no row** | 🔧 | Order logs written by a customer accepting something, by a webhook or by a scheduled command are skipped outright. Attributing those to whoever happened to be authenticated would be worse than not recording them. |
+| **No presence data, by design** | 🔧 | Logins, session length and page views exist in the database and are excluded. Measuring presence rewards whoever leaves the tab open. Stated in the frontend note so the exclusion is a decision on the record rather than an omission. |
+| Idempotent | 🔧 | Keyed on `(source_type, source_id, action)`, the table's own unique index. Re-saving a model updates its row; the backfill can run as many times as needed. |
+| `staff:backfill-ledger` | 🔧 | Survey by default, `--fix` to write. The dry run previews through a rolled-back transaction rather than reimplementing the recorder's rules — a survey that disagrees with the write it previews is worse than no survey. |
+
+### The Log — work only the person knows about
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `staff_contributions` table | 🔧 | **A second table, not a `source` column on the first.** The promise is that verified and self-reported work never merge into one figure; a column would make that a convention the next feature can forget, two tables make it structural. Nothing joins them and no endpoint sums across them. |
+| Six endpoints (list / create / edit / remove / attach / download) | 🔧 | Evidence stored on the private disk, served through a route that checks who is asking. Replacing a file deletes the one it replaced. |
+| `minutes` optional, and staying optional | 🔧 | Making someone account for their hours turns a contribution log into a timesheet, which is a different product with a very different reception. |
+| Evidence invited, not required | 🔧 | A supplier phone call has no artifact, and refusing to record it would only mean it goes unrecorded. Each row reports `has_evidence` so a reviewer sees what they are agreeing to. |
+| Review — verify or reject | 🔧 | `staff.verify`. **Nobody countersigns their own claim** (422), the same separation that stops one person filling both order sign-off slots. A rejection with no reason is refused — it is not something anyone can act on. |
+| Editable only while pending | 🔧 | 409 after review. Rewording an entry a manager agreed with would change what they agreed to; the answer is a correcting entry, and the message says so. |
+
+### Permissions
+
+| Key | Roles | Why |
+|---|---|---|
+| `staff.self` | **all nine** | Nothing may be measured about a person that the person cannot open. A `viewer` holding no other permission still gets their own record — asserted by a test that walks every role. |
+| `staff.view_team` | super_admin, admin, order_manager | Seeing a colleague's record is a manager's act. `sales_manager` deliberately absent — a pipeline role, not a line-management one. |
+| `staff.verify` | super_admin, admin | Narrower than viewing, because a verification turns someone's own claim into a countersigned record. |
+
+### Tests
+
+**29 new** — the migration against real SQL and its idempotency, capture from all
+seven sources, the four deliberate exclusions, the name/role snapshot,
+idempotency on re-save, inertness before the migration, every role reaching its
+own page, the 403 on a colleague, the summary keeping both halves apart (asserted
+by the *absence* of a combined total), every category present including zeros,
+the full contribution lifecycle, self-review, unreasoned rejection, private
+evidence, and the backfill's survey/fix/re-run behaviour.
+
+Full suite **503 passed, 0 failed**, 206 skipped — up from 474. **One real bug
+found by test:** `StaffContribution::scopeBetween` used `whereBetween` on a date
+column that some drivers return with a time on it, so `'2026-08-17 00:00:00'`
+sorted after the string `'2026-08-17'` and everything logged on the final day of
+a range silently vanished. Now `whereDate` on both bounds.
+
+### Not built, deliberately
+
+Phases 3–5 (role scorecards, the AI-written monthly narrative, skills
+intelligence and the bus-factor map) wait on **one business answer: does any of
+this ever touch pay, bonus or promotion, or is it purely visibility?** A
+visibility tool can be generous and approximate; one that decides money has to be
+defensible line by line and needs an appeals route. Building the scoring before
+that is settled means building it twice. Phase 4 additionally needs
+`QUEUE_CONNECTION=database` — outstanding item 2 below.
+
+Also worth surfacing before this goes live: under §87(1) no. 6 BetrVG a technical
+system *suitable for* monitoring employee performance requires works-council
+agreement, and the test is suitability rather than intent. If Okelcor has a
+Betriebsrat they are a day-one stakeholder. Flagged as an engineering read, not
+legal advice.
+
+See `FRONTEND_NOTE_staff-contribution-ledger.md`.
+
+---
+
 ## eBay Integration (Sessions 15–25)
 
 | Phase | Feature | Status |
@@ -2385,6 +2477,8 @@ business would have trusted and been wrong about.
 | `password_reset_tokens` | Customer password reset + invite tokens |
 | `failed_jobs` | Laravel queue failures |
 | `saved_fitments` | Customer-saved size/brand profiles ("My Garage") |
+| `staff_activities` | Per-person record of work the API watched happen (Session 89) 🔧 |
+| `staff_contributions` | Self-reported work the API cannot see, kept in its own table on purpose 🔧 |
 | `admin_insights` | AI-generated dashboard insights, one row per insight per generation batch |
 | `search_events` | One row per public catalogue query — term, filters, result count, and whether anything was found. No IP or user agent; the visitor digest rotates daily 🔧 |
 | `admin_push_tokens` | Expo push tokens for the admin/ops mobile app, one row per device |
@@ -2608,6 +2702,8 @@ detail and the item-edit path all work unchanged before the migration runs — a
 existing test (`OrderTotalFromItemsTest`) caught the one path where that was not
 true. The finance column on the board reads a structural zero and says so in
 `meta.finance_recording_available`. `route:cache` must be rebuilt: 9 new routes.
+
+38. `2026_08_17_000001_create_staff_activity_tables` (Session 89 — creates `staff_activities` and `staff_contributions`. Both NEW: nothing existing is read, altered or backfilled, so this cannot affect a live row. Each guarded with `Schema::hasTable`. Proved by `StaffContributionLedgerTest::test_the_migration_applies_against_real_sql_and_is_idempotent`, which runs the migration file itself and re-runs it. **Deploy-order safe in both directions**, and unusually load-bearing: the recording hooks sit on the order, document and invoice paths, so `StaffActivity::ledgerAvailable()` no-ops every one of them until the table exists — a reporting table must never be able to fail the thing it reports on. A test drops the table and asserts an order log still writes.)
 
 37. `2026_08_14_000001_add_file_and_origin_to_finance_invoices` (Session 86 — adds `file_path`/`original_filename`/`mime_type`/`file_size`/`uploaded_at` so finance can attach the sevDesk PDF, and `source_type`/`source_id` so a row auto-registered from an invoice or a trade document can be traced back to it rather than being an orphan number. Every column guarded with `Schema::hasColumn`; nothing existing is read, altered or backfilled. The code is deploy-order safe — `FinanceInvoice::registerAvailable()` checks for `source_type` and registration silently no-ops without it, so raising an invoice still works before this runs.)
 

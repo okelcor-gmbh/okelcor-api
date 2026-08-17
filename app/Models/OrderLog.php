@@ -2,11 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\RecordsStaffActivity;
+use App\Services\StaffActivityRecorder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class OrderLog extends Model
 {
+    use RecordsStaffActivity;
+
     /**
      * Every action string this codebase is allowed to write, and the single
      * source of truth for the `action` column's ENUM.
@@ -103,5 +107,14 @@ class OrderLog extends Model
     public function adminUser(): BelongsTo
     {
         return $this->belongsTo(AdminUser::class);
+    }
+
+    /**
+     * The single richest source in the ledger — this table already stamps who
+     * did what to which order, and has been doing so since Session 5.
+     */
+    public function recordStaffActivity(StaffActivityRecorder $recorder): void
+    {
+        $recorder->fromOrderLog($this);
     }
 }

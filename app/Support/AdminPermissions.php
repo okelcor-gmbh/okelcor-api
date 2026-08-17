@@ -154,6 +154,25 @@ class AdminPermissions
 
         // ── eBay ──────────────────────────────────────────────────────────
         'ebay.manage'             => ['super_admin', 'admin'],
+
+        // ── Staff contribution ledger ─────────────────────────────────────
+        // Every role holds `staff.self`, and that is the design rather than an
+        // oversight: nothing may be measured about a person that the person
+        // cannot see, and the surest way to guarantee it is to make their own
+        // view the one permission nobody can be missing. A viewer with no other
+        // access still gets their own record.
+        'staff.self'              => self::ROLES,
+
+        // Seeing someone else's work is a manager's act, and stops with the
+        // roles that actually manage people. `sales_manager` is deliberately
+        // absent — it is a pipeline role, not a line-management one, and
+        // widening it later is a one-line change here.
+        'staff.view_team'         => ['super_admin', 'admin', 'order_manager'],
+
+        // Agreeing that self-reported work happened. Narrower than viewing it,
+        // because a verification is the thing that turns someone's own claim
+        // into a countersigned record.
+        'staff.verify'            => ['super_admin', 'admin'],
     ];
 
     /**

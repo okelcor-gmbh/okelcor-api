@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\RecordsStaffActivity;
+use App\Services\StaffActivityRecorder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Schema;
@@ -15,6 +17,8 @@ use Illuminate\Support\Facades\Schema;
  */
 class FinanceInvoice extends Model
 {
+    use RecordsStaffActivity;
+
     /**
      * Where a register row came from.
      *
@@ -111,5 +115,16 @@ class FinanceInvoice extends Model
     public function order(): BelongsTo
     {
         return $this->belongsTo(Order::class, 'order_ref', 'ref');
+    }
+
+    /**
+     * Only rows a person typed. The registrar writes `okelcor` rows for this
+     * system's own invoices, and crediting finance with those would count the
+     * same work twice — once here, and once through the order log that raised
+     * the invoice.
+     */
+    public function recordStaffActivity(StaffActivityRecorder $recorder): void
+    {
+        $recorder->fromFinanceInvoice($this);
     }
 }

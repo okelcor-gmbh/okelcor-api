@@ -54,6 +54,8 @@ use App\Http\Controllers\Admin\AdminQuoteRequestController;
 use App\Http\Controllers\Admin\AdminLeadFunnelController;
 use App\Http\Controllers\Admin\AdminQuoteAttachmentController;
 use App\Http\Controllers\Admin\AdminSettingController;
+use App\Http\Controllers\Admin\AdminStaffContributionController;
+use App\Http\Controllers\Admin\AdminStaffLedgerController;
 use App\Http\Controllers\Admin\AdminUserController;
 use App\Http\Controllers\Admin\AuthController;
 use App\Http\Controllers\Admin\MediaController;
@@ -795,6 +797,34 @@ Route::prefix('v1')->group(function () {
             Route::post('finance-invoices/{id}/file', [AdminFinanceInvoiceController::class, 'uploadFile']);
             Route::patch('finance-invoices/{id}', [AdminFinanceInvoiceController::class, 'update']);
             Route::delete('finance-invoices/{id}', [AdminFinanceInvoiceController::class, 'destroy']);
+        });
+
+        // -----------------------------------------------------------------
+        // Staff contribution ledger
+        //
+        // Everything reads `staff.self`, which every role holds — nothing may
+        // be measured about a person that the person cannot open. Seeing a
+        // colleague's record is enforced inside the controllers rather than by
+        // a second middleware, because the subject defaults to the caller and
+        // only the explicit `?admin_user_id=` of somebody else needs
+        // `staff.view_team`. A route-level guard would lock people out of
+        // their own page.
+        // -----------------------------------------------------------------
+        Route::middleware('permission:staff.self')->group(function () {
+            Route::get('staff/activity', [AdminStaffLedgerController::class, 'activity']);
+            Route::get('staff/summary',  [AdminStaffLedgerController::class, 'summary']);
+            Route::get('staff/members',  [AdminStaffLedgerController::class, 'members']);
+
+            Route::get('staff/contributions',    [AdminStaffContributionController::class, 'index']);
+            Route::post('staff/contributions',   [AdminStaffContributionController::class, 'store']);
+            Route::patch('staff/contributions/{id}',  [AdminStaffContributionController::class, 'update']);
+            Route::delete('staff/contributions/{id}', [AdminStaffContributionController::class, 'destroy']);
+            Route::post('staff/contributions/{id}/file', [AdminStaffContributionController::class, 'uploadFile']);
+            Route::get('staff/contributions/{id}/file',  [AdminStaffContributionController::class, 'download']);
+        });
+
+        Route::middleware('permission:staff.verify')->group(function () {
+            Route::post('staff/contributions/{id}/review', [AdminStaffContributionController::class, 'review']);
         });
 
         // -----------------------------------------------------------------
