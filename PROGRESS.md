@@ -6,7 +6,7 @@ Last updated: 2026-08-17 | Branch: `main` | Latest commit: Session 89 (**pushed,
 
 ## 🔧 Sessions 86–89 pushed, NOT deployed
 
-**Two unapplied migrations (#37, #38), sixteen new routes.**
+**Three unapplied migrations (#37, #38, #39), seventeen new routes.**
 
 | Session | What it is | Migration | Routes |
 |---|---|---|---|
@@ -14,6 +14,7 @@ Last updated: 2026-08-17 | Branch: `main` | Latest commit: Session 89 (**pushed,
 | **87** | eBay kept beside the website in the report, CSV export, fulfilment queue starting before dispatch | none | **1 new** |
 | **88** | `sort` on the order list, so the queue can be worked from the back | none | none |
 | **89** | Staff contribution ledger — phases 1 and 2 of the performance system | **#38** | **10 new** |
+| **89b** | Job titles separated from roles, team report, monthly digest, admin nav search | **#39** | **1 new** |
 
 ```bash
 cd /home/okelvaxj/domains/okelcor.com/public_html/okelcor-api
@@ -44,6 +45,13 @@ until this runs, and every source it reads has months of attributable work in it
 ```bash
 /opt/alt/php83/usr/bin/php artisan staff:backfill-ledger          # survey, writes nothing
 /opt/alt/php83/usr/bin/php artisan staff:backfill-ledger --fix    # then this
+
+# Name people by their job rather than their permission set. Prints anyone
+# still falling back to a role, so the gaps are visible rather than silent.
+/opt/alt/php83/usr/bin/php artisan staff:sync-job-titles
+
+# Check the report before anyone receives it by e-mail.
+/opt/alt/php83/usr/bin/php artisan staff:digest --dry-run
 ```
 
 Read the survey before the fix. It prints the split per person and per category,
@@ -2340,6 +2348,56 @@ See `FRONTEND_NOTE_staff-contribution-ledger.md`.
 
 ---
 
+## The job is not the role (Session 89b)
+
+> **Deploy status:** built and tested, **not yet deployed**. Migration **#39**
+> unapplied. **1 new route**. Additive and guarded; every path falls back to a
+> tidied role until a title is set.
+
+The ledger shipped labelling people by `admin_users.role`, and that is wrong
+about most of this team. The role is a permission set and has never been a job
+description: **edinah@** and **yelzaveta@** are order managers holding `admin`
+because they also need customers, campaigns and quote requests, and **victor@**
+runs operations on the same role for the same reason. Reading the role as the job
+files all three under "Admin" and describes none of them.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `admin_users.job_title` | 🔧 | Free text, not an enum — this codebase has already been bitten once by a column that could not hold the values its own code used, and job titles change more often than permission sets do. Editable on `POST`/`PATCH /admin/users`. |
+| `staff_activities.admin_job_title` | 🔧 | Snapshotted, like the name and role. Somebody promoted next year does not get last quarter's record relabelled. |
+| `config/staff.php` + `staff:sync-job-titles` | 🔧 | Matched on **e-mail**, the one identifier that belongs to the person rather than to their access. Will not overwrite a title set by hand without `--force`, and prints everyone still falling back to a role so the gaps are visible rather than silent. |
+| Never blank | 🔧 | `jobTitle()` falls back to a tidied role; `job_title_set` says which of the two you are looking at, so the panel can prompt for a real one instead of passing a permission off as a description. |
+
+**Confirmed rather than assumed: super_admin work is recorded too.** The recorder
+keys on `admin_user_id` and never looks at the role. Two tests now assert it —
+one for two super_admins specifically, one walking every role in `ROLES`.
+
+### The team report and the monthly digest
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `GET /admin/staff/team-report` | 🔧 | `staff.view_team`. Everyone's period side by side. |
+| **Alphabetical, never ranked** | 🔧 | A count of ledger rows is not a measure of value — one order manager's month can be sixty documents while another's is a single container negotiation that took three weeks. Sorting by volume would turn a record into a league table and make a claim the data cannot support. Asserted by a test that gives the second person more work and requires the order unchanged. |
+| No combined figure, again | 🔧 | Same rule as the per-person endpoints: recorded and self-reported are separate and nothing sums them. |
+| `caveats` travel in the payload | 🔧 | The same words go out in the e-mail. A caveat living only in the page template is one half the readers never see. |
+| `staff:digest` + `StaffContributionDigest` mailable | 🔧 | Monthly on the 1st. Recipients from `STAFF_DIGEST_RECIPIENTS`, deliberately **not** "everyone with `staff.view_team`" — a performance report landing in an inbox nobody asked for it in is the fastest way to make this feel like surveillance. |
+| Monthly, not weekly | 🔧 | A summary arriving every Monday trains people to work for the report, and a month is the shortest window in which "sixty documents" and "one three-week negotiation" are both visible. |
+| Sends inline | 🔧 | Two or three e-mails a month does not need the queue worker, so this does **not** wait on `QUEUE_CONNECTION`. Bulk campaigns still do. |
+| Fails soft | 🔧 | No recipients, or `STAFF_DIGEST_ENABLED=false`, reports and exits 0 rather than failing every scheduled run on a server nobody has configured. |
+
+### Tests
+
+**13 new** (42 in the file, 516 in the suite, up from 503): super_admin recorded,
+every role recorded, the job title captured instead of the role, the fallback,
+the snapshot surviving a promotion, e-mail matching case-insensitively, the
+no-overwrite rule and `--force`, `--set` for one person, the team report's
+permission gate, its alphabetical order under unequal workloads, and four digest
+cases — dry run, per-recipient send, no recipients, and stood down by config.
+
+See the addendum in `FRONTEND_NOTE_staff-contribution-ledger.md`.
+
+---
+
 ## eBay Integration (Sessions 15–25)
 
 | Phase | Feature | Status |
@@ -2702,6 +2760,8 @@ detail and the item-edit path all work unchanged before the migration runs — a
 existing test (`OrderTotalFromItemsTest`) caught the one path where that was not
 true. The finance column on the board reads a structural zero and says so in
 `meta.finance_recording_available`. `route:cache` must be rebuilt: 9 new routes.
+
+39. `2026_08_17_000002_add_job_title_to_admin_users_table` (Session 89b — adds `admin_users.job_title` and `staff_activities.admin_job_title`. Both additive, guarded and nullable; nothing existing is read or rewritten, and every path falls back to a tidied role until a title is set. The second column is guarded on the ledger table existing, so #38 and #39 do not depend on each other's order.)
 
 38. `2026_08_17_000001_create_staff_activity_tables` (Session 89 — creates `staff_activities` and `staff_contributions`. Both NEW: nothing existing is read, altered or backfilled, so this cannot affect a live row. Each guarded with `Schema::hasTable`. Proved by `StaffContributionLedgerTest::test_the_migration_applies_against_real_sql_and_is_idempotent`, which runs the migration file itself and re-runs it. **Deploy-order safe in both directions**, and unusually load-bearing: the recording hooks sit on the order, document and invoice paths, so `StaffActivity::ledgerAvailable()` no-ops every one of them until the table exists — a reporting table must never be able to fail the thing it reports on. A test drops the table and asserts an order log still writes.)
 

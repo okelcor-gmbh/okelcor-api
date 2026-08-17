@@ -56,6 +56,7 @@ class StaffContributionLedgerTest extends TestCase
             $table->string('email')->unique();
             $table->string('password');
             $table->string('role');
+            $table->string('job_title', 60)->nullable();
             $table->boolean('is_active')->default(true);
             $table->timestamp('two_factor_confirmed_at')->nullable();
             $table->timestamps();
@@ -168,6 +169,7 @@ class StaffContributionLedgerTest extends TestCase
         $this->runMigration('2026_08_13_000003_create_finance_invoices_table');
         $this->runMigration('2026_08_14_000001_add_file_and_origin_to_finance_invoices');
         $this->runMigration('2026_08_17_000001_create_staff_activity_tables');
+        $this->runMigration('2026_08_17_000002_add_job_title_to_admin_users_table');
 
         Schema::enableForeignKeyConstraints();
 
@@ -176,6 +178,7 @@ class StaffContributionLedgerTest extends TestCase
         StaffActivity::forgetLedgerCheck();
         StaffContribution::forgetLogCheck();
         FinanceInvoice::forgetRegisterCheck();
+        \App\Services\StaffActivityRecorder::forgetJobTitleCheck();
     }
 
     private function runMigration(string $name): void
@@ -185,12 +188,13 @@ class StaffContributionLedgerTest extends TestCase
 
     // ── harness ───────────────────────────────────────────────────────────
 
-    private function admin(string $role = 'order_manager'): AdminUser
+    private function admin(string $role = 'order_manager', ?string $jobTitle = null): AdminUser
     {
         $this->seq++;
 
         return AdminUser::create([
             'name'                    => ucfirst($role) . ' ' . $this->seq,
+            'job_title'               => $jobTitle,
             'email'                   => "{$role}{$this->seq}@okelcor.com",
             'password'                => Hash::make('secret-password'),
             'role'                    => $role,
@@ -801,5 +805,212 @@ class StaffContributionLedgerTest extends TestCase
                 "Role {$role} cannot open its own contribution record."
             );
         }
+    }
+
+    // ── who gets recorded, and what they are called ───────────────────────
+
+    public function test_super_admins_work_is_recorded_like_everybody_elses(): void
+    {
+        // The ledger keys on admin_user_id and never looks at the role. Asserted
+        // rather than assumed, because "am I in this too?" is the first question
+        // anyone running the system asks, and the honest answer has to be
+        // demonstrable.
+        $boss = $this->admin('super_admin', 'Managing Director');
+        $dev  = $this->admin('super_admin', 'System Administrator');
+
+        $this->log($boss, 'status_changed');
+        $this->log($dev, 'document_sent');
+
+        $this->assertSame(1, StaffActivity::where('admin_user_id', $boss->id)->count());
+        $this->assertSame(1, StaffActivity::where('admin_user_id', $dev->id)->count());
+    }
+
+    public function test_every_role_that_can_act_is_recorded(): void
+    {
+        foreach (AdminPermissions::ROLES as $role) {
+            $person = $this->admin($role);
+            $this->log($person, 'status_changed');
+
+            $this->assertSame(
+                1,
+                StaffActivity::where('admin_user_id', $person->id)->count(),
+                "Work by a {$role} was not recorded."
+            );
+        }
+    }
+
+    public function test_the_ledger_records_the_job_not_the_permission_set(): void
+    {
+        // The real shape of this team: an order manager who holds `admin`
+        // because she also needs customers, campaigns and quote requests.
+        $edinah = $this->admin('admin', 'Order Manager');
+
+        $this->log($edinah, 'document_sent');
+
+        $activity = StaffActivity::first();
+
+        $this->assertSame('Order Manager', $activity->admin_job_title);
+        // The role is still kept — it says what she may open — but it is not
+        // what describes her.
+        $this->assertSame('admin', $activity->admin_role);
+    }
+
+    public function test_someone_with_no_title_falls_back_to_a_readable_role(): void
+    {
+        $person = $this->admin('order_manager');
+
+        $this->assertFalse($person->hasJobTitle());
+        $this->assertSame('Order Manager', $person->jobTitle());
+
+        $this->log($person, 'status_changed');
+
+        // Never blank — a report with an empty column reads as broken.
+        $this->assertSame('Order Manager', StaffActivity::first()->admin_job_title);
+    }
+
+    public function test_the_job_title_is_a_snapshot_not_a_live_lookup(): void
+    {
+        $person = $this->admin('admin', 'Order Manager');
+        $this->log($person, 'document_sent');
+
+        $person->update(['job_title' => 'Head of Operations']);
+
+        // Last month's record still says what she was then. Reading it live
+        // would rewrite her history the day she is promoted.
+        $this->assertSame('Order Manager', StaffActivity::first()->admin_job_title);
+    }
+
+    public function test_job_titles_are_applied_by_email_and_not_overwritten_by_accident(): void
+    {
+        $person = $this->admin('admin');
+        config(['staff.job_titles' => [strtoupper($person->email) => 'Order Manager']]);
+
+        // Matched case-insensitively — an e-mail is the same person whatever
+        // case it was typed in.
+        $this->artisan('staff:sync-job-titles')->assertSuccessful();
+        $this->assertSame('Order Manager', $person->fresh()->jobTitle());
+
+        config(['staff.job_titles' => [$person->email => 'Something Else']]);
+        $this->artisan('staff:sync-job-titles')->assertSuccessful();
+
+        // A title set in the panel outranks the seed.
+        $this->assertSame('Order Manager', $person->fresh()->jobTitle());
+
+        $this->artisan('staff:sync-job-titles --force')->assertSuccessful();
+        $this->assertSame('Something Else', $person->fresh()->jobTitle());
+    }
+
+    public function test_a_job_title_can_be_set_for_one_person_directly(): void
+    {
+        $person = $this->admin('admin');
+
+        // Passed as an option value rather than in the command string: a title
+        // with a space in it is the normal case, and the string form splits on
+        // it (as a shell would without quotes).
+        $this->artisan('staff:sync-job-titles', ['--set' => "{$person->email}=Operations Manager"])
+            ->assertSuccessful();
+
+        $this->assertSame('Operations Manager', $person->fresh()->jobTitle());
+    }
+
+    // ── the team report ──────────────────────────────────────────────────
+
+    public function test_the_team_report_needs_the_team_permission(): void
+    {
+        $viewer = $this->admin('viewer');
+
+        $this->getJson('/api/v1/admin/staff/team-report', $this->headers($viewer))
+            ->assertStatus(403);
+    }
+
+    public function test_the_team_report_lists_people_by_job_and_never_ranks_them(): void
+    {
+        $boss   = $this->admin('super_admin', 'Managing Director');
+        $edinah = $this->admin('admin', 'Order Manager');
+
+        // Deliberately giving the second person more work than the first.
+        foreach (range(1, 3) as $ignored) {
+            $this->log($edinah, 'document_sent');
+        }
+        $this->log($boss, 'status_changed');
+
+        $data = $this->getJson('/api/v1/admin/staff/team-report', $this->headers($boss))
+            ->assertOk()
+            ->json('data');
+
+        $names = array_column($data['people'], 'name');
+        $sorted = $names;
+        sort($sorted);
+
+        // Alphabetical, not "most active first". A league table is a claim the
+        // data cannot support.
+        $this->assertSame($sorted, $names);
+
+        $row = collect($data['people'])->firstWhere('admin_user_id', $edinah->id);
+        $this->assertSame('Order Manager', $row['job_title']);
+        $this->assertSame('admin', $row['role']);
+        $this->assertSame(3, $row['recorded']['total']);
+
+        // Recorded and self-reported stay apart here too.
+        $this->assertArrayHasKey('self_reported', $row);
+        $this->assertArrayNotHasKey('total', $row);
+
+        // The caveats travel with the payload — this report gets forwarded.
+        $this->assertNotEmpty($data['caveats']);
+    }
+
+    public function test_the_digest_dry_run_sends_nothing(): void
+    {
+        \Illuminate\Support\Facades\Mail::fake();
+
+        $person = $this->admin('admin', 'Order Manager');
+        $this->log($person, 'document_sent');
+
+        config(['staff.digest.recipients' => ['solomon@okelcor.com']]);
+
+        $this->artisan('staff:digest --dry-run')->assertSuccessful();
+
+        \Illuminate\Support\Facades\Mail::assertNothingSent();
+    }
+
+    public function test_the_digest_emails_each_configured_recipient(): void
+    {
+        \Illuminate\Support\Facades\Mail::fake();
+
+        $person = $this->admin('admin', 'Order Manager');
+        $this->log($person, 'document_sent');
+
+        config(['staff.digest.recipients' => ['solomon@okelcor.com', 'operations@okelcor.com']]);
+
+        $this->artisan('staff:digest')->assertSuccessful();
+
+        \Illuminate\Support\Facades\Mail::assertSent(\App\Mail\StaffContributionDigest::class, 2);
+    }
+
+    public function test_the_digest_says_so_rather_than_failing_when_nobody_is_configured(): void
+    {
+        \Illuminate\Support\Facades\Mail::fake();
+
+        config(['staff.digest.recipients' => []]);
+
+        // A scheduled command that fails every night on an unconfigured server
+        // is noise that trains people to ignore the log.
+        $this->artisan('staff:digest')->assertSuccessful();
+
+        \Illuminate\Support\Facades\Mail::assertNothingSent();
+    }
+
+    public function test_the_digest_can_be_stood_down_from_config(): void
+    {
+        \Illuminate\Support\Facades\Mail::fake();
+
+        config([
+            'staff.digest.recipients' => ['solomon@okelcor.com'],
+            'staff.digest.enabled'    => false,
+        ]);
+
+        $this->artisan('staff:digest')->assertSuccessful();
+
+        \Illuminate\Support\Facades\Mail::assertNothingSent();
     }
 }

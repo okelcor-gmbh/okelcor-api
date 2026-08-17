@@ -38,6 +38,18 @@ Schedule::command('admin:notifications:due-followups')
     ->onOneServer()
     ->appendOutputTo(storage_path('logs/admin-notifications.log'));
 
+// The team contribution report. Monthly rather than weekly on purpose: a
+// performance summary arriving every Monday trains people to work for the
+// report, and a month is the shortest window in which "sixty documents" and
+// "one container negotiation that took three weeks" are both visible.
+// Recipients come from STAFF_DIGEST_RECIPIENTS; with none set the command says
+// so and sends nothing.
+Schedule::command('staff:digest')
+    ->monthlyOn(1, '07:00')
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/staff-digest.log'));
+
 Schedule::command('tracking:sync-carriers')
     ->hourly()
     ->withoutOverlapping()

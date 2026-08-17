@@ -292,20 +292,27 @@ class StaffActivityRecorder
             return null;
         }
 
-        if ($nameSnapshot === null || $roleSnapshot === null) {
-            $admin = $this->admin($adminUserId);
+        $admin = $this->admin($adminUserId);
 
-            if ($admin === null) {
-                return null;
-            }
-
-            $nameSnapshot ??= $admin->name;
-            $roleSnapshot ??= $admin->role;
+        if ($admin === null && ($nameSnapshot === null || $roleSnapshot === null)) {
+            return null;
         }
+
+        $nameSnapshot ??= $admin?->name;
+        $roleSnapshot ??= $admin?->role;
 
         $attributes['admin_user_id'] = $adminUserId;
         $attributes['admin_name']    = $nameSnapshot;
         $attributes['admin_role']    = $roleSnapshot;
+
+        // The job, not the permission set. Snapshotted for the same reason the
+        // name is: what someone did last quarter is a statement about who they
+        // were then, and reading it live would relabel their history the day
+        // they change job. Guarded, because this column ships one migration
+        // after the table it sits on.
+        if ($admin !== null && self::jobTitleAvailable()) {
+            $attributes['admin_job_title'] = $admin->jobTitle();
+        }
 
         if (empty($attributes['metadata'])) {
             $attributes['metadata'] = null;
@@ -364,6 +371,26 @@ class StaffActivityRecorder
     }
 
     // -------------------------------------------------------------------------
+
+
+    /**
+     * Whether the ledger carries a job-title column yet. Memoised per process,
+     * same deploy-order rule as everything else here: recording must keep
+     * working between the two migrations.
+     */
+    private static ?bool $jobTitleReady = null;
+
+    public static function jobTitleAvailable(): bool
+    {
+        return self::$jobTitleReady ??= \Illuminate\Support\Facades\Schema::hasTable('staff_activities')
+            && \Illuminate\Support\Facades\Schema::hasColumn('staff_activities', 'admin_job_title');
+    }
+
+    /** Test seam — the harness builds the column after the container boots. */
+    public static function forgetJobTitleCheck(): void
+    {
+        self::$jobTitleReady = null;
+    }
 
     /**
      * Order-log actions worth surfacing as headline work, used by the summary

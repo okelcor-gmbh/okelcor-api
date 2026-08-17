@@ -827,6 +827,14 @@ Route::prefix('v1')->group(function () {
             Route::post('staff/contributions/{id}/review', [AdminStaffContributionController::class, 'review']);
         });
 
+        // Everyone's period side by side. Gated at the route rather than in the
+        // controller, unlike the endpoints above — there is no "your own" case
+        // for a team report, so nothing here would lock somebody out of their
+        // own record.
+        Route::middleware('permission:staff.view_team')->group(function () {
+            Route::get('staff/team-report', [AdminStaffLedgerController::class, 'teamReport']);
+        });
+
         // -----------------------------------------------------------------
         // Logistics dashboard — orders.view
         // -----------------------------------------------------------------

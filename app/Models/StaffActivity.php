@@ -51,6 +51,7 @@ class StaffActivity extends Model
         'admin_user_id',
         'admin_name',
         'admin_role',
+        'admin_job_title',
         'category',
         'action',
         'subject_type',

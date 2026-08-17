@@ -241,3 +241,108 @@ means building it twice.
 
 Phase 4 (the monthly narrative via Gemini) additionally needs
 `QUEUE_CONNECTION=database` and a worker — still outstanding on production.
+
+---
+
+# Addendum — job titles, the team report, and the digest (same session)
+
+Migration **#39** and **1 more route**. Everything below ships with the same
+deploy.
+
+## Role is not a job. Render `job_title`.
+
+This was wrong in the first draft and is now fixed at the source. `admin_users.role`
+is a permission set and has never described anybody's job:
+
+| Person | Role they hold | What they actually do |
+|---|---|---|
+| edinah@okelcor.com | `admin` | **Order Manager** |
+| yelzaveta@okelcor.com | `admin` | **Order Manager** |
+| victor@okelcor.com | `admin` | **Operations Manager** |
+| leojohnseyi@gmail.com | `super_admin` | **System Administrator** |
+| solomon@okelcor.com | `super_admin` | **Managing Director** |
+
+All three `admin` holders need customers, campaigns, marketing, orders and quote
+requests — that is why they hold it. Grouping anything by role files them
+together as "Admin" and describes none of them.
+
+**So: render `job_title` everywhere a person is named.** Show `role` only where
+access itself is the subject (the Users page, permission screens). Every payload
+that names a person now carries both:
+
+```json
+"admin_user": { "id": 4, "name": "Edinah Agalla", "job_title": "Order Manager", "role": "admin" }
+```
+
+`job_title` is never null — it falls back to a tidied role so nothing renders
+blank. `job_title_set` (on the team report and the users endpoint) tells you
+whether it is a real title or that fallback, so the UI can prompt for a real one
+rather than passing a permission off as a job description.
+
+It is editable on `POST`/`PATCH /admin/users` as a plain `job_title` string
+(≤60 chars, nullable), and the ledger **snapshots** it — someone promoted next
+year does not have last quarter's record relabelled.
+
+## `GET /admin/staff/team-report` — `staff.view_team`
+
+Everyone's period side by side. Params `from`, `to`, `include_inactive`.
+
+```json
+{
+  "data": {
+    "from": "...", "to": "...",
+    "people": [{
+      "admin_user_id": 4, "name": "Edinah Agalla", "email": "…",
+      "job_title": "Order Manager", "job_title_set": true, "role": "admin",
+      "recorded": { "total": 142, "by_category": [...] },
+      "self_reported": { "total": 3, "verified": 2, "pending": 1, "rejected": 0 }
+    }],
+    "totals": { "people": 5, "people_with_activity": 4, "recorded": 279,
+                "self_reported": 6, "awaiting_review": 2 },
+    "caveats": ["...", "..."]
+  }
+}
+```
+
+**Three rules the UI must hold**, all asserted by tests on the API side:
+
+1. **Do not sort by volume.** `people` is alphabetical and must stay that way. A
+   count of ledger rows is not a measure of value — one order manager's month can
+   be sixty documents while another's is a single container negotiation that took
+   three weeks. Adding a sort-by-recorded control turns a record into a league
+   table and makes a claim the data cannot support.
+2. **No per-person total.** There is no field adding `recorded` and
+   `self_reported`, and there must not be one in the UI either.
+3. **Render `caveats` on the page.** They ship in the payload rather than living
+   in the template because the same words go out in the e-mailed digest — a
+   caveat that exists on only one of the two is one half the readers never see.
+
+## The monthly digest
+
+`staff:digest` e-mails the same report. Recipients come from
+`STAFF_DIGEST_RECIPIENTS` (comma-separated) — deliberately not "everyone with
+`staff.view_team`", because a performance report landing in an inbox nobody asked
+for it in is the fastest way to make this feel like surveillance.
+
+```
+STAFF_DIGEST_RECIPIENTS=solomon@okelcor.com,operations@okelcor.com
+STAFF_DIGEST_DAYS=30
+STAFF_DIGEST_ENABLED=true
+```
+
+Scheduled monthly on the 1st at 07:00. Monthly rather than weekly on purpose: a
+summary arriving every Monday trains people to work for the report. Sends inline
+— two or three e-mails a month does not need the queue worker, so this does not
+wait on `QUEUE_CONNECTION`.
+
+`staff:digest --dry-run` prints the table and says who it would send to.
+
+## Nav
+
+Two entries: **My Contribution** (`/admin/contribution`, ungated — every role
+holds `staff.self`) and **Team Contribution** (`/admin/contribution/team`, gated
+on the new `staff_team` frontend section, matching `staff.view_team`:
+super_admin, admin, order_manager).
+
+The team table links each name to `/admin/contribution?admin_user_id=N`, which
+the personal page now reads.

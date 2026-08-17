@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AdminUser;
 use App\Models\StaffActivity;
 use App\Models\StaffContribution;
+use App\Services\StaffReportService;
 use App\Support\AdminPermissions;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -84,7 +85,12 @@ class AdminStaffLedgerController extends Controller
                 'per_page'     => $paginated->perPage(),
                 'total'        => $paginated->total(),
                 'last_page'    => $paginated->lastPage(),
-                'admin_user'   => ['id' => $subject->id, 'name' => $subject->name, 'role' => $subject->role],
+                'admin_user'   => [
+                    'id'        => $subject->id,
+                    'name'      => $subject->name,
+                    'job_title' => $subject->jobTitle(),
+                    'role'      => $subject->role,
+                ],
                 'from'         => $from,
                 'to'           => $to,
                 'categories'   => StaffActivity::CATEGORY_LABELS,
@@ -155,7 +161,12 @@ class AdminStaffLedgerController extends Controller
 
         return response()->json([
             'data' => [
-                'admin_user' => ['id' => $subject->id, 'name' => $subject->name, 'role' => $subject->role],
+                'admin_user' => [
+                    'id'        => $subject->id,
+                    'name'      => $subject->name,
+                    'job_title' => $subject->jobTitle(),
+                    'role'      => $subject->role,
+                ],
                 'from'       => $from,
                 'to'         => $to,
 
@@ -178,6 +189,32 @@ class AdminStaffLedgerController extends Controller
     }
 
     // -------------------------------------------------------------------------
+    // GET /api/v1/admin/staff/team-report — staff.view_team
+    //
+    // Everyone's period side by side. Descriptive only: no score, no ranking,
+    // no weighting, and alphabetical order rather than "best first". A count of
+    // ledger rows is not a measure of value — one order manager's month can be
+    // sixty documents while another's is a single container negotiation that
+    // took three weeks.
+    // -------------------------------------------------------------------------
+    public function teamReport(Request $request, StaffReportService $reports): JsonResponse
+    {
+        $request->validate([
+            'from'             => ['nullable', 'date'],
+            'to'               => ['nullable', 'date'],
+            'include_inactive' => ['nullable', 'boolean'],
+        ]);
+
+        [$from, $to] = $this->range($request);
+
+        return response()->json([
+            'data'    => $reports->build($from, $to, $request->boolean('include_inactive')),
+            'meta'    => ['can_verify' => AdminPermissions::can($request->user()->role, 'staff.verify')],
+            'message' => 'success',
+        ]);
+    }
+
+    // -------------------------------------------------------------------------
     // GET /api/v1/admin/staff/members — staff.self
     //
     // Who the caller may look at. Returns just themselves without
@@ -191,7 +228,13 @@ class AdminStaffLedgerController extends Controller
 
         $canViewTeam = AdminPermissions::can($me->role, 'staff.view_team');
 
-        $query = AdminUser::query()->select('id', 'name', 'email', 'role', 'is_active')->orderBy('name');
+        $columns = ['id', 'name', 'email', 'role', 'is_active'];
+
+        if (\Illuminate\Support\Facades\Schema::hasColumn('admin_users', 'job_title')) {
+            $columns[] = 'job_title';
+        }
+
+        $query = AdminUser::query()->select($columns)->orderBy('name');
 
         if (! $canViewTeam) {
             $query->whereKey($me->id);
@@ -202,6 +245,11 @@ class AdminStaffLedgerController extends Controller
                 'id'        => $u->id,
                 'name'      => $u->name,
                 'email'     => $u->email,
+                // The job comes first because it is what a reader recognises.
+                // The role is still carried, but it describes access rather
+                // than the person — two order managers and the person running
+                // operations all hold `admin`.
+                'job_title' => $u->jobTitle(),
                 'role'      => $u->role,
                 'is_active' => (bool) $u->is_active,
                 'is_self'   => $u->id === $me->id,

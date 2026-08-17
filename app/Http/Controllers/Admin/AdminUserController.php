@@ -135,6 +135,12 @@ class AdminUserController extends Controller
             'last_name'  => ['nullable', 'string', 'max:100'],
             'email'      => ['required', 'email', 'max:255', 'unique:admin_users,email'],
             'role'       => ['required', Rule::in(AdminPermissions::ROLES)],
+            // What the person does, as distinct from what they may open. Free
+            // text and optional: the role is a permission set and describes
+            // nobody's job — two order managers and the person running
+            // operations all hold `admin` because all three need customers,
+            // campaigns and quote requests.
+            'job_title'  => ['nullable', 'string', 'max:60'],
         ]);
 
         $temporaryPassword = Str::password(16);
@@ -211,6 +217,7 @@ class AdminUserController extends Controller
             'display_name' => ['sometimes', 'nullable', 'string', 'max:100'],
             'email'        => ['sometimes', 'email', 'max:255', Rule::unique('admin_users', 'email')->ignore($id)],
             'role'         => ['sometimes', Rule::in(AdminPermissions::ROLES)],
+            'job_title'    => ['sometimes', 'nullable', 'string', 'max:60'],
             'password'     => ['sometimes', 'confirmed', Password::min(8)->letters()->numbers()],
             'is_active'    => ['sometimes', 'boolean'],
         ]);
@@ -270,6 +277,12 @@ class AdminUserController extends Controller
             'email'               => $u->email,
             'role'                => $u->role,
             'role_label'          => AuthController::roleLabel($u->role),
+            // Always present, falling back to a tidied role so nothing renders
+            // blank. `job_title_set` says which of the two you are looking at,
+            // so the panel can prompt for a real one rather than silently
+            // passing a permission off as a job description.
+            'job_title'           => $u->jobTitle(),
+            'job_title_set'       => $u->hasJobTitle(),
             'is_active'              => (bool) $u->is_active,
             'must_change_password'   => (bool) $u->must_change_password,
             'two_factor_enabled'     => $u->hasTwoFactorEnabled(),
