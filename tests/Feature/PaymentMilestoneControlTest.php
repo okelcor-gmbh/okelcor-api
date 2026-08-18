@@ -7,6 +7,7 @@ use App\Models\Order;
 use App\Models\OrderLog;
 use App\Models\TradeDocument;
 use App\Services\InvoiceService;
+use App\Services\PaymentStateCorrectionService;
 use App\Services\TradeDocumentService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\UploadedFile;
@@ -53,7 +54,7 @@ class PaymentMilestoneControlTest extends TestCase
 
         Schema::disableForeignKeyConstraints();
 
-        foreach (['trade_documents', 'order_logs', 'order_items', 'orders', 'personal_access_tokens', 'admin_users'] as $table) {
+        foreach (['eu_declarations', 'trade_documents', 'order_logs', 'order_items', 'orders', 'personal_access_tokens', 'admin_users'] as $table) {
             Schema::dropIfExists($table);
         }
 
@@ -85,6 +86,19 @@ class PaymentMilestoneControlTest extends TestCase
             $table->string('source')->default('website');
             $table->string('customer_name')->nullable();
             $table->string('customer_email')->nullable();
+            // The creation path writes these; one test here goes through it to
+            // hold the "who declared this paid" record in place.
+            $table->string('customer_phone')->nullable();
+            $table->string('address')->nullable();
+            $table->string('city')->nullable();
+            $table->string('postal_code')->nullable();
+            $table->string('country')->nullable();
+            $table->string('carrier')->nullable();
+            $table->string('carrier_type')->nullable();
+            $table->string('tracking_number')->nullable();
+            $table->string('container_number')->nullable();
+            $table->date('estimated_delivery')->nullable();
+            $table->text('admin_notes')->nullable();
             $table->decimal('subtotal', 12, 2)->default(0);
             $table->decimal('delivery_cost', 12, 2)->default(0);
             $table->decimal('total', 12, 2)->default(0);
@@ -135,6 +149,18 @@ class PaymentMilestoneControlTest extends TestCase
             $table->string('new_value', 100)->nullable();
             $table->text('notes')->nullable();
             $table->string('ip_address', 45)->nullable();
+            $table->timestamps();
+        });
+
+        // Eager-loaded by the order detail formatter. Only the columns that
+        // formatter reads — this harness is deliberately minimal.
+        Schema::create('eu_declarations', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('order_id');
+            $table->string('order_ref')->nullable();
+            $table->string('status', 20)->default('pending');
+            $table->timestamp('signed_at')->nullable();
+            $table->string('signed_name')->nullable();
             $table->timestamps();
         });
 
@@ -544,6 +570,287 @@ class PaymentMilestoneControlTest extends TestCase
                 ->where('status', 'issued')
                 ->get()
         );
+    }
+
+    // ── 5. putting a wrong payment state back (Session 90) ────────────────
+    //
+    // The order manager reported the same shape of problem a second time: an
+    // order confirmed, the deposit not yet in, and the site saying the customer
+    // had paid. Session 76 closed the paths that were putting orders there on
+    // their own. What it did not close is that nothing could put one back
+    // afterwards — every route through the ladder moves forward — so an order
+    // that landed wrong for any reason at all stayed wrong until a developer
+    // touched the database. That is what "there is no option for us to set it
+    // manually" means, and it is the gap these tests hold shut.
+
+    public function test_an_order_showing_paid_can_be_put_back_to_awaiting_deposit(): void
+    {
+        $order = $this->order([
+            'payment_status'  => 'paid',
+            'payment_stage'   => 'balance_paid',
+            'balance_paid_at' => now()->subDay(),
+        ]);
+
+        $this->postJson("/api/v1/admin/orders/{$order->id}/payment-milestones/correct", [
+            'payment_stage'        => 'pending_proforma',
+            'reset_payment_status' => true,
+            'reason'               => 'Deposit has not arrived; this state was never confirmed by anyone.',
+        ], $this->headers())
+            ->assertOk()
+            ->assertJsonPath('data.payment_stage', 'pending_proforma')
+            ->assertJsonPath('data.payment_status', 'pending')
+            ->assertJsonPath('data.payment_milestones_active', false);
+
+        $order->refresh();
+
+        $this->assertSame('pending', $order->payment_status);
+        $this->assertSame('pending_proforma', $order->payment_stage);
+
+        // The customer portal reads both of these. Either one left behind keeps
+        // telling him he has paid.
+        $this->assertFalse($order->isFullyPaid());
+        $this->assertFalse($order->paymentMilestonesActive());
+    }
+
+    public function test_a_rolled_back_stage_takes_its_payment_dates_with_it(): void
+    {
+        // A date saying the balance arrived on the 3rd is a claim, not a note.
+        // Leaving it behind a stage of pending_proforma leaves the claim standing.
+        $order = $this->order([
+            'payment_status'        => 'paid',
+            'payment_stage'         => 'shipment_released',
+            'deposit_paid_at'       => now()->subDays(5),
+            'balance_paid_at'       => now()->subDays(3),
+            'shipment_released_at'  => now()->subDay(),
+            'shipment_release_note' => 'Released to the forwarder.',
+        ]);
+
+        $this->postJson("/api/v1/admin/orders/{$order->id}/payment-milestones/correct", [
+            'payment_stage'        => 'pending_proforma',
+            'reset_payment_status' => true,
+            'reason'               => 'Nothing has been paid on this order yet.',
+        ], $this->headers())->assertOk();
+
+        $order->refresh();
+
+        $this->assertNull($order->deposit_paid_at);
+        $this->assertNull($order->balance_paid_at);
+        $this->assertNull($order->shipment_released_at);
+        $this->assertNull($order->shipment_release_note);
+    }
+
+    public function test_a_stage_that_still_stands_keeps_its_date(): void
+    {
+        // Correcting only the tail of the ladder must not disown the deposit
+        // that genuinely did arrive — otherwise the fix costs more than the bug.
+        $paidAt = now()->subDays(5)->startOfSecond();
+
+        $order = $this->order([
+            'payment_status'   => 'paid',
+            'payment_stage'    => 'balance_paid',
+            'deposit_paid_at'  => $paidAt,
+            'balance_paid_at'  => now()->subDay(),
+        ]);
+
+        $this->postJson("/api/v1/admin/orders/{$order->id}/payment-milestones/correct", [
+            'payment_stage'        => 'deposit_paid',
+            'reset_payment_status' => true,
+            'reason'               => 'Deposit is in, the balance is not — balance was marked in error.',
+        ], $this->headers())->assertOk();
+
+        $order->refresh();
+
+        $this->assertSame('deposit_paid', $order->payment_stage);
+        $this->assertNull($order->balance_paid_at);
+        $this->assertNotNull($order->deposit_paid_at);
+        $this->assertSame($paidAt->toDateTimeString(), $order->deposit_paid_at->toDateTimeString());
+    }
+
+    public function test_a_correction_never_moves_an_order_forward(): void
+    {
+        // Recording that money arrived belongs to the milestone actions, which
+        // notify the customer and stamp who confirmed it. If this could do it
+        // too it would become the quick way round both, and the ladder's guards
+        // would stop meaning anything.
+        $order = $this->order(['payment_stage' => 'deposit_requested']);
+
+        $this->postJson("/api/v1/admin/orders/{$order->id}/payment-milestones/correct", [
+            'payment_stage' => 'balance_paid',
+            'reason'        => 'Trying to shortcut the ladder.',
+        ], $this->headers())
+            ->assertStatus(409)
+            ->assertJsonPath('code', 'use_the_milestone_actions');
+
+        $this->assertSame('deposit_requested', $order->fresh()->payment_stage);
+    }
+
+    public function test_a_stripe_order_is_left_to_the_gateway_here_too(): void
+    {
+        $order = $this->order([
+            'payment_method' => 'stripe',
+            'payment_status' => 'paid',
+            'payment_stage'  => 'balance_paid',
+        ]);
+
+        $this->postJson("/api/v1/admin/orders/{$order->id}/payment-milestones/correct", [
+            'payment_stage'        => 'pending_proforma',
+            'reset_payment_status' => true,
+            'reason'               => 'Trying to hand-edit a gateway payment.',
+        ], $this->headers())
+            ->assertStatus(409)
+            ->assertJsonPath('code', 'gateway_managed_payment');
+
+        $this->assertSame('paid', $order->fresh()->payment_status);
+    }
+
+    public function test_a_correction_is_refused_without_a_reason(): void
+    {
+        $order = $this->order(['payment_status' => 'paid', 'payment_stage' => 'balance_paid']);
+
+        $this->postJson("/api/v1/admin/orders/{$order->id}/payment-milestones/correct", [
+            'payment_stage' => 'pending_proforma',
+        ], $this->headers())
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('reason');
+
+        $this->assertSame('balance_paid', $order->fresh()->payment_stage);
+    }
+
+    public function test_a_correction_never_emails_the_customer(): void
+    {
+        // A "your payment status changed" for a payment that never happened is
+        // exactly the confusion this whole feature exists to end.
+        $order = $this->order(['payment_status' => 'paid', 'payment_stage' => 'balance_paid']);
+
+        $this->postJson("/api/v1/admin/orders/{$order->id}/payment-milestones/correct", [
+            'payment_stage'        => 'pending_proforma',
+            'reset_payment_status' => true,
+            'reason'               => 'Deposit not received.',
+        ], $this->headers())->assertOk();
+
+        Mail::assertNothingSent();
+
+        $this->assertNull($order->fresh()->balance_paid_email_sent_at);
+    }
+
+    public function test_a_correction_always_leaves_an_audit_row_naming_who_and_why(): void
+    {
+        $order = $this->order(['payment_status' => 'paid', 'payment_stage' => 'balance_paid']);
+
+        $this->postJson("/api/v1/admin/orders/{$order->id}/payment-milestones/correct", [
+            'payment_stage'        => 'pending_proforma',
+            'reset_payment_status' => true,
+            'reason'               => 'Buyer queried a payment he never made.',
+        ], $this->headers())->assertOk();
+
+        $log = OrderLog::where('order_id', $order->id)->where('action', 'payment_state_corrected')->first();
+
+        $this->assertNotNull($log, 'A correction that records nothing is worse than the state it corrects.');
+        $this->assertSame('balance_paid / paid', $log->old_value);
+        $this->assertSame('pending_proforma / pending', $log->new_value);
+        $this->assertStringContainsString('Buyer queried a payment he never made.', (string) $log->notes);
+        $this->assertNotNull($log->admin_user_email);
+    }
+
+    public function test_the_action_is_one_the_column_accepts(): void
+    {
+        // The single guard behind the longest-standing High gap in this project:
+        // shipped code writing an action the ENUM rejects, the write swallowed,
+        // the audit row never created. This one write is deliberately NOT inside
+        // a try/catch, so the constant has to carry the value.
+        $this->assertContains('payment_state_corrected', OrderLog::ACTIONS);
+    }
+
+    public function test_a_role_without_the_permission_cannot_correct_a_payment(): void
+    {
+        $order = $this->order(['payment_status' => 'paid', 'payment_stage' => 'balance_paid']);
+
+        $this->postJson("/api/v1/admin/orders/{$order->id}/payment-milestones/correct", [
+            'payment_stage'        => 'pending_proforma',
+            'reset_payment_status' => true,
+            'reason'               => 'Should never be applied.',
+        ], $this->headers('viewer'))->assertStatus(403);
+
+        $this->assertSame('paid', $order->fresh()->payment_status);
+    }
+
+    public function test_an_order_already_in_that_state_is_not_written_again(): void
+    {
+        $order = $this->order(['payment_status' => 'pending', 'payment_stage' => 'deposit_requested']);
+
+        $this->postJson("/api/v1/admin/orders/{$order->id}/payment-milestones/correct", [
+            'payment_stage' => 'deposit_requested',
+            'reason'        => 'Nothing actually needs changing here.',
+        ], $this->headers())
+            ->assertStatus(409)
+            ->assertJsonPath('code', 'nothing_to_correct');
+
+        $this->assertSame(0, OrderLog::where('order_id', $order->id)->where('action', 'payment_state_corrected')->count());
+    }
+
+    // ── 6. finding the orders that are already wrong ──────────────────────
+
+    public function test_the_audit_flags_a_paid_order_with_nothing_behind_it(): void
+    {
+        $order = $this->order(['payment_status' => 'paid', 'payment_stage' => 'balance_paid']);
+
+        $this->assertNotNull(app(PaymentStateCorrectionService::class)->unevidencedReason($order));
+    }
+
+    public function test_the_audit_leaves_alone_an_order_somebody_confirmed(): void
+    {
+        $order = $this->order([
+            'payment_status'  => 'paid',
+            'payment_stage'   => 'balance_paid',
+            'balance_paid_at' => now()->subDay(),
+        ]);
+
+        $this->assertNull(app(PaymentStateCorrectionService::class)->unevidencedReason($order));
+    }
+
+    public function test_the_audit_leaves_alone_stripe_and_ebay(): void
+    {
+        // Both settle outside this database, against a source that genuinely
+        // knows. Flagging them would bury the orders that are actually wrong.
+        $stripe = $this->order(['payment_status' => 'paid', 'payment_method' => 'stripe']);
+        $ebay   = $this->order(['payment_status' => 'paid', 'source' => 'ebay']);
+
+        $service = app(PaymentStateCorrectionService::class);
+
+        $this->assertNull($service->unevidencedReason($stripe));
+        $this->assertNull($service->unevidencedReason($ebay));
+    }
+
+    public function test_an_unpaid_order_is_never_flagged(): void
+    {
+        $order = $this->order(['payment_status' => 'pending', 'payment_stage' => 'deposit_requested']);
+
+        $this->assertNull(app(PaymentStateCorrectionService::class)->unevidencedReason($order));
+    }
+
+    public function test_an_order_recorded_as_already_paid_says_who_declared_it(): void
+    {
+        // The prevention half. 'paid' at creation is a person asserting the
+        // money is in — right for a paper backlog, wrong for a live order, and
+        // until now indistinguishable from a derivation afterwards because it
+        // wrote nothing at all. It does not block the backfill workflow; it
+        // just stops it being anonymous, which is what lets the audit tell the
+        // two apart from here on.
+        $this->postJson('/api/v1/admin/orders', [
+            'customer_name'  => 'Backlog Buyer',
+            'customer_email' => 'backlog@acme-tyres.com',
+            'status'         => 'delivered',
+            'payment_status' => 'paid',
+            'total'          => 8000,
+        ], $this->headers())->assertCreated();
+
+        $order = Order::where('customer_email', 'backlog@acme-tyres.com')->firstOrFail();
+
+        $log = OrderLog::where('order_id', $order->id)->where('action', 'payment_status_changed')->first();
+
+        $this->assertNotNull($log);
+        $this->assertStringContainsString('Declared by the admin', (string) $log->notes);
+        $this->assertNull(app(PaymentStateCorrectionService::class)->unevidencedReason($order->fresh()));
     }
 
     // ── helpers ───────────────────────────────────────────────────────────

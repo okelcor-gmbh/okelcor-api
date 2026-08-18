@@ -78,6 +78,13 @@ class OrderLog extends Model
         'signoff_revoked',
         'signoff_bypassed',
         'document_gate_overridden',
+
+        // Session 90 — the only backwards path through the payment ladder.
+        // Every other milestone action moves an order forward; this one puts a
+        // payment state back to what is true, and is the reason an order that
+        // arrives at "paid" without anyone deciding it no longer needs a
+        // developer to unstick.
+        'payment_state_corrected',
     ];
 
     public $timestamps = false;

@@ -72,6 +72,15 @@ class AdminPermissions
         'payments.mark_paid'      => ['super_admin', 'admin', 'order_manager'],
         'payments.refund'         => ['super_admin', 'admin'],
 
+        // Putting a payment state back to what is true. Same holders as
+        // mark_paid — the order manager is the person who knows whether the
+        // money arrived, and making her ask someone else to correct a record
+        // she is responsible for is what produced the original complaint. Kept
+        // on its own key so it can be narrowed later without also removing the
+        // ability to record a payment: withdrawing a claim of payment and
+        // making one are different acts, even where they are the same people.
+        'payments.correct_state'  => ['super_admin', 'admin', 'order_manager'],
+
         // ── Products / content ────────────────────────────────────────────
         'products.view'           => ['super_admin', 'admin', 'editor', 'content_manager', 'sales_manager', 'viewer'],
         'products.edit'           => ['super_admin', 'admin', 'editor', 'content_manager'],

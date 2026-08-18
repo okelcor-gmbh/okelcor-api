@@ -6,13 +6,18 @@ use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Models\OrderLog;
 use App\Services\PaymentMilestoneEmailService;
+use App\Services\PaymentStateCorrectionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\Rule;
 
 class AdminOrderPaymentMilestoneController extends Controller
 {
-    public function __construct(private PaymentMilestoneEmailService $emailService) {}
+    public function __construct(
+        private PaymentMilestoneEmailService $emailService,
+        private PaymentStateCorrectionService $corrections,
+    ) {}
 
     /**
      * POST /api/v1/admin/orders/{id}/payment-milestones/request-deposit
@@ -348,6 +353,76 @@ class AdminOrderPaymentMilestoneController extends Controller
                 'sent_at' => $order->fresh()->{$sentAtColumn}?->toIso8601String(),
             ],
             'message' => "Notification email for stage '{$stage}' resent to {$order->customer_email}.",
+        ]);
+    }
+
+    /**
+     * POST /api/v1/admin/orders/{id}/payment-milestones/correct
+     *
+     * Put a payment state back to what is true.
+     *
+     * The order manager has now reported the same shape of problem twice: an
+     * order shows as paid, the deposit has not arrived, and there is no way to
+     * say so. Session 76 closed the paths that were putting orders there on
+     * their own; this closes the one that was left, which is that nothing could
+     * put one back afterwards. Between them the state is only ever what somebody
+     * chose — forwards through the milestone actions, backwards through here.
+     *
+     * Deliberately not a general "set the payment state" endpoint. It only ever
+     * moves an order backwards, so recording that money arrived stays with the
+     * actions that notify the customer and stamp who confirmed it; it refuses
+     * Stripe orders, whose payment state belongs to the gateway; it never
+     * e-mails anybody, because correcting our own record is not an event in the
+     * buyer's order; and it demands a reason, which goes to the audit trail
+     * along with everything it cleared.
+     *
+     * | Field                 | Type    | Notes                                    |
+     * |-----------------------|---------|------------------------------------------|
+     * | `payment_stage`       | string  | Required. The stage it should be at.     |
+     * | `reset_payment_status`| boolean | Optional. Puts `payment_status` back to `pending`. |
+     * | `reason`              | string  | Required, 5–500. Goes to the order log.  |
+     */
+    public function correct(Request $request, int $id): JsonResponse
+    {
+        $request->validate([
+            'payment_stage'        => ['required', 'string', Rule::in(PaymentStateCorrectionService::STAGES)],
+            'reset_payment_status' => ['sometimes', 'boolean'],
+            'reason'               => ['required', 'string', 'min:5', 'max:500'],
+        ]);
+
+        $order = Order::findOrFail($id);
+
+        $targetStage = (string) $request->input('payment_stage');
+        $resetStatus = $request->boolean('reset_payment_status');
+
+        if ($refusal = $this->corrections->refuse($order, $targetStage, $resetStatus)) {
+            // 409, not 422: the request is well formed, the order is simply not
+            // in a state where this correction means anything. The panel can
+            // reload and show where it actually stands.
+            return response()->json($refusal + ['payment_stage' => $order->payment_stage], 409);
+        }
+
+        $result = $this->corrections->apply(
+            $order,
+            $targetStage,
+            $resetStatus,
+            (string) $request->input('reason'),
+            $request->user(),
+            $request->ip(),
+            'admin panel',
+        );
+
+        $fresh = $order->fresh();
+
+        return response()->json([
+            'data'    => $this->formatMilestones($fresh) + [
+                'payment_status' => $fresh->payment_status,
+                'corrected_from' => ['payment_stage' => $result['stage_from'], 'payment_status' => $result['status_from']],
+                'cleared'        => $result['cleared'],
+            ],
+            'message' => $result['status_from'] !== $result['status_to']
+                ? "Payment state corrected to '{$result['stage_to']}', and the payment marked as not yet received. The customer was not notified."
+                : "Payment state corrected to '{$result['stage_to']}'. The customer was not notified.",
         ]);
     }
 

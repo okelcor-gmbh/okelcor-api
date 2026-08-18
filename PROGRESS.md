@@ -1,12 +1,12 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-17 | Branch: `main` | Latest commit: Session 89 (**pushed, not deployed**)
+Last updated: 2026-08-18 | Branch: `main` | Latest commit: Session 90 (**pushed, not deployed**)
 
 ---
 
-## 🔧 Sessions 86–89 pushed, NOT deployed
+## 🔧 Sessions 86–90 pushed, NOT deployed
 
-**Three unapplied migrations (#37, #38, #39), seventeen new routes.**
+**Four unapplied migrations (#37, #38, #39, #40), eighteen new routes.**
 
 | Session | What it is | Migration | Routes |
 |---|---|---|---|
@@ -16,6 +16,7 @@ Last updated: 2026-08-17 | Branch: `main` | Latest commit: Session 89 (**pushed,
 | **89** | Staff contribution ledger — phases 1 and 2 of the performance system | **#38** | **10 new** |
 | **89b** | Job titles separated from roles, team report, monthly digest, admin nav search | **#39** | **1 new** |
 | **89c** | Technical work — git commits, media, eBay, account administration | none | none |
+| **90** | Correcting a payment state that says paid when it isn't — the only backwards path through the ladder | **#40** | **1 new** |
 
 ```bash
 cd /home/okelvaxj/domains/okelcor.com/public_html/okelcor-api
@@ -37,7 +38,25 @@ git fetch origin && git reset --hard origin/main
 
 ```bash
 git rev-parse --short HEAD
-/opt/alt/php83/usr/bin/php artisan tinker --execute="echo Schema::hasColumn('finance_invoices','source_type') && Schema::hasTable('staff_activities') ? 'both live' : 'NOT LIVE';"
+/opt/alt/php83/usr/bin/php artisan tinker --execute="echo Schema::hasColumn('finance_invoices','source_type') && Schema::hasTable('staff_activities') && in_array('payment_state_corrected', App\Models\OrderLog::ACTIONS) ? 'all live' : 'NOT LIVE';"
+```
+
+**Then fix the order the order manager reported (Session 90).** She is waiting
+on a deposit for **AB - 1182** and the customer's portal says he has already
+paid. Read it before writing anything — the print-out includes the log history
+that produced the state:
+
+```bash
+/opt/alt/php83/usr/bin/php artisan orders:payment-state "AB - 1182"
+
+/opt/alt/php83/usr/bin/php artisan orders:payment-state "AB - 1182" \
+    --stage=pending_proforma --reset-status \
+    --reason="deposit not received; state was never confirmed by anyone"
+
+# Then every other order in the same state. Reports, never repairs — an order
+# recorded from a paper backlog is supposed to look like this and a live one is
+# not, and only somebody who can check the bank can tell them apart.
+/opt/alt/php83/usr/bin/php artisan orders:payment-state --audit
 ```
 
 **Then build the ledger from existing history** — Session 89's page opens empty
@@ -94,7 +113,8 @@ none of them is fixed by shipping code.
 | 5 | Re-run `orders:repair-totals` (survey, no `--fix`), then `--fix` | Confirms the rewritten classifier flags only the 2 lump-sum orders, not 21. Then corrects **AB-1150** (16,250 → 8,125) and **AB - 1182** (30,000 → 15,000). Read the survey before the fix. |
 | 6 | *(optional, business call)* `PARTNER_EDIT_WINDOW_HOURS=72` in `.env` before `config:cache` | See Session 75 partner-correction note. Config-only, reversible. |
 | 7 | *(human, not a command)* Reconcile orders **10075, 10076, 10077, 10079, 10080** | Items exceed the stored total on inconsistent ratios. No tooling will fix these — someone has to compare each against what was actually invoiced. Tracked in Known Gaps. |
-| 8 | *(offered, not asked for)* `invoices:register-existing` backfill | Session 86's invoice register fills forward only. Without a backfill the reconciliation shows history from the deploy onward rather than from the start of the year. Small command, dry run first — say the word. |
+| 8 | **Correct AB - 1182's payment state, then sweep** — `orders:payment-state "AB - 1182"` to read it, then `--stage=pending_proforma --reset-status --reason="…"`, then `orders:payment-state --audit` | Reported by the order manager on 2026-08-18: she is waiting on the deposit and the customer's portal says he has paid. Needs the Session 90 deploy first (migration #40). The sweep then names every other order in the same state — it reports rather than repairs, because a backfilled historical order is supposed to look identical to a live one that went wrong. |
+| 9 | *(offered, not asked for)* `invoices:register-existing` backfill | Session 86's invoice register fills forward only. Without a backfill the reconciliation shows history from the deploy onward rather than from the start of the year. Small command, dry run first — say the word. |
 
 ---
 
@@ -2442,6 +2462,77 @@ See addendum 2 in `FRONTEND_NOTE_staff-contribution-ledger.md`.
 
 ---
 
+## The website said he had paid (Session 90)
+
+> **Deploy status:** built and tested, **not yet deployed**. Migration **#40**
+> unapplied. **1 new route**, so `route:cache` must be rebuilt. Frontend built
+> in the same session and pushed alongside.
+
+The order manager reported the same symptom for the second time — an order
+confirmed, the deposit not yet in, the site telling the customer he had paid —
+along with *"it keeps giving automatic and there is no option for us to set it
+manually"*. She is right that Session 76 fixed it, and right that it is still
+happening. They were two different faults.
+
+Session 76 closed every path that moved an order **forward** on its own. What it
+left is the direction of travel: `request-deposit` refuses unless the order is
+at `pending_proforma`, `deposit-paid` unless it is at one of two stages,
+`balance-paid` unless the deposit is in. Each guard is correct alone. Together
+they mean an order that arrived at a paid state — however it got there,
+including before Session 76 shipped — **could never be put back by anyone using
+the product**. That is the whole of "no option to set it manually": not that
+something set it today, but that nothing can unset what was set. Every such
+order needed a developer, and until one was free the buyer kept reading that he
+had paid.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `POST /admin/orders/{id}/payment-milestones/correct` | 🔧 | `payments.correct_state`. Stage, an optional reset of `payment_status`, and a required reason. |
+| **Only ever backwards** | 🔧 | 409 `use_the_milestone_actions` on a forward move. Recording that money arrived stays with the actions that notify the customer and stamp who confirmed it — a correction tool that could also do that would become the quick way round both, and the ladder's guards would stop meaning anything. |
+| Never a Stripe order | 🔧 | 409 `gateway_managed_payment`. The gateway owns that state; a figure typed here would only disagree with Stripe until somebody noticed. |
+| Never e-mails anybody | 🔧 | Correcting our own record is not an event in the buyer's order, and "your payment status changed" for a payment that never happened is precisely the confusion being fixed. |
+| Rolled-back stages lose their dates | 🔧 | `deposit_paid_at` is a claim that money arrived on a date, not a note. Left behind a rolled-back stage the claim still stands. `*_email_sent_at` is **not** cleared — an e-mail that went out went out, and that is the only record of what the customer was told. |
+| **The one log write with no try/catch** | 🔧 | Every other order log write in this codebase swallows its own failure, which is right — a failed log must not fail a user's action. Not here: a correction that recorded nothing would be worse than the state it corrects, so a rejected insert rolls the correction back. `payment_state_corrected` is in `OrderLog::ACTIONS`, which the existing test enforces. |
+| Separate permission key | 🔧 | Same holders as `payments.mark_paid` — the order manager is the person who knows whether the money arrived, and making her ask someone else to correct her own record is what produced the complaint. Its own key so it can be narrowed later: withdrawing a claim of payment and making one are different acts. |
+
+### Finding the ones already wrong
+
+`orders:payment-state` — inspect one order, correct one order, or sweep. Survey
+by default; nothing writes without `--stage` and a reason.
+
+The sweep flags an order presenting as paid with **nothing** recording who
+confirmed it: no Stripe session, no eBay, no `deposit_paid_at`/`balance_paid_at`
+stamp, no `payment_status_changed` row. It **reports and never repairs**.
+Nothing in the code can tell whether the money actually arrived, only whether
+anybody wrote down that it did — a historical order backfilled from paper is
+supposed to look exactly like this, a live order is not, and a rule that guessed
+would eventually guess against the bank.
+
+### Prevention
+
+`POST /admin/orders` with `payment_status: paid` now writes a
+`payment_status_changed` row naming the admin who recorded it. That path is the
+one legitimate way an order is born paid and the backfill workflow is unchanged
+— what changed is that it is no longer anonymous. Every other route to a paid
+state already left a record of who confirmed it; this one wrote nothing, which
+is exactly why the orders already on production cannot be told apart and need
+the sweep.
+
+### Tests
+
+**16 new** (53 in the file, **540 in the suite**, up from 524): the correction
+itself, both columns coming back together, dates cleared for undone stages and
+kept for standing ones, the refusal to move forward, Stripe refused, no reason
+refused, nothing e-mailed, the audit row with its old→new and reason, the action
+being one the column accepts, a `viewer` refused, a no-op refused, and five on
+the sweep — flagged when unevidenced, silent for a confirmed order, for Stripe,
+for eBay, and for an unpaid order — plus the creation path now naming who
+declared an order paid.
+
+See `FRONTEND_NOTE_payment-state-correction.md`.
+
+---
+
 ## eBay Integration (Sessions 15–25)
 
 | Phase | Feature | Status |
@@ -2816,5 +2907,7 @@ still has `QUEUE_CONNECTION=sync`, so `SendBulkEmailCampaignJob` would run
 inline during the HTTP request. Set `QUEUE_CONNECTION=database` and run a
 queue worker before the order manager sends to the full contact list — see
 Session 50 note above.
+
+40. `2026_08_18_000001_add_payment_state_corrected_to_order_logs_enum` (Session 90 — adds `payment_state_corrected`. Second widening built from `OrderLog::ACTIONS` rather than a hand-copied list; see #36. **Not deploy-order safe, deliberately.** `PaymentStateCorrectionService` is the only thing that can move a payment state backwards and its whole claim to being safe in an order manager's hands is that it cannot be done quietly, so its log write is the one in this project NOT wrapped in a try/catch. Until this runs, MySQL rejects the action and the correction rolls back rather than happening unrecorded — the endpoint refuses to work instead of working silently, which is the intended failure of the two. `down()` throws if any row uses the added value. MySQL-only.)
 
 32. `2026_08_12_000001_create_search_events_table` (Session 79 — customer behaviour analytics; creates `search_events`. One new table: nothing existing is read, altered or backfilled, so this cannot affect a live row. Guarded with `Schema::hasTable`. Proved by `CustomerBehaviourAnalyticsTest`, which runs the real migration file in its own setup. **Deploy-order safe in both directions, unlike #28** — `SearchEventRecorder` checks for the table and skips when it is absent, so the public catalogue never fails because a reporting table has not been created yet, and the report returns `available: false` rather than reporting zeros. The consequence of code-before-migration is only that nothing is recorded until it runs)

@@ -613,6 +613,14 @@ Route::prefix('v1')->group(function () {
             Route::post('resend-email',     [AdminOrderPaymentMilestoneController::class, 'resendEmail']);
         });
 
+        // The only backwards path through the ladder. Held on its own key
+        // rather than payments.mark_paid so undoing a payment can be narrowed
+        // later without also taking away the ability to record one — the two
+        // are the same people today, but they are not the same act.
+        Route::middleware('permission:payments.correct_state')->group(function () {
+            Route::post('orders/{id}/payment-milestones/correct', [AdminOrderPaymentMilestoneController::class, 'correct']);
+        });
+
         // -----------------------------------------------------------------
         // Quotes — read + pipeline (quotes.manage = view+write for SM; quotes.update = mutations only)
         // -----------------------------------------------------------------

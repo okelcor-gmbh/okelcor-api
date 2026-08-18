@@ -289,6 +289,29 @@ class AdminOrderController extends Controller
 
         $this->writeLog($request, $order, 'created', ['notes' => 'Historical order recorded by admin.']);
 
+        // An order that is born paid needs a record of who said so.
+        //
+        // 'paid' at creation is a person asserting the money is already in the
+        // bank — right for a paper backlog, and wrong for a live order, which
+        // is how the order manager ended up with a buyer looking at a payment
+        // he had not made. Every other route to a paid state leaves a row
+        // naming whoever confirmed it (`markPaid` writes payment_status_changed,
+        // the milestone actions stamp deposit_confirmed_by / balance_confirmed_by).
+        // This one wrote nothing, so the assertion could never afterwards be
+        // told apart from a derivation — and `orders:payment-state --audit`
+        // exists precisely because the ones already on production cannot be.
+        //
+        // Does not block anything: the backfill workflow is unchanged and the
+        // form still supports it. It just stops being anonymous.
+        if ($data['payment_status'] === 'paid') {
+            $this->writeLog($request, $order, 'payment_status_changed', [
+                'old_value' => 'pending',
+                'new_value' => 'paid',
+                'notes'     => "Recorded as already paid at creation, stage '{$paymentStage}'. "
+                    . 'Declared by the admin recording the order, not observed by a gateway.',
+            ]);
+        }
+
         $order->load(['items', 'logs', 'euDeclaration', 'tradeDocuments']);
 
         return response()->json([
