@@ -158,9 +158,21 @@ class CustomerApprovalService
         $supportEmail = config('mail.from.address') ?: 'support@okelcor.com';
         $needsVerify  = $customer->email_verified_at === null;
 
+        // An unverified buyer needs the link, not just the instruction.
+        //
+        // This email has always said "one last step: please verify your email
+        // address first" — and shipped no link with it. The only verification
+        // link the customer ever had was the one from registration, which
+        // expires after 24 hours, and a B2B account is routinely approved days
+        // or weeks after it is registered. So the sentence named a step the
+        // customer had no way to take.
+        //
+        // Generated fresh here so the clock starts when the mail is sent.
+        $verifyUrl = $needsVerify ? app(CustomerEmailVerifier::class)->link($customer) : null;
+
         try {
             Mail::to($customer->email)->send(new ApprovedAccountEmail(
-                $customer, $loginUrl, $supportEmail, $needsVerify
+                $customer, $loginUrl, $supportEmail, $needsVerify, $verifyUrl
             ));
 
             // In-app twin of the approval email (Email = Inbox).

@@ -946,6 +946,12 @@ Route::prefix('v1')->group(function () {
             Route::post('customers/{id}/unlock', [AdminCustomerController::class, 'unlock']);
             Route::post('customers/{id}/logout-all', [AdminCustomerController::class, 'logoutAll']);
             Route::post('customers/{id}/force-password-reset', [AdminCustomerController::class, 'forcePasswordReset']);
+
+            // Email confirmation — resend the link, or vouch for the address.
+            // A customer locked out by an unverified address had no route back
+            // that did not go through a developer; these are that route.
+            Route::post('customers/{id}/resend-verification', [AdminCustomerController::class, 'resendVerification']);
+            Route::post('customers/{id}/verify-email', [AdminCustomerController::class, 'verifyEmail']);
             Route::get('customers/{id}/sessions', [AdminCustomerController::class, 'sessions']);
 
             // Onboarding actions (CRM-1)

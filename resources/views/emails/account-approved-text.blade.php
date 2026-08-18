@@ -3,7 +3,14 @@ Hello {{ $customer->first_name }},
 Good news — your Okelcor B2B wholesale account has been APPROVED.
 
 @if ($requiresEmailVerification)
-One last step: please verify your email address first. Once verified, you can log in with the password you chose at registration.
+One last step: please confirm your email address. Once confirmed, you can log in with the password you chose at registration.
+@if (! empty($verifyUrl))
+
+Confirm your email address:
+{{ $verifyUrl }}
+
+This link is valid for 24 hours. If it has expired by the time you use it, reset your password at {{ $loginUrl }} — that confirms your address as well.
+@endif
 @else
 You can now log in and start using your account:
 {{ $loginUrl }}

@@ -29,9 +29,17 @@
 
             @if ($requiresEmailVerification)
                 <div class="highlight">
-                    <p style="margin:0;"><strong>One last step:</strong> please verify your email address first.
-                    Once verified, you can log in with the password you chose at registration.</p>
+                    <p style="margin:0;"><strong>One last step:</strong> please confirm your email address.
+                    Once confirmed, you can log in with the password you chose at registration.</p>
                 </div>
+                @if (! empty($verifyUrl))
+                    <p style="text-align:center;">
+                        <a href="{{ $verifyUrl }}" class="btn">Confirm My Email Address</a>
+                    </p>
+                    <p style="font-size:13px;color:#6b7280;">This link is valid for 24 hours. If it has expired by the
+                    time you use it, reset your password at <a href="{{ $loginUrl }}" style="color:#e63946;">{{ $loginUrl }}</a>
+                    — that confirms your address as well.</p>
+                @endif
             @else
                 <p>You can now log in and start using your account:</p>
                 <p style="text-align:center;">

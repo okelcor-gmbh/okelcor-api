@@ -8,6 +8,7 @@ use App\Mail\CustomerPasswordReset;
 use App\Models\BlockedEntity;
 use App\Models\Customer;
 use App\Services\CustomerApprovalService;
+use App\Services\CustomerEmailVerifier;
 use App\Services\CustomerTimelineService;
 use App\Services\SecurityEventService;
 use App\Support\CustomerLifecyclePresenter;
@@ -311,6 +312,105 @@ class AdminCustomerController extends Controller
         );
 
         return response()->json(['success' => true, 'message' => 'Account unlocked successfully.']);
+    }
+
+    // ── POST /admin/customers/{id}/resend-verification ────────────────────────
+
+    /**
+     * Send the customer a fresh "confirm your email" link.
+     *
+     * The self-service resend exists on the public API, but it is no use to the
+     * person actually fielding the complaint. A buyer who cannot get in e-mails
+     * the order manager, and until now her only options were to talk him
+     * through a page he had already tried or to escalate to a developer — which
+     * is exactly how this reached us.
+     *
+     * Fresh link each time: the previous one lasts 24 hours and the reason this
+     * is being clicked at all is usually that the last one expired.
+     */
+    public function resendVerification(Request $request, int $id): JsonResponse
+    {
+        $customer = Customer::findOrFail($id);
+
+        if ($customer->email_verified_at) {
+            return response()->json([
+                'message' => 'This email address is already confirmed. If the customer still cannot log in, the cause is something else — check the account status and onboarding status.',
+                'code'    => 'already_verified',
+            ], 409);
+        }
+
+        $sent = app(CustomerEmailVerifier::class)->send($customer);
+
+        if (! $sent) {
+            return response()->json([
+                'message' => 'The verification email could not be sent. Check the mail log.',
+                'code'    => 'email_send_failed',
+            ], 502);
+        }
+
+        SecurityEventService::log(
+            'email_verification_sent', $customer->id,
+            $request->ip(), $request->userAgent(),
+            'Verification email resent by admin', 'info'
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => "A confirmation link has been sent to {$customer->email}. It is valid for 24 hours.",
+        ]);
+    }
+
+    // ── POST /admin/customers/{id}/verify-email ───────────────────────────────
+
+    /**
+     * Confirm the address on the customer's behalf.
+     *
+     * The escape hatch for when the link will not reach them — a corporate
+     * filter eating the mail, a mailbox that forwards, an address the business
+     * has been corresponding with for months anyway. Someone at Okelcor is
+     * vouching for it, so it demands a reason and records who said so;
+     * `email_verified_by_admin` is a distinct event type from `email_verified`
+     * precisely so the two are never mistaken for each other in the audit trail.
+     *
+     * Deliberately does not touch account status or onboarding status. Those
+     * are separate gates with their own buttons, and a single control that
+     * quietly cleared all three would make it impossible to tell afterwards
+     * which one had actually been the problem.
+     */
+    public function verifyEmail(Request $request, int $id): JsonResponse
+    {
+        $request->validate([
+            'reason' => ['required', 'string', 'min:5', 'max:500'],
+        ]);
+
+        $customer = Customer::findOrFail($id);
+
+        if ($customer->email_verified_at) {
+            return response()->json([
+                'message' => 'This email address is already confirmed.',
+                'code'    => 'already_verified',
+            ], 409);
+        }
+
+        $customer->update(['email_verified_at' => now()]);
+
+        SecurityEventService::log(
+            'email_verified_by_admin', $customer->id,
+            $request->ip(), $request->userAgent(),
+            'Email confirmed by ' . ($request->user()?->email ?? 'admin') . '. Reason: ' . $request->input('reason'),
+            'warning'
+        );
+
+        CustomerTimelineService::record(
+            $customer->id, 'email_verified_by_admin', 'Email confirmed by an admin',
+            $request->input('reason'), [], $request->user()?->id
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Email address confirmed. The customer can now log in, provided the account is active.',
+            'data'    => ['email_verified' => true],
+        ]);
     }
 
     // ── POST /admin/customers/{id}/logout-all ─────────────────────────────────

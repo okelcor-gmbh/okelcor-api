@@ -21,6 +21,8 @@ class ApprovedAccountEmail extends Mailable
         public readonly string $loginUrl,
         public readonly string $supportEmail,
         public readonly bool $requiresEmailVerification = false,
+        /** A fresh signed verification link — null when the address is already verified. */
+        public readonly ?string $verifyUrl = null,
     ) {}
 
     public function envelope(): Envelope
@@ -40,6 +42,7 @@ class ApprovedAccountEmail extends Mailable
                 'loginUrl'                  => $this->loginUrl,
                 'supportEmail'              => $this->supportEmail,
                 'requiresEmailVerification' => $this->requiresEmailVerification,
+                'verifyUrl'                 => $this->verifyUrl,
             ],
         );
     }
