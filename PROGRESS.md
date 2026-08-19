@@ -1,10 +1,10 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-19 | Branch: `main` | Latest commit: Session 93 (**pushed, not deployed**)
+Last updated: 2026-08-19 | Branch: `main` | Latest commit: Session 94 (**pushed, not deployed**)
 
 ---
 
-## 🔧 Sessions 86–93 pushed, NOT deployed
+## 🔧 Sessions 86–94 pushed, NOT deployed
 
 **Seven unapplied migrations (#37–43), twenty-one new routes.**
 
@@ -20,6 +20,7 @@ Last updated: 2026-08-19 | Branch: `main` | Latest commit: Session 93 (**pushed,
 | **91** | The approved customer who could never log in — a password reset now confirms the email, and the order manager has the controls | **#41** | **2 new** |
 | **92** | Product optimization (the marketing brief) — SEO slugs, rich descriptions, the Artikelmerkmale sheet, shipping/returns content | **#42** | **1 new** |
 | **93** | Brand-level content defaults — entered once per brand, inherited by all ~15,000 products at read time | **#43** | none |
+| **94** | The `marketing` role — content + catalogue + campaigns, nothing operational | none | none |
 
 ```bash
 cd /home/okelvaxj/domains/okelcor.com/public_html/okelcor-api
@@ -2584,6 +2585,44 @@ skipped, the served catalogue, the permission gate, and the
 override→setting→null fallback chain.
 
 See `FRONTEND_NOTE_product-optimization.md`.
+
+---
+
+## The marketing role (Session 94)
+
+> **Deploy status:** built and tested, **not yet deployed**. **No migration,
+> no new routes** — the role column has been VARCHAR validated against
+> `AdminPermissions::ROLES` since #33, so a new role is a constant edit.
+
+The marketer manages articles, product optimization and the e-mail campaigns,
+and held `editor` — which could edit products on the API but carried no
+campaign permissions, and whose admin-panel nav never offered the Products
+page at all (a frontend `ROLE_ACCESS` gap; from his seat, "no access to
+products"). One role now says what the job is.
+
+| Grant | Why |
+|---|---|
+| `products.view` / `products.edit` | The catalogue — and `products.edit` is the gate on every content route: articles, categories, hero slides, brands (incl. Session 93 brand content), media, settings. |
+| `articles.manage`, `media.upload`, `promotions.manage`, `fet.manage` | Content. |
+| `settings.manage` | The site-wide product shipping/returns texts live there — the thing he was just asked to edit. |
+| `marketing.manage`, `newsletter.manage` | Campaigns, marketing contacts, bulk email, and the audience list they send to. |
+| `analytics.view` | What people search for is marketing data. |
+| **Nothing operational** | No orders, payments, quotes, CRM, customers, finance, partners, eBay, `products.import` (that group carries delete-all), or `staff.view_team`. A marketing role that could touch operations would just be `admin` under a nicer name — asserted by test, permission by permission. |
+
+`editor` is deliberately unchanged: the marketer moves off it rather than it
+being widened — other people hold it, and their access was not this change's
+to grow.
+
+### Tests
+
+**5 new** (suite **590, 0 failed**, up from 585): the role is valid, holds
+every content/campaign key, holds none of sixteen operational keys, editor
+unchanged, and an end-to-end route check — a marketing admin saving a rich
+description and reading the spec sheet. The existing every-role walks
+(staff.self, signoff board) pick the tenth role up automatically and pass.
+
+**To finish (human step):** in Admin → Users, change the marketer's role from
+`editor` to `marketing` after the deploy.
 
 ---
 

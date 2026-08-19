@@ -460,6 +460,27 @@ class ProductOptimizationTest extends TestCase
             ->assertStatus(403);
     }
 
+    public function test_the_marketing_role_can_do_the_work_it_was_created_for(): void
+    {
+        // Session 94: the marketer's role, end to end against a real route —
+        // he reported "no access to products" from the editor seat, and this
+        // is the assertion that the new seat actually reaches them.
+        $product = $this->product();
+
+        $this->actingAs($this->admin('marketing'), 'sanctum')
+            ->putJson("/api/v1/admin/products/{$product->id}", [
+                'description_html' => '<p>Written by marketing.</p>',
+                'specs'            => ['nasshaftungseigenschaften' => 'A'],
+            ])
+            ->assertOk();
+
+        $this->actingAs($this->admin('marketing'), 'sanctum')
+            ->getJson('/api/v1/admin/products/spec-options')
+            ->assertOk();
+
+        $this->assertSame('<p>Written by marketing.</p>', $product->fresh()->description_html);
+    }
+
     // ── 5. shipping & returns ─────────────────────────────────────────────
 
     public function test_shipping_and_returns_fall_back_to_the_site_wide_setting(): void

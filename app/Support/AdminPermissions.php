@@ -16,6 +16,9 @@ namespace App\Support;
  *   sales_manager   — read-only orders + quotes (view pipeline, no mutations)
  *   content_manager — all content (products, articles, hero, promotions, media)
  *   support         — customer read-only + contacts
+ *   marketing       — content + catalogue + campaigns: everything the person
+ *                     optimizing products and running e-mail campaigns touches,
+ *                     and nothing operational (no orders, quotes or customers)
  *   editor          — products, articles, categories, hero, brands, media, settings
  *   viewer          — product catalogue read-only
  */
@@ -82,21 +85,21 @@ class AdminPermissions
         'payments.correct_state'  => ['super_admin', 'admin', 'order_manager'],
 
         // ── Products / content ────────────────────────────────────────────
-        'products.view'           => ['super_admin', 'admin', 'editor', 'content_manager', 'sales_manager', 'viewer'],
-        'products.edit'           => ['super_admin', 'admin', 'editor', 'content_manager'],
+        'products.view'           => ['super_admin', 'admin', 'editor', 'content_manager', 'sales_manager', 'viewer', 'marketing'],
+        'products.edit'           => ['super_admin', 'admin', 'editor', 'content_manager', 'marketing'],
         'products.import'         => ['super_admin', 'admin'],
         'products.delete_all'     => ['super_admin', 'admin'],
 
         // ── Media ─────────────────────────────────────────────────────────
-        'media.upload'            => ['super_admin', 'admin', 'editor', 'content_manager'],
+        'media.upload'            => ['super_admin', 'admin', 'editor', 'content_manager', 'marketing'],
 
         // ── Content types ─────────────────────────────────────────────────
-        'articles.manage'         => ['super_admin', 'admin', 'editor', 'content_manager'],
-        'promotions.manage'       => ['super_admin', 'admin', 'editor', 'content_manager'],
-        'fet.manage'              => ['super_admin', 'admin', 'editor', 'content_manager'],
+        'articles.manage'         => ['super_admin', 'admin', 'editor', 'content_manager', 'marketing'],
+        'promotions.manage'       => ['super_admin', 'admin', 'editor', 'content_manager', 'marketing'],
+        'fet.manage'              => ['super_admin', 'admin', 'editor', 'content_manager', 'marketing'],
 
         // ── Settings ──────────────────────────────────────────────────────
-        'settings.manage'         => ['super_admin', 'admin', 'editor'],
+        'settings.manage'         => ['super_admin', 'admin', 'editor', 'marketing'],
 
         // ── Quotes ────────────────────────────────────────────────────────
         'quotes.manage'           => ['super_admin', 'admin', 'order_manager', 'sales_manager'],
@@ -120,15 +123,15 @@ class AdminPermissions
         'trade_documents.manage'  => ['super_admin', 'admin', 'order_manager'],
 
         // ── Newsletter ────────────────────────────────────────────────────
-        'newsletter.manage'       => ['super_admin', 'admin', 'order_manager'],
+        'newsletter.manage'       => ['super_admin', 'admin', 'order_manager', 'marketing'],
 
         // ── Marketing contacts / bulk email ────────────────────────────────
-        'marketing.manage'        => ['super_admin', 'admin', 'order_manager'],
+        'marketing.manage'        => ['super_admin', 'admin', 'order_manager', 'marketing'],
 
         // ── Customer behaviour analytics ──────────────────────────────────
         // `sales_manager` added here as Session 79 said it should be, in the
         // same change that widened admin_users.role — see the migration.
-        'analytics.view'          => ['super_admin', 'admin', 'order_manager', 'editor', 'sales_manager'],
+        'analytics.view'          => ['super_admin', 'admin', 'order_manager', 'editor', 'sales_manager', 'marketing'],
 
         // ── Customers ─────────────────────────────────────────────────────
         'customers.view'          => ['super_admin', 'admin', 'support'],
@@ -195,6 +198,7 @@ class AdminPermissions
         'sales_manager',
         'content_manager',
         'support',
+        'marketing',
         'editor',
         'viewer',
     ];
