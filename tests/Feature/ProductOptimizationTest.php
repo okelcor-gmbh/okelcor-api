@@ -143,10 +143,14 @@ class ProductOptimizationTest extends TestCase
         parent::tearDown();
     }
 
-    /** Run the real migration file — not a re-implementation of it. */
+    /** Run the real migration files — not re-implementations of them. */
     private function runOptimizationMigration(): void
     {
         $migration = require database_path('migrations/2026_08_18_000003_add_seo_and_specs_to_products_table.php');
+        $migration->up();
+
+        // Session 93 — brand-level content defaults.
+        $migration = require database_path('migrations/2026_08_19_000001_add_content_defaults_to_brands_table.php');
         $migration->up();
     }
 
@@ -491,5 +495,158 @@ class ProductOptimizationTest extends TestCase
         $this->getJson('/api/v1/products/' . $product->id)
             ->assertOk()
             ->assertJsonPath('data.returns_info', null);
+    }
+
+    // ── 6. brand-level defaults (Session 93) ──────────────────────────────
+    //
+    // The marketer's follow-up: with ~15,000 products, entering this content
+    // product by product is not a workflow. Entered once per brand, inherited
+    // by every product without its own value — resolved at read time, never
+    // copied, so a brand edit is instant everywhere and a product's own value
+    // always wins.
+
+    private function brand(array $overrides = []): \App\Models\Brand
+    {
+        $this->seq++;
+
+        return \App\Models\Brand::create(array_merge([
+            'name'      => 'Continental',
+            'is_active' => true,
+        ], $overrides));
+    }
+
+    public function test_the_brand_migration_applies_against_real_sql_and_is_idempotent(): void
+    {
+        foreach (['description_html', 'specs', 'shipping_info', 'returns_info'] as $column) {
+            $this->assertTrue(Schema::hasColumn('brands', $column), "brands.{$column} missing");
+        }
+
+        $this->runOptimizationMigration(); // guarded — re-run is a no-op
+        $this->assertTrue(Schema::hasColumn('brands', 'specs'));
+    }
+
+    public function test_a_brand_spec_default_fills_every_product_that_left_it_empty(): void
+    {
+        $this->brand(['specs' => ['reifenbauart' => 'Radial', 'nasshaftungseigenschaften' => 'B']]);
+
+        // Two products, no specs of their own — one brand entry covers both.
+        $a = $this->product();
+        $b = $this->product();
+
+        foreach ([$a, $b] as $product) {
+            $sheet = collect($this->getJson('/api/v1/products/' . $product->id)->json('data.specifications'))->keyBy('key');
+
+            $this->assertSame('Radial', $sheet['reifenbauart']['value']);
+            $this->assertSame('B', $sheet['nasshaftungseigenschaften']['value']);
+        }
+    }
+
+    public function test_a_products_own_value_always_beats_the_brand_default(): void
+    {
+        $this->brand(['specs' => ['nasshaftungseigenschaften' => 'C']]);
+
+        $product = $this->product(['specs' => ['nasshaftungseigenschaften' => 'A']]);
+
+        $sheet = collect($this->getJson('/api/v1/products/' . $product->id)->json('data.specifications'))->keyBy('key');
+
+        $this->assertSame('A', $sheet['nasshaftungseigenschaften']['value']);
+    }
+
+    public function test_the_brand_description_shows_on_products_without_their_own(): void
+    {
+        $this->brand(['description_html' => '<h2>Continental</h2><p>German engineering since 1871.</p>']);
+
+        $bare    = $this->product();
+        $written = $this->product(['description_html' => '<p>This specific tyre.</p>']);
+
+        $this->getJson('/api/v1/products/' . $bare->id)
+            ->assertJsonPath('data.description_html', '<h2>Continental</h2><p>German engineering since 1871.</p>');
+
+        $this->getJson('/api/v1/products/' . $written->id)
+            ->assertJsonPath('data.description_html', '<p>This specific tyre.</p>');
+    }
+
+    public function test_shipping_resolves_product_then_brand_then_setting(): void
+    {
+        $this->brand(['shipping_info' => 'Continental: Spedition ab Werk.']);
+
+        $own      = $this->product(['shipping_info' => 'Only this one ships free.']);
+        $branded  = $this->product();
+        $orphan   = $this->product(['brand' => 'NoSuchBrand']);
+
+        // Product's own text wins over its brand's.
+        $this->getJson('/api/v1/products/' . $own->id)
+            ->assertJsonPath('data.shipping_info', 'Only this one ships free.');
+
+        // No own text → the brand's.
+        $this->getJson('/api/v1/products/' . $branded->id)
+            ->assertJsonPath('data.shipping_info', 'Continental: Spedition ab Werk.');
+
+        // No brand row at all → the site-wide setting seeded by migration #42.
+        $this->getJson('/api/v1/products/' . $orphan->id)
+            ->assertJsonPath('data.shipping_info', "Versand: Kostenlos – Deutsche Post Brief.\nStandort: Munich, Deutschland");
+    }
+
+    public function test_brand_matching_ignores_case(): void
+    {
+        // products.brand is free text from three import sources; "CONTINENTAL"
+        // and "Continental" are the same company and must inherit the same
+        // defaults — same rule the brand-logo lookup has always applied.
+        $this->brand(['name' => 'Continental', 'specs' => ['reifenbauart' => 'Radial']]);
+
+        $product = $this->product(['brand' => 'CONTINENTAL']);
+
+        $sheet = collect($this->getJson('/api/v1/products/' . $product->id)->json('data.specifications'))->keyBy('key');
+
+        $this->assertSame('Radial', $sheet['reifenbauart']['value']);
+    }
+
+    public function test_an_inactive_brand_lends_no_defaults(): void
+    {
+        $this->brand(['is_active' => false, 'specs' => ['reifenbauart' => 'Radial']]);
+
+        $product = $this->product();
+
+        $keys = collect($this->getJson('/api/v1/products/' . $product->id)->json('data.specifications'))->pluck('key');
+
+        $this->assertFalse($keys->contains('reifenbauart'));
+    }
+
+    public function test_the_admin_brand_form_saves_defaults_under_the_same_rules_as_products(): void
+    {
+        $brand = $this->brand();
+
+        $this->actingAs($this->admin(), 'sanctum')
+            ->putJson("/api/v1/admin/brands/{$brand->id}", [
+                'name'             => 'Continental',
+                'description_html' => '<p>Real content.</p><script>alert(1)</script>',
+                'specs'            => [
+                    'reifenbauart' => 'Radial',
+                    'junk_key'     => 'dropped',
+                    'fahrzeugtyp'  => '',
+                ],
+                'shipping_info'    => 'Continental shipping.',
+            ])
+            ->assertOk();
+
+        $fresh = $brand->fresh();
+
+        $this->assertStringNotContainsString('<script', (string) $fresh->description_html);
+        $this->assertStringContainsString('Real content', (string) $fresh->description_html);
+        $this->assertSame(['reifenbauart' => 'Radial'], $fresh->specs);
+        $this->assertSame('Continental shipping.', $fresh->shipping_info);
+    }
+
+    public function test_a_brand_default_label_class_is_validated_like_a_products(): void
+    {
+        $brand = $this->brand();
+
+        $this->actingAs($this->admin(), 'sanctum')
+            ->putJson("/api/v1/admin/brands/{$brand->id}", [
+                'name'  => 'Continental',
+                'specs' => ['nasshaftungseigenschaften' => 'X'],
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('specs.nasshaftungseigenschaften');
     }
 }

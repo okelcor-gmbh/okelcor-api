@@ -1,12 +1,12 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-19 | Branch: `main` | Latest commit: Session 92 (**pushed, not deployed**)
+Last updated: 2026-08-19 | Branch: `main` | Latest commit: Session 93 (**pushed, not deployed**)
 
 ---
 
-## 🔧 Sessions 86–92 pushed, NOT deployed
+## 🔧 Sessions 86–93 pushed, NOT deployed
 
-**Six unapplied migrations (#37–42), twenty-one new routes.**
+**Seven unapplied migrations (#37–43), twenty-one new routes.**
 
 | Session | What it is | Migration | Routes |
 |---|---|---|---|
@@ -19,6 +19,7 @@ Last updated: 2026-08-19 | Branch: `main` | Latest commit: Session 92 (**pushed,
 | **90** | Correcting a payment state that says paid when it isn't — the only backwards path through the ladder | **#40** | **1 new** |
 | **91** | The approved customer who could never log in — a password reset now confirms the email, and the order manager has the controls | **#41** | **2 new** |
 | **92** | Product optimization (the marketing brief) — SEO slugs, rich descriptions, the Artikelmerkmale sheet, shipping/returns content | **#42** | **1 new** |
+| **93** | Brand-level content defaults — entered once per brand, inherited by all ~15,000 products at read time | **#43** | none |
 
 ```bash
 cd /home/okelvaxj/domains/okelcor.com/public_html/okelcor-api
@@ -2586,6 +2587,38 @@ See `FRONTEND_NOTE_product-optimization.md`.
 
 ---
 
+## Brand-level content defaults (Session 93)
+
+> **Deploy status:** built and tested, **not yet deployed**. Migration **#43**
+> unapplied. **No new routes.** Deploy-order safe. Frontend built in the same
+> session.
+
+The marketer's follow-up to Session 92, and he is right: with ~15,000
+products, entering the optimization content product by product is not a
+workflow. Entered once per brand instead, inherited by every product without
+its own value.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `brands` gains the same four content columns | 🔧 | The chain only works when every level speaks the same shape. |
+| **Resolution at read time, never copied** | 🔧 | `product → brand → site setting → null`. A brand edit is instant on all its products, there is never a stale copy on 15,000 rows, and a product's own value always wins. |
+| Only json-backed specs default per brand | 🔧 | A brand does not have one width or one EAN — per-tyre physical facts stay on the product (and are mostly CSV-imported anyway). |
+| Same rules wherever a value enters | 🔧 | `PUT /admin/brands/{id}` runs the same sanitizer, the same A–G validation and the same junk-dropping as the product path. |
+| Case-insensitive brand match | 🔧 | `products.brand` is free text from three import sources; "CONTINENTAL" and "Continental" inherit the same defaults — the rule the logo lookup has always used. Inactive brands lend nothing. |
+| Admin → Brands → content button | 🔧 | `/admin/brands/{id}`: brand description (article editor), json half of the spec sheet, shipping/returns. Warns that a wrong blanket value is worse than an empty field. |
+
+### Tests
+
+**9 new** (30 in `ProductOptimizationTest`, suite **585, 0 failed**, up from
+576): the migration + idempotency, one brand entry filling two products, the
+product's own value winning, description fallback, the full shipping chain,
+case-insensitive matching, inactive brands excluded, the admin form under
+product rules, and A–G validation on brand defaults.
+
+See the Session 93 addendum in `FRONTEND_NOTE_product-optimization.md`.
+
+---
+
 ## The approved customer who could never log in (Session 91)
 
 > **Deploy status:** built and tested, **not yet deployed**. Migration **#41**
@@ -3025,6 +3058,8 @@ still has `QUEUE_CONNECTION=sync`, so `SendBulkEmailCampaignJob` would run
 inline during the HTTP request. Set `QUEUE_CONNECTION=database` and run a
 queue worker before the order manager sends to the full contact list — see
 Session 50 note above.
+
+43. `2026_08_19_000001_add_content_defaults_to_brands_table` (Session 93 — adds `description_html`, `specs`, `shipping_info`, `returns_info` to `brands`; the same four content fields products gained in #42, because the product → brand → setting chain only works when every level speaks the same shape. Guarded and additive; nothing existing read, renamed or rewritten. **Deploy-order safe**: resolution reads whole brand rows, so before this runs the attributes are simply absent and behaviour is unchanged. Proved by `ProductOptimizationTest::test_the_brand_migration_applies_against_real_sql_and_is_idempotent`, which runs the migration file itself and re-runs it.)
 
 42. `2026_08_18_000003_add_seo_and_specs_to_products_table` (Session 92 — adds `slug` (unique, backfilled for every existing product inside the migration, only-NULLs so re-runs cannot rename a live URL), `description_html`, `specs` JSON, `shipping_info`, `returns_info`; seeds `product_shipping_info`/`product_returns_info` site settings via insertOrIgnore. All guarded and additive; nothing existing read, renamed or rewritten. **Deploy-order safe in both directions**: the model checks for the slug column before writing it (cached per request — the Wix import creates thousands of rows), and the public API resolves numeric ids regardless. Proved by `ProductOptimizationTest::test_the_migration_applies_against_real_sql_and_is_idempotent`, which runs the migration file itself and re-runs it.)
 

@@ -128,18 +128,25 @@ class TyreSpecs
      * condition field could disagree with the one the whole catalogue already
      * filters on, and "Used" is already the answer.
      *
+     * `$brandDefaults` (Session 93) fills json-backed specs the product left
+     * empty — entered once per brand instead of 15,000 times per catalogue.
+     * Only json rows fall back: column rows are per-tyre physical facts
+     * (width, EAN, load index) that a brand cannot meaningfully default.
+     *
+     * @param  array<string, mixed>|null  $brandDefaults  the brand's `specs`
      * @return array<int, array{key: string, label_de: string, label_en: string, value: string}>
      */
-    public static function sheetFor(Product $product): array
+    public static function sheetFor(Product $product, ?array $brandDefaults = null): array
     {
         $stored = $product->specs ?? [];
+        $brand  = $brandDefaults ?? [];
         $rows   = [];
 
         foreach (self::SHEET as $spec) {
             $value = match ($spec['source']) {
                 'derived' => $product->type === 'Used' ? 'Gebraucht' : 'Neu',
                 'column'  => $product->{$spec['column']},
-                'json'    => $stored[$spec['key']] ?? null,
+                'json'    => $stored[$spec['key']] ?? $brand[$spec['key']] ?? null,
             };
 
             if ($spec['input'] === 'boolean' && $value !== null && $value !== '') {

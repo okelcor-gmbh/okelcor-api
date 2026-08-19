@@ -1,6 +1,7 @@
 # Frontend note — product optimization (the marketing brief)
 
 **Session 92 · backend and frontend both built and tested · migration #42 · 1 new admin route**
+**Session 93 addendum at the bottom — brand-level defaults, migration #43, no new routes**
 
 From the marketer's brief (`Product Optimization.txt`), three asks, all shipped:
 
@@ -128,3 +129,63 @@ re-runs are no-ops. `route:cache` needed (1 new route).
 slug generation/stability/dedup, sanitization, column-vs-json-vs-derived sheet
 assembly, A–G validation, replace semantics, settings fallback chain. Suite:
 **576 passed, 0 failed**.
+
+---
+
+# Addendum — Session 93: brand-level defaults
+
+The marketer's follow-up, and he is right: with ~15,000 products, entering the
+optimization content product by product is not a workflow. Most of it is the
+same for every tyre a brand makes, so it is now entered **once per brand**.
+
+## The resolution chain
+
+```
+product's own value  →  brand default  →  site-wide setting  →  null (hide)
+```
+
+- Resolved **at read time**. Nothing is ever copied onto product rows: a brand
+  edit takes effect on all its products instantly, there is never a stale
+  copy, and a product's own value always wins.
+- Applies to: rich description, json-backed spec defaults, shipping, returns.
+- Does **not** apply to per-tyre physical facts — width, EAN, load index,
+  EPREL. A brand does not have one width; those stay on the product (and are
+  mostly filled by the CSV import anyway).
+- Brand matching is case-insensitive on `products.brand`, same rule the brand
+  logo lookup has always used. Inactive brands lend no defaults.
+
+## What changed
+
+**Backend** — migration **#43** adds the same four content columns to
+`brands`. `PUT /admin/brands/{id}` accepts them under exactly the product
+rules: same sanitizer for the HTML, A–G validation on label classes, junk
+keys and blanks dropped. `formatBrand` returns them. **No new routes.**
+Deploy-order safe: resolution reads whole brand rows, so before the migration
+the attributes are simply absent and behaviour is unchanged.
+
+**Admin panel** — each card on **Admin → Brands** has a new content button
+(file icon) opening **/admin/brands/{id}**: the brand's rich description
+(article editor), the json-backed half of the spec sheet ("— no brand
+default —" clears a field), and shipping/returns overrides. The form warns
+that a wrong blanket value is worse than an empty field.
+
+**Public payload** — unchanged in shape. `description_html`,
+`specifications`, `shipping_info`, `returns_info` on the product are simply
+resolved through the chain now; clients cannot tell where a value came from
+and do not need to.
+
+## Suggested workflow for the marketer
+
+1. Open Admin → Brands → (brand) → content button.
+2. Write the brand description once; set spec defaults that genuinely hold
+   for the whole brand (e.g. Reifenbauart "Radial", Fahrzeugtyp).
+3. Only touch individual products for values that differ — those override.
+
+## Tests
+
+9 new in `ProductOptimizationTest` (30 in the file, suite **585, 0 failed**):
+the brand migration + idempotency, a default filling two products from one
+entry, the product's own value winning, brand description fallback, the full
+shipping chain (product → brand → setting), case-insensitive matching,
+inactive brands excluded, the admin form saving under product rules
+(sanitizer + junk-dropping), and A–G validation on brand defaults.

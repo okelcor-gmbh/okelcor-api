@@ -268,18 +268,43 @@ class ProductController extends Controller
 
             'tyre_batch'    => $this->formatTyreBatch($p),
 
-            // Product optimization (Session 92). description_html is sanitized
-            // at write time and rendered verbatim; null means "no rich version
-            // yet" and the frontend falls back to the plain description.
-            // specifications is the assembled Artikelmerkmale sheet — labels
-            // in both languages, empties skipped, order fixed by TyreSpecs.
-            // shipping/returns: per-product override, else the site-wide
-            // setting, else null (frontend hides the block).
-            'description_html' => $p->description_html,
-            'specifications'   => TyreSpecs::sheetFor($p),
-            'shipping_info'    => $p->shipping_info ?: $this->productContentSetting('product_shipping_info'),
-            'returns_info'     => $p->returns_info ?: $this->productContentSetting('product_returns_info'),
+            // Product optimization (Sessions 92–93). Everything here resolves
+            // through the same chain: the product's own value, else its
+            // brand's default, else (for shipping/returns) the site-wide
+            // setting, else null. Resolved at read time — a brand edit takes
+            // effect on all its products instantly, nothing is copied onto
+            // 15,000 rows, and a product's own value always wins.
+            'description_html' => $p->description_html ?: $this->brandContentFor($p->brand)?->description_html,
+            'specifications'   => TyreSpecs::sheetFor($p, $this->brandContentFor($p->brand)?->specs),
+            'shipping_info'    => $p->shipping_info
+                ?: ($this->brandContentFor($p->brand)?->shipping_info
+                ?: $this->productContentSetting('product_shipping_info')),
+            'returns_info'     => $p->returns_info
+                ?: ($this->brandContentFor($p->brand)?->returns_info
+                ?: $this->productContentSetting('product_returns_info')),
         ];
+    }
+
+    // Lazily loaded once per request; keyed by lowercase brand name, same as
+    // the logo cache. Whole rows, deliberately: before migration #43 the
+    // content columns are simply absent from the row and read as null, so the
+    // code is deploy-order safe without a schema check.
+    private ?array $brandContentCache = null;
+
+    private function brandContentFor(?string $brand): ?Brand
+    {
+        if ($brand === null || $brand === '') {
+            return null;
+        }
+
+        if ($this->brandContentCache === null) {
+            $this->brandContentCache = Brand::where('is_active', true)
+                ->get()
+                ->keyBy(fn ($b) => strtolower($b->name))
+                ->all();
+        }
+
+        return $this->brandContentCache[strtolower($brand)] ?? null;
     }
 
     // Resolved once per request — formatProduct() runs per row.
