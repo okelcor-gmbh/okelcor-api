@@ -7,6 +7,9 @@ use App\Http\Requests\Admin\StoreProductRequest;
 use App\Http\Requests\Admin\UpdateProductRequest;
 use App\Models\Product;
 use App\Models\ProductImage;
+use App\Services\ArticleHtmlSanitizer;
+use App\Services\ProductSlugger;
+use App\Support\TyreSpecs;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -14,6 +17,29 @@ use Illuminate\Support\Str;
 
 class AdminProductController extends Controller
 {
+    public function __construct(
+        private ProductSlugger $slugger,
+        private ArticleHtmlSanitizer $sanitizer,
+    ) {}
+
+    /**
+     * GET /api/v1/admin/products/spec-options
+     *
+     * The tyre specification sheet, served rather than hardcoded — the admin
+     * form renders whatever this returns, so adding an attribute is one entry
+     * in TyreSpecs and no frontend deploy. Same pattern as the trade-document
+     * upload-options endpoint (Session 76), for the same reason: the last
+     * hardcoded copy of a backend vocabulary drifted.
+     */
+    public function specOptions(): JsonResponse
+    {
+        return response()->json([
+            'data' => [
+                'sheet' => TyreSpecs::SHEET,
+            ],
+        ]);
+    }
+
     public function index(Request $request): JsonResponse
     {
         $query = Product::with('images');
@@ -126,6 +152,13 @@ class AdminProductController extends Controller
         $data['spec']    ??= '';
         $data['is_active'] ??= true;
         $data              = $this->reconcileStockFlag($data);
+        $data              = $this->applyOptimizationFields($data);
+
+        // Every product gets a slug at birth: typed one normalized, blank one
+        // generated from brand+name+season (the marketing brief's URL shape).
+        $data['slug'] = ! empty($data['slug'])
+            ? $this->slugger->fromInput($data['slug'])
+            : $this->slugger->generate($data['brand'], $data['name'], $data['season']);
 
         // Handle primary_image file upload if present
         if ($request->hasFile('primary_image')) {
@@ -151,6 +184,22 @@ class AdminProductController extends Controller
     {
         $product  = Product::findOrFail($id);
         $data     = $this->reconcileStockFlag($request->validated());
+        $data     = $this->applyOptimizationFields($data);
+
+        // The slug moves ONLY when the request carries one. A rename must not
+        // relocate a live URL as a side effect — that URL is in Google's index
+        // and in campaign e-mails. Blank slug on a product that never had one
+        // (pre-migration rows before the backfill) gets a generated one.
+        if (array_key_exists('slug', $data)) {
+            $data['slug'] = ! empty($data['slug'])
+                ? $this->slugger->fromInput($data['slug'], $product->id)
+                : ($product->slug ?? $this->slugger->generate(
+                    $data['brand'] ?? $product->brand,
+                    $data['name'] ?? $product->name,
+                    $data['season'] ?? $product->season,
+                    $product->id
+                ));
+        }
 
         // Handle primary_image file upload if present
         if ($request->hasFile('primary_image')) {
@@ -325,11 +374,35 @@ class AdminProductController extends Controller
         return Storage::disk('public')->putFileAs($collection, $file, $filename);
     }
 
+    /**
+     * The Session 92 content fields, shared by store and update.
+     *
+     * `description_html` gets the exact treatment article bodies get — same
+     * sanitizer, same rules, same failure mode (422, not a stored script tag).
+     * `specs`, when present, REPLACES the stored object: the admin form always
+     * sends the whole sheet, and merge semantics would make a cleared field
+     * unclearable. Unknown keys and blanks are dropped so the JSON column
+     * never accumulates junk a removed form field once wrote.
+     */
+    private function applyOptimizationFields(array $data): array
+    {
+        if (array_key_exists('description_html', $data) && $data['description_html'] !== null) {
+            $data['description_html'] = $this->sanitizer->sanitize($data['description_html']) ?: null;
+        }
+
+        if (array_key_exists('specs', $data)) {
+            $data['specs'] = TyreSpecs::cleanForStorage($data['specs']);
+        }
+
+        return $data;
+    }
+
     private function formatProduct(Product $p): array
     {
         return [
             'id'            => $p->id,
             'sku'           => $p->sku,
+            'slug'          => $p->slug,
             'brand'         => $p->brand,
             'name'          => $p->name,
             'size'          => $p->size,
@@ -340,6 +413,19 @@ class AdminProductController extends Controller
             'price_b2b'     => $p->price_b2b !== null ? (float) $p->price_b2b : null,
             'price_b2c'     => $p->price_b2c !== null ? (float) $p->price_b2c : null,
             'description'   => $p->description,
+            'description_html' => $p->description_html,
+            'specs'         => $p->specs,
+            'shipping_info' => $p->shipping_info,
+            'returns_info'  => $p->returns_info,
+            // The column-backed half of the spec sheet — the form initializes
+            // its Artikelmerkmale section from these.
+            'width'         => $p->width,
+            'height'        => $p->height,
+            'rim'           => $p->rim,
+            'load_index'    => $p->load_index,
+            'speed_rating'  => $p->speed_rating,
+            'ean'           => $p->ean,
+            'tread_depth_mm' => $p->tread_depth_mm !== null ? (float) $p->tread_depth_mm : null,
             'primary_image' => $p->primary_image ? url(Storage::url($p->primary_image)) : null,
             'images'        => $p->images->map(fn ($img) => [
                 'id'  => $img->id,

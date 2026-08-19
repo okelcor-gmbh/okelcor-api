@@ -1,12 +1,12 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-18 | Branch: `main` | Latest commit: Session 91 (**pushed, not deployed**)
+Last updated: 2026-08-19 | Branch: `main` | Latest commit: Session 92 (**pushed, not deployed**)
 
 ---
 
-## 🔧 Sessions 86–91 pushed, NOT deployed
+## 🔧 Sessions 86–92 pushed, NOT deployed
 
-**Five unapplied migrations (#37, #38, #39, #40, #41), twenty new routes.**
+**Six unapplied migrations (#37–42), twenty-one new routes.**
 
 | Session | What it is | Migration | Routes |
 |---|---|---|---|
@@ -18,6 +18,7 @@ Last updated: 2026-08-18 | Branch: `main` | Latest commit: Session 91 (**pushed,
 | **89c** | Technical work — git commits, media, eBay, account administration | none | none |
 | **90** | Correcting a payment state that says paid when it isn't — the only backwards path through the ladder | **#40** | **1 new** |
 | **91** | The approved customer who could never log in — a password reset now confirms the email, and the order manager has the controls | **#41** | **2 new** |
+| **92** | Product optimization (the marketing brief) — SEO slugs, rich descriptions, the Artikelmerkmale sheet, shipping/returns content | **#42** | **1 new** |
 
 ```bash
 cd /home/okelvaxj/domains/okelcor.com/public_html/okelcor-api
@@ -2549,6 +2550,42 @@ See `FRONTEND_NOTE_payment-state-correction.md`.
 
 ---
 
+## Product optimization — the marketing brief (Session 92)
+
+> **Deploy status:** built and tested, **not yet deployed**. Migration **#42**
+> unapplied. **1 new admin route**, so `route:cache` must be rebuilt.
+> Deploy-order safe in both directions. Frontend built in the same session.
+
+The marketer's brief (`Product Optimization.txt`): SEO URLs shaped
+`brand+productName+season`, product descriptions "rich text like the blog
+post", the Artikelmerkmale block of a German tyre listing (24 attributes — EU
+label classes, 3PMSF, EPREL …), and shipping/returns text.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `products.slug` + backfill | 🔧 | Every existing product slugged in the migration (only NULLs, re-run safe); every new one at creation **on the model**, not the endpoint — the Wix import and eBay sync create products too. `GET /products/{idOrSlug}` resolves both; canonical points at the slug so the two URLs are one page to Google. **A rename never moves the URL** — the slug changes only when edited deliberately. |
+| `description_html` | 🔧 | Same TipTap editor, same `ArticleHtmlSanitizer`, same 422-not-500 failure as article bodies. Plain `description` unchanged, required, still the meta description. |
+| `TyreSpecs` catalogue + `products.specs` JSON | 🔧 | **One list says where each attribute lives.** Half the brief's fields already existed as columns (width, rim, load index, EAN, tread depth — Sessions 14–71); storing them again in JSON would be two places for one fact. `column` rows read the column, `json` rows the new JSON, Reifenzustand is `derived` from `type`. Served by `GET /admin/products/spec-options` (upload-options pattern) so the admin form renders whatever it says — a new attribute is one backend entry, no frontend deploy. |
+| Validation with teeth | 🔧 | EU-label classes A–G only; unknown keys and blanks dropped before storage; sending `specs` replaces the object so a cleared field stays cleared. |
+| Shipping/returns, two layers | 🔧 | Site-wide defaults in `site_settings` (`product_shipping_info` seeded from the brief), per-product override columns win. **Returns seeded EMPTY deliberately**: the brief's text is copied from an eBay listing (eBay Plus, eBay return labels) and would be wrong on okelcor.com — the marketer words the site version in Settings. Until then the page keeps its existing translated copy. |
+| Admin fields for the column-backed sheet | 🔧 | `width`/`height`/`rim`/`load_index`/`speed_rating`/`ean` were CSV-import-only; the FormRequests now accept them, as strings — "10.5" rims and "91/89" load indexes are real. |
+| Frontend | 🔧 | Product form: SEO section, rich editor, sheet rendered from spec-options, shipping/returns overrides. Shop: `/shop/[id]` takes both handles, all links via one `productPath()` helper (cards, specials, compare, related, navbar search — whose backend href now carries the slug too), accordion gains Beschreibung/Artikelmerkmale/Versand sections that render only when content exists. |
+
+### Tests
+
+**21 new** (`ProductOptimizationTest`, suite **576, 0 failed**, up from 555):
+the migration against real SQL and its idempotency, the backfill's uniqueness
+and its refusal to rename, slug at birth / slug stability under rename /
+dedup of a hand-typed collision, resolution by both handles, sanitization,
+the plain description untouched, column-vs-json-vs-derived assembly, A–G
+refusal, junk-key dropping, replace semantics, Ja/Nein rendering, empties
+skipped, the served catalogue, the permission gate, and the
+override→setting→null fallback chain.
+
+See `FRONTEND_NOTE_product-optimization.md`.
+
+---
+
 ## The approved customer who could never log in (Session 91)
 
 > **Deploy status:** built and tested, **not yet deployed**. Migration **#41**
@@ -2988,6 +3025,8 @@ still has `QUEUE_CONNECTION=sync`, so `SendBulkEmailCampaignJob` would run
 inline during the HTTP request. Set `QUEUE_CONNECTION=database` and run a
 queue worker before the order manager sends to the full contact list — see
 Session 50 note above.
+
+42. `2026_08_18_000003_add_seo_and_specs_to_products_table` (Session 92 — adds `slug` (unique, backfilled for every existing product inside the migration, only-NULLs so re-runs cannot rename a live URL), `description_html`, `specs` JSON, `shipping_info`, `returns_info`; seeds `product_shipping_info`/`product_returns_info` site settings via insertOrIgnore. All guarded and additive; nothing existing read, renamed or rewritten. **Deploy-order safe in both directions**: the model checks for the slug column before writing it (cached per request — the Wix import creates thousands of rows), and the public API resolves numeric ids regardless. Proved by `ProductOptimizationTest::test_the_migration_applies_against_real_sql_and_is_idempotent`, which runs the migration file itself and re-runs it.)
 
 41. `2026_08_18_000002_add_email_verification_types_to_security_events_enum` (Session 91 — adds `email_verified`, `email_verification_sent`, `email_verified_by_admin`, and rebuilds the ENUM from the new `SecurityEvent::TYPES` constant instead of a hand-copied list. Closes the Known Gap left open by Session 83. **Not deploy-order safe, and this one bites harder than #40**: `SecurityEventService::log()` does not swallow its exceptions, so on strict MySQL a type the column rejects does not lose an audit row quietly — it throws and fails the customer action that wrote it. Deploying Session 91's code without this migration would break completing a password reset for every customer. Apply it before or with the code. `down()` throws if any row uses an added value. MySQL-only.)
 

@@ -6,6 +6,7 @@ use App\Models\Brand;
 use App\Models\Product;
 use App\Models\SiteSetting;
 use App\Services\SearchEventRecorder;
+use App\Support\TyreSpecs;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -190,20 +191,34 @@ class ProductController extends Controller
             ->withHeaders(['Cache-Control' => 'no-store, no-cache, must-revalidate']);
     }
 
-    public function show(int $id): JsonResponse
+    /**
+     * One product, by slug or by numeric id.
+     *
+     * The marketing brief's URL shape is `/shop/brand-name-season`, so the
+     * slug is the primary handle. The numeric id keeps resolving forever:
+     * every URL already indexed, bookmarked or sitting in a sent campaign is
+     * an id URL, and an SEO change that 404s the existing index would cost
+     * exactly the traffic it is meant to win.
+     */
+    public function show(string $idOrSlug): JsonResponse
     {
-        $product = Product::with('images')->where('is_active', true)->findOrFail($id);
+        $query = Product::with('images')->where('is_active', true);
+
+        $product = ctype_digit($idOrSlug)
+            ? $query->findOrFail((int) $idOrSlug)
+            : $query->where('slug', $idOrSlug)->firstOrFail();
 
         $related = Product::where('type', $product->type)
             ->where('id', '!=', $product->id)
             ->where('is_active', true)
             ->inRandomOrder()
             ->limit(4)
-            ->get(['id', 'brand', 'name', 'size', 'price', 'price_b2b', 'price_b2c', 'primary_image']);
+            ->get(['id', 'slug', 'brand', 'name', 'size', 'price', 'price_b2b', 'price_b2c', 'primary_image']);
 
         $data = $this->formatProduct($product);
         $data['related'] = $related->map(fn ($r) => [
             'id'            => $r->id,
+            'slug'          => $r->slug,
             'brand'         => $r->brand,
             'name'          => $r->name,
             'size'          => $r->size,
@@ -222,6 +237,7 @@ class ProductController extends Controller
         return [
             'id'            => $p->id,
             'sku'           => $p->sku,
+            'slug'          => $p->slug,
             'brand'         => $p->brand,
             'name'          => $p->name,
             'size'          => $p->size,
@@ -251,7 +267,35 @@ class ProductController extends Controller
             'estimated_dispatch_days' => $p->in_stock ? $this->estimatedDispatchDays() : null,
 
             'tyre_batch'    => $this->formatTyreBatch($p),
+
+            // Product optimization (Session 92). description_html is sanitized
+            // at write time and rendered verbatim; null means "no rich version
+            // yet" and the frontend falls back to the plain description.
+            // specifications is the assembled Artikelmerkmale sheet — labels
+            // in both languages, empties skipped, order fixed by TyreSpecs.
+            // shipping/returns: per-product override, else the site-wide
+            // setting, else null (frontend hides the block).
+            'description_html' => $p->description_html,
+            'specifications'   => TyreSpecs::sheetFor($p),
+            'shipping_info'    => $p->shipping_info ?: $this->productContentSetting('product_shipping_info'),
+            'returns_info'     => $p->returns_info ?: $this->productContentSetting('product_returns_info'),
         ];
+    }
+
+    // Resolved once per request — formatProduct() runs per row.
+    private ?array $contentSettingsCache = null;
+
+    private function productContentSetting(string $key): ?string
+    {
+        if ($this->contentSettingsCache === null) {
+            $this->contentSettingsCache = SiteSetting::whereIn('key', ['product_shipping_info', 'product_returns_info'])
+                ->pluck('value', 'key')
+                ->all();
+        }
+
+        $value = trim((string) ($this->contentSettingsCache[$key] ?? ''));
+
+        return $value !== '' ? $value : null;
     }
 
     /**

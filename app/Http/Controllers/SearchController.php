@@ -29,7 +29,7 @@ class SearchController extends Controller
                       ->orWhere('sku', 'like', "%{$q}%");
             })
             ->limit(6)
-            ->get(['id', 'brand', 'name', 'size', 'type', 'price', 'primary_image']);
+            ->get(['id', 'slug', 'brand', 'name', 'size', 'type', 'price', 'primary_image']);
 
         $articles = Article::with(['translations' => fn ($tq) => $tq->where('locale', $locale)])
             ->where('is_published', true)
@@ -46,13 +46,16 @@ class SearchController extends Controller
 
         $productResults = $products->map(fn ($p) => [
             'id'            => $p->id,
+            'slug'          => $p->slug,
             'brand'         => $p->brand,
             'name'          => $p->name,
             'size'          => $p->size,
             'type'          => $p->type,
             'price'         => (float) $p->price,
             'primary_image' => $p->primary_image ? url('storage/' . $p->primary_image) : null,
-            'href'          => "/shop/{$p->id}",
+            // Slug URL when the product has one (Session 92 SEO shape); the id
+            // URL for legacy rows. Both resolve on GET /products/{idOrSlug}.
+            'href'          => '/shop/' . ($p->slug ?: $p->id),
         ]);
 
         $articleResults = $articles->map(function ($a) use ($locale) {

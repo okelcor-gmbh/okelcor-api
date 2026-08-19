@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Admin;
 
+use App\Support\TyreSpecs;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -42,6 +43,26 @@ class UpdateProductRequest extends FormRequest
             'tread_depth_mm'    => ['nullable', 'numeric', 'min:0', 'max:99.9'],
             'dot_code'          => ['nullable', 'string', 'max:20'],
             'inspection_date'   => ['nullable', 'date'],
-        ];
+
+            // The tyre-size / index columns the spec sheet reads (Session 92).
+            // Until now only the CSV import could write these; the admin sheet
+            // edits them directly. Strings, not numbers — they are printed, not
+            // computed, and "10.5" rims and "91/89" load indexes are real.
+            'width'        => ['sometimes', 'nullable', 'string', 'max:10'],
+            'height'       => ['sometimes', 'nullable', 'string', 'max:10'],
+            'rim'          => ['sometimes', 'nullable', 'string', 'max:10'],
+            'load_index'   => ['sometimes', 'nullable', 'string', 'max:10'],
+            'speed_rating' => ['sometimes', 'nullable', 'string', 'max:5'],
+            'ean'          => ['sometimes', 'nullable', 'string', 'max:20'],
+
+            // Product optimization (Session 92). `sometimes` on slug: absent
+            // means "leave the URL alone" — a product rename must never move a
+            // live URL as a side effect. description_html is sanitized in the
+            // controller, same treatment as article bodies.
+            'slug'             => ['sometimes', 'nullable', 'string', 'max:255'],
+            'description_html' => ['sometimes', 'nullable', 'string', 'max:200000'],
+            'shipping_info'    => ['sometimes', 'nullable', 'string', 'max:2000'],
+            'returns_info'     => ['sometimes', 'nullable', 'string', 'max:2000'],
+        ] + TyreSpecs::validationRules();
     }
 }

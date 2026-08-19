@@ -8,8 +8,52 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class Product extends Model
 {
     use SoftDeletes;
+
+    /**
+     * Every product gets a slug at creation, wherever it is created from —
+     * the admin form is only one of the doors (the Wix import, the eBay sync
+     * and the seeder all call Product::create directly). A hook on the model
+     * is the one place that covers all of them; an endpoint-level generator
+     * would leave every other path minting products with no URL.
+     *
+     * Creation only. Renames never touch an existing slug — that URL is in
+     * Google's index and in sent campaigns; moving it is a deliberate act
+     * through the admin slug field, not a side effect.
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (Product $product) {
+            if (empty($product->slug) && static::slugColumnExists()) {
+                $product->slug = app(\App\Services\ProductSlugger::class)->generate(
+                    (string) $product->brand,
+                    (string) $product->name,
+                    (string) $product->season,
+                );
+            }
+        });
+    }
+
+    /**
+     * Deploy-order safety: with this code live before migration #42 runs, a
+     * product created by the imports or the webhook path must not try to
+     * INSERT a column that is not there yet. Cached per request — the Wix
+     * import creates thousands of rows and must not pay a SHOW COLUMNS each.
+     */
+    private static ?bool $hasSlugColumn = null;
+
+    private static function slugColumnExists(): bool
+    {
+        return static::$hasSlugColumn ??= \Illuminate\Support\Facades\Schema::hasColumn('products', 'slug');
+    }
+
+    /** @internal test harnesses rebuild the schema between tests. */
+    public static function flushSlugColumnCache(): void
+    {
+        static::$hasSlugColumn = null;
+    }
     protected $fillable = [
         'sku',
+        'slug',
         'ean',
         'brand',
         'name',
@@ -21,6 +65,10 @@ class Product extends Model
         'price_b2b',
         'price_b2c',
         'description',
+        'description_html',
+        'specs',
+        'shipping_info',
+        'returns_info',
         'primary_image',
         'is_active',
         'sort_order',
@@ -58,6 +106,7 @@ class Product extends Model
         'tread_depth_mm'      => 'decimal:1',
         'inspection_date'     => 'date',
         'inspection_photos'   => 'array',
+        'specs'               => 'array',
     ];
 
     /**

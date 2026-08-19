@@ -1,0 +1,43 @@
+Product Optimization:
+
+URL Structure: okelcor.com/shop/brand+productName+season
+
+Product Description: Make it rich text like how you did with the blog post.
+
+Add These Specification for tires: 
+
+Artikelmerkmale
+Reifenzustand: Options(Neu, Gebraucht)
+Schneeflocken-Symbol: Options(Nein, Ja)
+Reifenbreite: (manual entry)
+Zollgröße: (manual entry)
+Reifenquerschnitt: (manual entry)
+Nasshaftungseigenschaften: Options(A, B, C, D, E, F, G)
+Reifenkraftstoffeffizienz: Options(A, B, C, D, E, F, G)
+Externes Rollgeräusch (dB; Klasse): Options(A, B, C, D, E, F, G)
+Eisgriffigkeit: Options(Nein, Ja)
+Fahrzeugtyp: (manual entry)
+Produktlinie: (manual entry)
+Profiltiefe: (manual entry)
+Lastbereich: (manual entry)
+Modell: (manual entry)
+Gesamtdurchmesser: (manual entry)
+Zusätzliche Kennzeichnungen: (manual entry)
+Reifenbauart: (manual entry)
+Reifenspezifikation: (manual entry)
+Geschwindigkeitsindex: (manual entry)
+Tragfähigkeitsindex: (manual entry)
+EAN/GTIN: (manual entry)
+MPN/Herstellernummer: (manual entry)
+Hersteller: (manual entry)
+EPREL-Registrierungsnummer: (manual entry)
+
+
+Add these for the delivery:
+
+Versand: Kostenlos Deutsche Post Brief. Weitere Detailsfür Versand
+Standort: Munich, Deutschland
+
+Rücknahme:
+30 Tage Rückgabe. Käufer zahlt Rückversand. Wenn Sie ein eBay-Versandetikett verwenden, werden die Kosten dafür von Ihrer Rückerstattung abgezogen. Für eBay Plus-Mitglieder ist der Rückversand im Inland kostenlos. Mehr erfahren. Informationen zum Widerrufsrecht- Informationen zu Rückgaben
+
