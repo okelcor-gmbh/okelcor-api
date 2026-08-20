@@ -38,13 +38,34 @@ git fetch origin && git reset --hard origin/main
 /opt/alt/php83/usr/bin/php artisan view:clear && /opt/alt/php83/usr/bin/php artisan cache:clear
 ```
 
+Two things to know before running it: the `--pretend` must list **seven**
+migrations (`2026_08_14_000001` → `2026_08_19_000001`) — fewer means the fetch
+did not take; and **#42 runs a minute or two longer than the rest** because it
+slugs all ~15,000 products inside the migration. Let it finish.
+
 **Verify with a SHA and an assertion against the running code**, never with
 `migrate:status` alone — see the Sessions 78–80 note for why:
 
 ```bash
-git rev-parse --short HEAD
-/opt/alt/php83/usr/bin/php artisan tinker --execute="echo Schema::hasColumn('finance_invoices','source_type') && Schema::hasTable('staff_activities') && in_array('payment_state_corrected', App\Models\OrderLog::ACTIONS) && in_array('email_verified', App\Models\SecurityEvent::TYPES) ? 'all live' : 'NOT LIVE';"
+git rev-parse --short HEAD    # expect 28fdda5
+/opt/alt/php83/usr/bin/php artisan tinker --execute="echo Schema::hasColumn('finance_invoices','source_type') && Schema::hasTable('staff_activities') && in_array('payment_state_corrected', App\Models\OrderLog::ACTIONS) && in_array('email_verified', App\Models\SecurityEvent::TYPES) && Schema::hasColumn('products','slug') && Schema::hasColumn('brands','specs') && in_array('marketing', App\Support\AdminPermissions::ROLES) ? 'all live' : 'NOT LIVE';"
+
+# Session 92 spot-check — the backfill must have slugged every product.
+/opt/alt/php83/usr/bin/php artisan tinker --execute="echo App\Models\Product::withTrashed()->whereNull('slug')->count() . ' products without a slug (expect 0)';"
 ```
+
+**Human steps once `all live` prints — none of these is a command:**
+
+1. **Vercel** — confirm the frontend deployed green at `f40de68`. Session 95's
+   admin-search fix is half backend, half frontend; the panel is only fixed
+   when both halves are live.
+2. **The marketer's role** — Admin → Users → change him `editor` →
+   `marketing` (Session 94). He logs out and back in, and Products, Brands,
+   Marketing and Settings appear in his menu.
+3. **Tell the order manager** the board's `in_transit` figure jumps —
+   Session 87, the change she asked for.
+4. **The marketer still owes the returns text** — Settings →
+   `product_returns_info` (see Session 92's note on why it was seeded empty).
 
 **Then unstick the customer who cannot log in (Session 91).** He is approved and
 active; his email address was never confirmed, and until this deploy nothing in
