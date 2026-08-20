@@ -21,7 +21,7 @@ Last updated: 2026-08-20 | Branch: `main` | Latest commit: Session 95 (**pushed,
 | **92** | Product optimization (the marketing brief) — SEO slugs, rich descriptions, the Artikelmerkmale sheet, shipping/returns content | **#42** | **1 new** |
 | **93** | Brand-level content defaults — entered once per brand, inherited by all ~15,000 products at read time | **#43** | none |
 | **94** | The `marketing` role — content + catalogue + campaigns, nothing operational | none | none |
-| **95** | Product search finds what the page shows — tokenized, covers specs/brand defaults/description; one definition for shop, navbar and admin | none | none |
+| **95** | Product search actually works — the panel sent `q`, the API read `search`, pagination was never forwarded; plus tokenized search over specs/brand defaults/description | none | none |
 
 ```bash
 cd /home/okelvaxj/domains/okelcor.com/public_html/okelcor-api
@@ -2595,12 +2595,20 @@ See `FRONTEND_NOTE_product-optimization.md`.
 > no new routes, no frontend change** — all three UIs already send their
 > terms; the fix is entirely in what the server matches.
 
-Reported by the marketing manager: searching "SUV" found nothing. He was right
-in a bigger way than the report says — the shop, the navbar and the admin
-panel each carried their own copy of the search, all three matched only
-brand/name/size/sku, and none knew about anything Sessions 92–93 built. "SUV"
-lives in the description, in the product's Fahrzeugtyp spec, or in the brand's
-default spec; none were searched anywhere.
+Reported by the marketing manager: cannot search products properly — e.g. by
+SKU. The root cause was not the field list at all: **the admin panel has sent
+its search as `q` since the page was built, and the admin endpoint only ever
+read `search`** — the box silently filtered nothing. Worse, the panel wrote
+`?page=` into the URL and read it back into the "Page 2 of 75" label but never
+forwarded it to the API, and asked for `per_page=200` against a backend cap of
+100. Net effect: **only the ~100 newest of 15,000 products were reachable in
+the panel at all**, by search or by paging. Fixed all three: the endpoint
+accepts `q` or `search` like the public one, the panel forwards `page`, and
+`per_page` matches the cap.
+
+On the way (first read as "SUV"), the search itself was also rebuilt — all
+three copies (shop, navbar, admin) matched only brand/name/size/sku and knew
+nothing about what Sessions 92–93 added:
 
 | Feature | Status | Notes |
 |---------|--------|-------|
@@ -2613,10 +2621,12 @@ default spec; none were searched anywhere.
 
 ### Tests
 
-**8 new** (39 in `ProductOptimizationTest`, suite **598, 0 failed**, up from
+**10 new** (41 in `ProductOptimizationTest`, suite **600, 0 failed**, up from
 590): found by own vehicle-type spec, found by brand-inherited spec, found by
 description, multi-word AND semantics across different fields, season + EAN,
-the admin panel running the same search, inactive brands excluded, and
+the admin panel running the same search, **the `q` parameter the panel
+actually sends finding a SKU**, **pagination returning different rows per
+page and covering the whole catalogue**, inactive brands excluded, and
 wildcard literals.
 
 ---

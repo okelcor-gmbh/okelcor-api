@@ -76,7 +76,13 @@ class AdminProductController extends Controller
         }
         // Same search the shop and navbar run — one definition, so what the
         // marketer finds in the panel is what a customer finds on the site.
-        ProductSearch::apply($query, $request->input('search'));
+        //
+        // `q` OR `search`, same as the public endpoint: the admin panel has
+        // sent `q` since it was built while this endpoint only ever read
+        // `search`, so the panel's search box silently filtered nothing —
+        // typing a SKU worked only if the product happened to be on the first
+        // page. That mismatch is the actual "cannot search products" report.
+        ProductSearch::apply($query, $request->filled('q') ? $request->q : $request->input('search'));
 
         $perPage   = min((int) $request->input('per_page', 24), 100);
         $paginated = $query->orderByDesc('created_at')->paginate($perPage);

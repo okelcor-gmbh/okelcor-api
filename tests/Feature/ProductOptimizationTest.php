@@ -764,6 +764,53 @@ class ProductOptimizationTest extends TestCase
         $this->assertContains($suv->id, $found);
     }
 
+    public function test_the_admin_panel_search_works_under_the_parameter_the_panel_actually_sends(): void
+    {
+        // The actual report ("cannot search products, e.g. by SKU"): the panel
+        // has sent `q` since it was built and this endpoint only read
+        // `search`, so the box silently filtered nothing — a SKU was findable
+        // only if the product sat on the first page. The endpoint now accepts
+        // both, like the public one always has.
+        $target = $this->product(['sku' => 'OKL-FIND-ME-4711']);
+        $other  = $this->product();
+
+        $found = collect(
+            $this->actingAs($this->admin(), 'sanctum')
+                ->getJson('/api/v1/admin/products?q=OKL-FIND-ME-4711')
+                ->assertOk()
+                ->json('data')
+        )->pluck('id');
+
+        $this->assertContains($target->id, $found);
+        $this->assertNotContains($other->id, $found);
+    }
+
+    public function test_the_admin_product_list_actually_paginates(): void
+    {
+        // The other half of "cannot find products": the panel wrote ?page=
+        // into the URL and read it back into the label, but never forwarded it
+        // to the API — every "page" of 15,000 products showed the same first
+        // rows. The backend side (paginate() reading `page`) asserted here;
+        // the forwarding is fixed in the panel.
+        $a = $this->product();
+        $b = $this->product();
+        $c = $this->product();
+
+        $pageOne = collect($this->actingAs($this->admin(), 'sanctum')
+            ->getJson('/api/v1/admin/products?per_page=2&page=1')->json('data'))->pluck('id');
+        $pageTwo = collect($this->actingAs($this->admin(), 'sanctum')
+            ->getJson('/api/v1/admin/products?per_page=2&page=2')->json('data'))->pluck('id');
+
+        $this->assertCount(2, $pageOne);
+        $this->assertCount(1, $pageTwo);
+        $this->assertEmpty($pageOne->intersect($pageTwo), 'page 2 must not repeat page 1');
+        $this->assertEqualsCanonicalizing(
+            [$a->id, $b->id, $c->id],
+            $pageOne->merge($pageTwo)->all(),
+            'the two pages together must cover the whole catalogue'
+        );
+    }
+
     public function test_an_inactive_brands_specs_do_not_make_its_products_searchable(): void
     {
         // Same rule as resolution: an inactive brand lends nothing, so search
