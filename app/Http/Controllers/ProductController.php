@@ -6,6 +6,7 @@ use App\Models\Brand;
 use App\Models\Product;
 use App\Models\SiteSetting;
 use App\Services\SearchEventRecorder;
+use App\Support\ProductSearch;
 use App\Support\TyreSpecs;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -71,15 +72,11 @@ class ProductController extends Controller
         if ($request->filled('price_max')) {
             $query->where('price', '<=', (float) $request->price_max);
         }
+        // Tokenized, and covers everything the product page displays —
+        // including specs inherited from the brand. See ProductSearch for why
+        // "SUV" has to find a tyre whose vehicle type lives on its brand row.
         $searchTerm = $request->filled('q') ? $request->q : $request->input('search');
-        if ($searchTerm) {
-            $query->where(function ($q) use ($searchTerm) {
-                $q->where('brand', 'like', "%{$searchTerm}%")
-                  ->orWhere('name', 'like', "%{$searchTerm}%")
-                  ->orWhere('size', 'like', "%{$searchTerm}%")
-                  ->orWhere('sku', 'like', "%{$searchTerm}%");
-            });
-        }
+        ProductSearch::apply($query, $searchTerm);
 
         // Filters are derived from the current (pre-pagination) result set
         $filtersQuery = clone $query;

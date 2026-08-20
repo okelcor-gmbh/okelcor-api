@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Article;
 use App\Models\Product;
+use App\Support\ProductSearch;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -21,13 +22,7 @@ class SearchController extends Controller
             ? $request->query('locale')
             : 'en';
 
-        $products = Product::where('is_active', true)
-            ->where(function ($query) use ($q) {
-                $query->where('brand', 'like', "%{$q}%")
-                      ->orWhere('name', 'like', "%{$q}%")
-                      ->orWhere('size', 'like', "%{$q}%")
-                      ->orWhere('sku', 'like', "%{$q}%");
-            })
+        $products = ProductSearch::apply(Product::where('is_active', true), $q)
             ->limit(6)
             ->get(['id', 'slug', 'brand', 'name', 'size', 'type', 'price', 'primary_image']);
 

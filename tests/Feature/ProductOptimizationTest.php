@@ -670,4 +670,116 @@ class ProductOptimizationTest extends TestCase
             ->assertStatus(422)
             ->assertJsonValidationErrors('specs.nasshaftungseigenschaften');
     }
+
+    // ── 7. search finds what the page shows (Session 95) ──────────────────
+    //
+    // Reported by the marketing manager: searching "SUV" found nothing. All
+    // three copies of the search (shop, navbar, admin) matched only
+    // brand/name/size/sku — nothing the last three sessions added, and not
+    // even the description. One definition now, ProductSearch, used by all
+    // three: every word must match somewhere, each word may match anywhere a
+    // person can see.
+
+    /** ids returned by the public shop search for a term. */
+    private function shopSearch(string $term): array
+    {
+        return collect($this->getJson('/api/v1/products?search=' . urlencode($term))->json('data'))
+            ->pluck('id')->all();
+    }
+
+    public function test_search_finds_a_product_by_its_vehicle_type_spec(): void
+    {
+        $suv   = $this->product(['specs' => ['fahrzeugtyp' => 'SUV / 4x4']]);
+        $other = $this->product();
+
+        $found = $this->shopSearch('SUV');
+
+        $this->assertContains($suv->id, $found);
+        $this->assertNotContains($other->id, $found);
+    }
+
+    public function test_search_finds_a_product_whose_vehicle_type_comes_from_its_brand(): void
+    {
+        // Session 93: the spec is inherited at read time, so the product PAGE
+        // says SUV while the product ROW says nothing. Search has to agree
+        // with the page, not the row.
+        $this->brand(['specs' => ['fahrzeugtyp' => 'SUV']]);
+
+        $inherited = $this->product();
+        $other     = $this->product(['brand' => 'Michelin']);
+
+        $found = $this->shopSearch('suv');
+
+        $this->assertContains($inherited->id, $found);
+        $this->assertNotContains($other->id, $found);
+    }
+
+    public function test_search_finds_a_word_that_only_appears_in_the_description(): void
+    {
+        $match = $this->product(['description' => 'Ideal for SUV and light truck use.']);
+
+        $this->assertContains($match->id, $this->shopSearch('suv'));
+    }
+
+    public function test_every_word_must_match_but_each_may_match_a_different_field(): void
+    {
+        $target = $this->product(['brand' => 'Continental', 'specs' => ['fahrzeugtyp' => 'SUV']]);
+        $sameBrand = $this->product(['brand' => 'Continental', 'name' => 'WinterContact']);
+        $sameType  = $this->product(['brand' => 'Michelin', 'specs' => ['fahrzeugtyp' => 'SUV']]);
+
+        // One word from the brand, one from the spec sheet — only the product
+        // matching BOTH comes back. This is the "continental suv" a person
+        // actually types.
+        $found = $this->shopSearch('continental suv');
+
+        $this->assertContains($target->id, $found);
+        $this->assertNotContains($sameBrand->id, $found);
+        $this->assertNotContains($sameType->id, $found);
+    }
+
+    public function test_search_matches_season_and_ean(): void
+    {
+        $winter = $this->product(['season' => 'Winter', 'ean' => '4019238004557']);
+        $summer = $this->product(); // Summer
+
+        $this->assertContains($winter->id, $this->shopSearch('winter'));
+        $this->assertNotContains($summer->id, $this->shopSearch('winter'));
+        $this->assertContains($winter->id, $this->shopSearch('4019238004557'));
+    }
+
+    public function test_the_admin_panel_search_is_the_same_search(): void
+    {
+        // The marketer manages listings from the panel — finding a product on
+        // the site but not in the panel (or the reverse) is how "search is
+        // broken" reports happen twice.
+        $suv = $this->product(['specs' => ['fahrzeugtyp' => 'SUV']]);
+
+        $found = collect(
+            $this->actingAs($this->admin(), 'sanctum')
+                ->getJson('/api/v1/admin/products?search=suv')
+                ->assertOk()
+                ->json('data')
+        )->pluck('id');
+
+        $this->assertContains($suv->id, $found);
+    }
+
+    public function test_an_inactive_brands_specs_do_not_make_its_products_searchable(): void
+    {
+        // Same rule as resolution: an inactive brand lends nothing, so search
+        // and the product page keep agreeing.
+        $this->brand(['is_active' => false, 'specs' => ['fahrzeugtyp' => 'SUV']]);
+
+        $product = $this->product();
+
+        $this->assertNotContains($product->id, $this->shopSearch('suv'));
+    }
+
+    public function test_like_wildcards_in_a_search_term_are_literal(): void
+    {
+        $this->product(['name' => 'EcoContact 6']);
+
+        // "%" must not become match-everything.
+        $this->assertSame([], $this->shopSearch('%'));
+    }
 }

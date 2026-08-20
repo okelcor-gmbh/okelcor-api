@@ -1,10 +1,10 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-19 | Branch: `main` | Latest commit: Session 94 (**pushed, not deployed**)
+Last updated: 2026-08-20 | Branch: `main` | Latest commit: Session 95 (**pushed, not deployed**)
 
 ---
 
-## 🔧 Sessions 86–94 pushed, NOT deployed
+## 🔧 Sessions 86–95 pushed, NOT deployed
 
 **Seven unapplied migrations (#37–43), twenty-one new routes.**
 
@@ -21,6 +21,7 @@ Last updated: 2026-08-19 | Branch: `main` | Latest commit: Session 94 (**pushed,
 | **92** | Product optimization (the marketing brief) — SEO slugs, rich descriptions, the Artikelmerkmale sheet, shipping/returns content | **#42** | **1 new** |
 | **93** | Brand-level content defaults — entered once per brand, inherited by all ~15,000 products at read time | **#43** | none |
 | **94** | The `marketing` role — content + catalogue + campaigns, nothing operational | none | none |
+| **95** | Product search finds what the page shows — tokenized, covers specs/brand defaults/description; one definition for shop, navbar and admin | none | none |
 
 ```bash
 cd /home/okelvaxj/domains/okelcor.com/public_html/okelcor-api
@@ -2585,6 +2586,38 @@ skipped, the served catalogue, the permission gate, and the
 override→setting→null fallback chain.
 
 See `FRONTEND_NOTE_product-optimization.md`.
+
+---
+
+## Search finds what the page shows (Session 95)
+
+> **Deploy status:** built and tested, **not yet deployed**. **No migration,
+> no new routes, no frontend change** — all three UIs already send their
+> terms; the fix is entirely in what the server matches.
+
+Reported by the marketing manager: searching "SUV" found nothing. He was right
+in a bigger way than the report says — the shop, the navbar and the admin
+panel each carried their own copy of the search, all three matched only
+brand/name/size/sku, and none knew about anything Sessions 92–93 built. "SUV"
+lives in the description, in the product's Fahrzeugtyp spec, or in the brand's
+default spec; none were searched anywhere.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `ProductSearch` — one definition, three callers | 🔧 | Shop, navbar and admin all run the same search, so what the marketer finds in the panel is what a customer finds on the site. Three hand-rolled copies deleted. |
+| Every word must match somewhere; each may match anywhere | 🔧 | "continental suv 205" narrows the way a person expects instead of being one literal string nothing contains. Capped at 6 tokens. |
+| Fields = what the page displays | 🔧 | brand, name, size, spec, SKU, EAN, slug, season, type, description, the product's spec JSON — and the **brand's default specs**, because a Continental whose Fahrzeugtyp comes from the brand default *displays* SUV, and search must agree with the page, not the row. Brand descriptions deliberately excluded: every word of a brand story matching every product of the brand is noise, not recall. |
+| Inactive brands lend nothing | 🔧 | Same rule as resolution, so search and page cannot disagree. |
+| LIKE wildcards escaped | 🔧 | Searching "%" is a literal, not match-everything. |
+| Deploy-order safe | 🔧 | The Session 92/93 clauses are guarded on their columns existing (cached per request), so a search in the window between code deploy and migration degrades to the old field list instead of erroring. |
+
+### Tests
+
+**8 new** (39 in `ProductOptimizationTest`, suite **598, 0 failed**, up from
+590): found by own vehicle-type spec, found by brand-inherited spec, found by
+description, multi-word AND semantics across different fields, season + EAN,
+the admin panel running the same search, inactive brands excluded, and
+wildcard literals.
 
 ---
 

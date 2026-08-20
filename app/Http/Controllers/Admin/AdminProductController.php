@@ -9,6 +9,7 @@ use App\Models\Product;
 use App\Models\ProductImage;
 use App\Services\ArticleHtmlSanitizer;
 use App\Services\ProductSlugger;
+use App\Support\ProductSearch;
 use App\Support\TyreSpecs;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -73,14 +74,9 @@ class AdminProductController extends Controller
                 default => null,
             };
         }
-        if ($request->filled('search')) {
-            $s = $request->search;
-            $query->where(function ($q) use ($s) {
-                $q->where('brand', 'like', "%{$s}%")
-                  ->orWhere('name', 'like', "%{$s}%")
-                  ->orWhere('sku', 'like', "%{$s}%");
-            });
-        }
+        // Same search the shop and navbar run — one definition, so what the
+        // marketer finds in the panel is what a customer finds on the site.
+        ProductSearch::apply($query, $request->input('search'));
 
         $perPage   = min((int) $request->input('per_page', 24), 100);
         $paginated = $query->orderByDesc('created_at')->paginate($perPage);
