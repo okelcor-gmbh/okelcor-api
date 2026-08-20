@@ -389,7 +389,13 @@ class AdminProductController extends Controller
     private function applyOptimizationFields(array $data): array
     {
         if (array_key_exists('description_html', $data) && $data['description_html'] !== null) {
-            $data['description_html'] = $this->sanitizer->sanitize($data['description_html']) ?: null;
+            // Same failure contract as article bodies: a purifier failure is a
+            // 422 the form can show, never a 500 that loses the whole save.
+            try {
+                $data['description_html'] = $this->sanitizer->sanitize($data['description_html']) ?: null;
+            } catch (\RuntimeException) {
+                abort(422, 'The rich description could not be processed. Simplify its formatting and try again.');
+            }
         }
 
         if (array_key_exists('specs', $data)) {

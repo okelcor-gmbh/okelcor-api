@@ -62,7 +62,12 @@ class AdminBrandController extends Controller
         ] + TyreSpecs::validationRules());
 
         if (array_key_exists('description_html', $data) && $data['description_html'] !== null) {
-            $data['description_html'] = $this->sanitizer->sanitize($data['description_html']) ?: null;
+            // Same failure contract as article bodies: 422, never a 500.
+            try {
+                $data['description_html'] = $this->sanitizer->sanitize($data['description_html']) ?: null;
+            } catch (\RuntimeException) {
+                abort(422, 'The brand description could not be processed. Simplify its formatting and try again.');
+            }
         }
 
         if (array_key_exists('specs', $data)) {
