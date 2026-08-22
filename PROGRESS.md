@@ -34,127 +34,73 @@ confirmed run — they remain in the Outstanding table below.
 | **95** | Product search actually works — the panel sent `q`, the API read `search`, pagination was never forwarded; plus tokenized search over specs/brand defaults/description | none | none |
 | **96** | The primary-image route the product form has always called and the backend never had | none | **1 new** |
 
+**Session 96 deploy — code-only, no migrations:**
+
 ```bash
 cd /home/okelvaxj/domains/okelcor.com/public_html/okelcor-api
 pwd                                     # okelvaxj, not u978121777
 git fetch origin && git reset --hard origin/main
-/opt/alt/php83/usr/bin/php /opt/alt/php83/usr/bin/composer.phar install --no-dev
-
-/opt/alt/php83/usr/bin/php artisan backup:okelcor
-/opt/alt/php83/usr/bin/php artisan migrate --pretend    # read before the next line
-/opt/alt/php83/usr/bin/php artisan migrate --force
+git rev-parse --short HEAD              # expect b039ffe or later
 
 /opt/alt/php83/usr/bin/php artisan config:clear && /opt/alt/php83/usr/bin/php artisan config:cache
 /opt/alt/php83/usr/bin/php artisan route:cache
-/opt/alt/php83/usr/bin/php artisan view:clear && /opt/alt/php83/usr/bin/php artisan cache:clear
+/opt/alt/php83/usr/bin/php artisan cache:clear
 ```
 
-Two things to know before running it: the `--pretend` must list **seven**
-migrations (`2026_08_14_000001` → `2026_08_19_000001`) — fewer means the fetch
-did not take; and **#42 runs a minute or two longer than the rest** because it
-slugs all ~15,000 products inside the migration. Let it finish.
-
-**Verify with a SHA and an assertion against the running code**, never with
-`migrate:status` alone — see the Sessions 78–80 note for why:
+**`route:cache` is the critical line** — Session 96 is a new route, and a stale
+route cache keeps returning the exact "route could not be found" error from the
+marketer's screenshot. Verify:
 
 ```bash
-git rev-parse --short HEAD    # expect 28fdda5
-/opt/alt/php83/usr/bin/php artisan tinker --execute="echo Schema::hasColumn('finance_invoices','source_type') && Schema::hasTable('staff_activities') && in_array('payment_state_corrected', App\Models\OrderLog::ACTIONS) && in_array('email_verified', App\Models\SecurityEvent::TYPES) && Schema::hasColumn('products','slug') && Schema::hasColumn('brands','specs') && in_array('marketing', App\Support\AdminPermissions::ROLES) ? 'all live' : 'NOT LIVE';"
-
-# Session 92 spot-check — the backfill must have slugged every product.
-/opt/alt/php83/usr/bin/php artisan tinker --execute="echo App\Models\Product::withTrashed()->whereNull('slug')->count() . ' products without a slug (expect 0)';"
+/opt/alt/php83/usr/bin/php artisan route:list --path=primary-image   # expect 1 route
 ```
 
-**Human steps once `all live` prints — none of these is a command:**
+Then have the marketer retry the image replace on product 3834 — backend-only
+fix, no panel refresh needed.
 
-1. **Vercel** — confirm the frontend deployed green at `f40de68`. Session 95's
-   admin-search fix is half backend, half frontend; the panel is only fixed
-   when both halves are live.
-2. **The marketer's role** — Admin → Users → change him `editor` →
-   `marketing` (Session 94). He logs out and back in, and Products, Brands,
-   Marketing and Settings appear in his menu.
-3. **Tell the order manager** the board's `in_transit` figure jumps —
-   Session 87, the change she asked for.
-4. **The marketer still owes the returns text** — Settings →
-   `product_returns_info` (see Session 92's note on why it was seeded empty).
+### Post-deploy work still outstanding from the 86–95 stack
 
-**Then unstick the customer who cannot log in (Session 91).** He is approved and
-active; his email address was never confirmed, and until this deploy nothing in
-the panel could say so. After the deploy the order manager has the buttons —
-these are for checking the damage across everyone else:
+The migrations are applied; none of the data commands or human steps that
+follow them has been confirmed run. In order:
 
 ```bash
-# Everyone currently blocked, and which gate is holding each one.
-# Reports, never repairs: a rejected application and an unconfirmed address
-# look identical from here and only one of them should be cleared.
+# Session 91 — who is blocked at login, and whether Theo clicked his link
 /opt/alt/php83/usr/bin/php artisan customers:stuck
 
-# One account in detail, including the gate and the button that clears it.
-/opt/alt/php83/usr/bin/php artisan customers:stuck tyreflexx@gmail.com
-```
-
-**Then fix the order the order manager reported (Session 90).** She is waiting
-on a deposit for **AB - 1182** and the customer's portal says he has already
-paid. Read it before writing anything — the print-out includes the log history
-that produced the state:
-
-```bash
+# Session 90 — AB - 1182 shows paid with no deposit received. Read first;
+# the correction line is in the Session 90 section.
 /opt/alt/php83/usr/bin/php artisan orders:payment-state "AB - 1182"
-
-/opt/alt/php83/usr/bin/php artisan orders:payment-state "AB - 1182" \
-    --stage=pending_proforma --reset-status \
-    --reason="deposit not received; state was never confirmed by anyone"
-
-# Then every other order in the same state. Reports, never repairs — an order
-# recorded from a paper backlog is supposed to look like this and a live one is
-# not, and only somebody who can check the bank can tell them apart.
 /opt/alt/php83/usr/bin/php artisan orders:payment-state --audit
-```
 
-**Then build the ledger from existing history** — Session 89's page opens empty
-until this runs, and every source it reads has months of attributable work in it:
-
-```bash
-/opt/alt/php83/usr/bin/php artisan staff:backfill-ledger          # survey, writes nothing
-/opt/alt/php83/usr/bin/php artisan staff:backfill-ledger --fix    # then this
-
-# Name people by their job rather than their permission set. Prints anyone
-# still falling back to a role, so the gaps are visible rather than silent.
+# Session 89 — the staff ledger opens empty until built from history.
+# Survey first, read it, then --fix. Re-runnable, cannot double a month.
+/opt/alt/php83/usr/bin/php artisan staff:backfill-ledger
+/opt/alt/php83/usr/bin/php artisan staff:backfill-ledger --fix
 /opt/alt/php83/usr/bin/php artisan staff:sync-job-titles
-
-# Check the report before anyone receives it by e-mail.
-/opt/alt/php83/usr/bin/php artisan staff:digest --dry-run
-
-# Development work. The ledger's other sources are all business operations, so
-# without this a developer's month reads as empty.
 /opt/alt/php83/usr/bin/php artisan staff:import-commits --since="12 months ago"
 /opt/alt/php83/usr/bin/php artisan staff:import-commits --since="12 months ago" --fix
+/opt/alt/php83/usr/bin/php artisan staff:digest --dry-run
 ```
 
-Read the survey before the fix. It prints the split per person and per category,
-which is worth checking against what the business believes happened before
-anything lands in a table people will be judged on. Re-runnable — it cannot
-double anybody's month.
+**Human steps, none of them a command:**
 
-**One number changes meaning on this deploy.** Session 87 widens `in_transit`
-from "dispatched" to the whole fulfilment window, so the board's figure will
-jump. That is the change the order manager asked for, not a regression — trade
-documents are issued before a container leaves as often as after — and the new
-`ready_to_ship` / `shipped` columns keep the old figure readable. **Tell her
-before she opens the board.**
-
-Nothing else here is customer-facing. Session 86's invoice register does **not**
-backfill: it fills from the moment an invoice or trade document is next saved,
-so the reconciliation shows history only from the deploy forward. An
-`invoices:register-existing` command with a dry run would close that; offered,
-not yet asked for.
+1. **The marketer's role** — Admin → Users: `editor` → `marketing`
+   (Session 94). He logs out and back in; Products, Brands, Marketing and
+   Settings appear.
+2. **The marketer owes the returns text** — Settings → `product_returns_info`
+   (Session 92 seeded it empty because his draft was eBay wording).
+3. **Tell the order manager** the board's `in_transit` figure jumped —
+   Session 87, the change she asked for, live since this deploy.
+4. Session 86's invoice register does **not** backfill — it fills from the
+   next save forward. `invoices:register-existing` offered, not yet asked for.
 
 ---
 
-## ⚠️ Outstanding on production (as of 2026-08-14)
+## ⚠️ Outstanding on production (as of 2026-08-22)
 
-Besides the pending deploy above, these are live data and configuration items —
-none of them is fixed by shipping code.
+Live data and configuration items — none of them is fixed by shipping code.
+Items 8 and the ledger/role steps above overlap deliberately: this table is the
+long-lived list, the section above is this deploy's checklist.
 
 | # | Action | Why it matters |
 |---|--------|----------------|
