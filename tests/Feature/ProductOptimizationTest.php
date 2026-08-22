@@ -829,4 +829,57 @@ class ProductOptimizationTest extends TestCase
         // "%" must not become match-everything.
         $this->assertSame([], $this->shopSearch('%'));
     }
+
+    // ── 8. the primary image button (Session 96) ──────────────────────────
+
+    public function test_the_primary_image_can_be_replaced_through_the_route_the_form_calls(): void
+    {
+        // The form has POSTed to /products/{id}/primary-image since it was
+        // written; the backend never had the route, so every hand-replaced
+        // image died on "route could not be found". Products always came in
+        // through the CSV import (which fetches its own images) — the marketer
+        // is the first person to press the button. Reported with a screenshot.
+        $product = $this->product(['primary_image' => 'products/old-cover.png']);
+        \Illuminate\Support\Facades\Storage::disk('public')->put('products/old-cover.png', 'old');
+
+        $this->actingAs($this->admin(), 'sanctum')
+            ->post("/api/v1/admin/products/{$product->id}/primary-image", [
+                'primary_image' => \Illuminate\Http\UploadedFile::fake()->image('new-cover.jpg', 800, 800),
+            ])
+            ->assertOk()
+            ->assertJsonPath('message', 'Primary image updated.');
+
+        $fresh = $product->fresh();
+
+        $this->assertNotSame('products/old-cover.png', $fresh->primary_image);
+        $this->assertTrue(\Illuminate\Support\Facades\Storage::disk('public')->exists($fresh->primary_image));
+        // The replaced file does not linger as an orphan.
+        $this->assertFalse(\Illuminate\Support\Facades\Storage::disk('public')->exists('products/old-cover.png'));
+    }
+
+    public function test_the_primary_image_route_refuses_a_non_media_file(): void
+    {
+        $product = $this->product();
+
+        $this->actingAs($this->admin(), 'sanctum')
+            ->post("/api/v1/admin/products/{$product->id}/primary-image", [
+                'primary_image' => \Illuminate\Http\UploadedFile::fake()->create('malware.php', 10, 'text/x-php'),
+            ])
+            ->assertStatus(422);
+
+        $this->assertNull($product->fresh()->primary_image);
+    }
+
+    public function test_a_viewer_cannot_replace_a_primary_image(): void
+    {
+        $product = $this->product(['primary_image' => 'products/keep.png']);
+
+        $this->actingAs($this->admin('viewer'), 'sanctum')
+            ->post("/api/v1/admin/products/{$product->id}/primary-image", [
+                'primary_image' => \Illuminate\Http\UploadedFile::fake()->image('x.jpg'),
+            ])
+            ->assertStatus(403);
+
+        $this->assertSame('products/keep.png', $product->fresh()->primary_image);
+    }
 }

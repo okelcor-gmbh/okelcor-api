@@ -1,12 +1,22 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-20 | Branch: `main` | Latest commit: Session 95 (**pushed, not deployed**)
+Last updated: 2026-08-22 | Branch: `main` | Latest commit: Session 96 (**pushed — sessions 86–95 deployed to production, 96 pending**)
 
 ---
 
-## 🔧 Sessions 86–95 pushed, NOT deployed
+## ✅ Sessions 86–95 deployed to production (confirmed 2026-08-22)
 
-**Seven unapplied migrations (#37–43), twenty-one new routes.**
+Verified from outside rather than from a deploy log: the live API serves
+`slug`/`description_html`/`specifications`, the live site renders a product's
+Artikelmerkmale sheet at its slug URL, and the Session 95 multi-word and
+description search answer correctly. All seven migrations (#37–43) are
+therefore applied. The Step 3 data commands (staff backfill, `orders:payment-state
+"AB - 1182"`, `customers:stuck`) and the marketer's role flip have **not** been
+confirmed run — they remain in the Outstanding table below.
+
+## 🔧 Session 96 pushed, NOT deployed
+
+**No migration, 1 new route — `route:cache` must be rebuilt.**
 
 | Session | What it is | Migration | Routes |
 |---|---|---|---|
@@ -22,6 +32,7 @@ Last updated: 2026-08-20 | Branch: `main` | Latest commit: Session 95 (**pushed,
 | **93** | Brand-level content defaults — entered once per brand, inherited by all ~15,000 products at read time | **#43** | none |
 | **94** | The `marketing` role — content + catalogue + campaigns, nothing operational | none | none |
 | **95** | Product search actually works — the panel sent `q`, the API read `search`, pagination was never forwarded; plus tokenized search over specs/brand defaults/description | none | none |
+| **96** | The primary-image route the product form has always called and the backend never had | none | **1 new** |
 
 ```bash
 cd /home/okelvaxj/domains/okelcor.com/public_html/okelcor-api
@@ -2607,6 +2618,33 @@ skipped, the served catalogue, the permission gate, and the
 override→setting→null fallback chain.
 
 See `FRONTEND_NOTE_product-optimization.md`.
+
+---
+
+## The primary-image button that never worked (Session 96)
+
+> **Deploy status:** built and tested, **not yet deployed**. No migration,
+> **1 new route** — `route:cache` must be rebuilt. Also carries the Session 95
+> hardening commit (`02fff7c`, sanitizer failures 422 instead of 500) if that
+> was not already pulled.
+
+The marketer replaced a product's primary image and got *"The route
+api/v1/admin/products/3834/primary-image could not be found"* — with a
+screenshot. He was the first person ever to press that button: the admin form
+has POSTed to `/products/{id}/primary-image` since the form was written, and
+the backend never had the route. Nobody noticed for months because products
+arrive through the CSV import, which downloads its own images.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `POST /admin/products/{id}/primary-image` | 🔧 | `products.edit`. Validates the media types the form has always advertised (images + MP4/MOV/AVI/WebM, 50 MB), deletes the replaced file rather than orphaning it, returns the full formatted product. Split from `PUT /products/{id}` because the form saves fields as JSON, which cannot carry a file — the same two-step contract article cover images use. |
+| No frontend change | 🔧 | The action has been calling the correct URL all along; the backend now answers it. |
+
+### Tests
+
+**3 new** (44 in `ProductOptimizationTest`, suite **603, 0 failed**): the
+replace-through-the-form-route round trip including the old file not lingering,
+a non-media file refused, and a viewer 403'd.
 
 ---
 

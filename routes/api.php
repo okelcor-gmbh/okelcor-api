@@ -471,6 +471,9 @@ Route::prefix('v1')->group(function () {
             Route::get('products/{product}', [AdminProductController::class, 'show']);
             Route::put('products/{product}', [AdminProductController::class, 'update']);
             Route::delete('products/{product}', [AdminProductController::class, 'destroy']);
+            // The form has called this since it was written; the route never
+            // existed until Session 96 — see uploadPrimaryImage().
+            Route::post('products/{id}/primary-image', [AdminProductController::class, 'uploadPrimaryImage']);
             Route::post('products/{product}/images', [AdminProductController::class, 'uploadImages']);
             Route::delete('products/{product}/images/{image}', [AdminProductController::class, 'deleteImage']);
             Route::post('products/{product}/inspection-photos', [AdminProductController::class, 'uploadInspectionPhotos']);

@@ -262,6 +262,48 @@ class AdminProductController extends Controller
         return response()->json(null, 204);
     }
 
+    /**
+     * POST /api/v1/admin/products/{id}/primary-image
+     *
+     * Replace (or set) the product's primary image.
+     *
+     * The admin form has called this endpoint since the form was written, and
+     * the backend never had it — every hand-replaced primary image failed with
+     * "route could not be found". Nobody noticed for months because products
+     * arrived through the CSV import, which downloads its own images; the
+     * marketer doing product optimization by hand (Session 92) is the first
+     * person to exercise the button. Reported with a screenshot of the exact
+     * error on product 3834.
+     *
+     * Split from PUT /products/{id} because the form saves fields as JSON,
+     * which cannot carry a file — same two-step contract the article cover
+     * image uses. Accepts the video types the form has always advertised
+     * ("JPG, PNG, WebP or MP4/MOV · Max 50 MB").
+     */
+    public function uploadPrimaryImage(Request $request, int $id): JsonResponse
+    {
+        $request->validate([
+            'primary_image' => ['required', 'file', 'mimes:jpeg,png,jpg,gif,webp,svg,mp4,mov,avi,webm', 'max:51200'],
+        ]);
+
+        $product = Product::with('images')->findOrFail($id);
+
+        // The replaced file is gone from every payload the moment this row
+        // updates — keeping it on disk would just be an orphan.
+        if ($product->primary_image) {
+            Storage::disk('public')->delete($product->primary_image);
+        }
+
+        $product->update([
+            'primary_image' => $this->storeImage($request->file('primary_image'), 'products'),
+        ]);
+
+        return response()->json([
+            'data'    => $this->formatProduct($product->fresh(['images'])),
+            'message' => 'Primary image updated.',
+        ]);
+    }
+
     public function uploadImages(Request $request, int $id): JsonResponse
     {
         $request->validate([
