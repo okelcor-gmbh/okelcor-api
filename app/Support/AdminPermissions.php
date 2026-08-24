@@ -185,6 +185,12 @@ class AdminPermissions
         // because a verification is the thing that turns someone's own claim
         // into a countersigned record.
         'staff.verify'            => ['super_admin', 'admin'],
+
+        // ── Internal staff messaging ──────────────────────────────────────
+        // Every role, same reasoning as `staff.self`: an inbox someone can be
+        // locked out of isn't a company inbox. The viewer with no other access
+        // can still be written to and can still answer.
+        'staff_messages.use'      => self::ROLES,
     ];
 
     /**

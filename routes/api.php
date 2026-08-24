@@ -56,6 +56,7 @@ use App\Http\Controllers\Admin\AdminQuoteAttachmentController;
 use App\Http\Controllers\Admin\AdminSettingController;
 use App\Http\Controllers\Admin\AdminStaffContributionController;
 use App\Http\Controllers\Admin\AdminStaffLedgerController;
+use App\Http\Controllers\Admin\AdminStaffMessageController;
 use App\Http\Controllers\Admin\AdminUserController;
 use App\Http\Controllers\Admin\AuthController;
 use App\Http\Controllers\Admin\MediaController;
@@ -846,6 +847,27 @@ Route::prefix('v1')->group(function () {
         // own record.
         Route::middleware('permission:staff.view_team')->group(function () {
             Route::get('staff/team-report', [AdminStaffLedgerController::class, 'teamReport']);
+        });
+
+        // -----------------------------------------------------------------
+        // Internal staff messaging — staff_messages.use (every role)
+        //
+        // The team's own inbox, same compose/thread/read shape as the
+        // customer communications block so the frontend renders both with
+        // one set of components. Who may see a given message is enforced
+        // inside the controller (sender + recipients only), the same split
+        // as the ledger above. See FRONTEND_NOTE_staff-messaging.md.
+        // -----------------------------------------------------------------
+        Route::middleware('permission:staff_messages.use')->group(function () {
+            Route::get('staff-messages/inbox',        [AdminStaffMessageController::class, 'inbox']);
+            Route::get('staff-messages/sent',         [AdminStaffMessageController::class, 'sent']);
+            Route::get('staff-messages/unread-count', [AdminStaffMessageController::class, 'unreadCount']);
+            Route::get('staff-messages/recipients',   [AdminStaffMessageController::class, 'recipients']);
+            Route::post('staff-messages',             [AdminStaffMessageController::class, 'store']);
+            Route::post('staff-messages/read-all',    [AdminStaffMessageController::class, 'markAllRead']);
+            Route::get('staff-messages/{id}',         [AdminStaffMessageController::class, 'show']);
+            Route::post('staff-messages/{id}/read',   [AdminStaffMessageController::class, 'markRead']);
+            Route::get('staff-messages/{id}/attachments/{index}/download', [AdminStaffMessageController::class, 'downloadAttachment']);
         });
 
         // -----------------------------------------------------------------
