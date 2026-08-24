@@ -74,6 +74,7 @@ use App\Http\Controllers\CustomerNotificationPreferenceController;
 use App\Http\Controllers\CustomerTrackingController;
 use App\Http\Controllers\Admin\AdminCrmFollowUpController;
 use App\Http\Controllers\Admin\AdminCommunicationController;
+use App\Http\Controllers\Admin\AdminStaffMessageController;
 use App\Http\Controllers\Admin\AdminChatController;
 use App\Http\Controllers\Admin\AdminCrispController;
 use App\Http\Controllers\Admin\AdminCrmEmailController;
@@ -697,6 +698,35 @@ Route::prefix('v1')->group(function () {
             Route::post('customers/{id}/communications/send-whatsapp', [AdminCommunicationController::class, 'sendWhatsAppForCustomer']);
             Route::post('quote-requests/{id}/communications/send-whatsapp', [AdminCommunicationController::class, 'sendWhatsAppForQuote']);
         });
+
+        // Forward a customer e-mail to a colleague. crm.view, not
+        // crm.update — forwarding creates nothing on the customer's record,
+        // it only re-sends something you are already allowed to read.
+        Route::middleware('permission:crm.view')->group(function () {
+            Route::post('communications/{id}/forward', [AdminStaffMessageController::class, 'forward'])->whereNumber('id');
+        });
+
+        // -----------------------------------------------------------------
+        // Staff-to-staff messaging (Session 97)
+        // -----------------------------------------------------------------
+        // Deliberately NO permission gate: every authenticated admin can
+        // write to a colleague, the same way every admin can edit their own
+        // signature. A permission here would mean an account that can log in
+        // but cannot be told anything. Visibility is enforced per-message in
+        // the controller (sender or recipient only), not by role.
+        //
+        // Static segments are declared before {id} and {id} is whereNumber'd,
+        // so /directory and /unread-count can never be swallowed by the
+        // wildcard.
+        Route::get('staff-messages/directory', [AdminStaffMessageController::class, 'directory']);
+        Route::get('staff-messages/unread-count', [AdminStaffMessageController::class, 'unreadCount']);
+        Route::get('staff-messages', [AdminStaffMessageController::class, 'index']);
+        Route::post('staff-messages', [AdminStaffMessageController::class, 'store']);
+        Route::get('staff-messages/{id}', [AdminStaffMessageController::class, 'show'])->whereNumber('id');
+        Route::post('staff-messages/{id}/reply', [AdminStaffMessageController::class, 'reply'])->whereNumber('id');
+        Route::post('staff-messages/{id}/read', [AdminStaffMessageController::class, 'markRead'])->whereNumber('id');
+        Route::get('staff-messages/{id}/attachments/{index}/download', [AdminStaffMessageController::class, 'downloadAttachment'])
+            ->whereNumber('id')->whereNumber('index');
 
         // Live chat — admin/mobile-app side (crm.view / crm.update)
         // Dormant: built against a custom live_chat_sessions system that

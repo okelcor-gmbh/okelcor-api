@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-22 | Branch: `main` | Latest commit: Session 96 (**pushed — sessions 86–95 deployed to production, 96 pending**)
+Last updated: 2026-08-24 | Branch: `main` | Latest commit: Session 97 (**pushed — sessions 86–95 deployed to production, 96–97 pending**)
 
 ---
 
@@ -14,9 +14,10 @@ therefore applied. The Step 3 data commands (staff backfill, `orders:payment-sta
 "AB - 1182"`, `customers:stuck`) and the marketer's role flip have **not** been
 confirmed run — they remain in the Outstanding table below.
 
-## 🔧 Session 96 pushed, NOT deployed
+## 🔧 Sessions 96–97 pushed, NOT deployed
 
-**No migration, 1 new route — `route:cache` must be rebuilt.**
+**Session 97 adds migration #44 and 9 new routes — `route:cache` must be
+rebuilt, and #44 must run or the messaging endpoints 500.**
 
 | Session | What it is | Migration | Routes |
 |---|---|---|---|
@@ -33,6 +34,7 @@ confirmed run — they remain in the Outstanding table below.
 | **94** | The `marketing` role — content + catalogue + campaigns, nothing operational | none | none |
 | **95** | Product search actually works — the panel sent `q`, the API read `search`, pagination was never forwarded; plus tokenized search over specs/brand defaults/description | none | none |
 | **96** | The primary-image route the product form has always called and the backend never had | none | **1 new** |
+| **97** | Staff-to-staff messaging and forwarding — reach a colleague from the panel instead of Outlook | **#44** | **9 new** |
 
 **Session 96 deploy — code-only, no migrations:**
 
@@ -42,9 +44,20 @@ pwd                                     # okelvaxj, not u978121777
 git fetch origin && git reset --hard origin/main
 git rev-parse --short HEAD              # expect b039ffe or later
 
+/opt/alt/php83/usr/bin/php artisan backup:okelcor       # Session 97 adds tables
+/opt/alt/php83/usr/bin/php artisan migrate --pretend    # read it, then:
+/opt/alt/php83/usr/bin/php artisan migrate --force      # applies #44
 /opt/alt/php83/usr/bin/php artisan config:clear && /opt/alt/php83/usr/bin/php artisan config:cache
 /opt/alt/php83/usr/bin/php artisan route:cache
 /opt/alt/php83/usr/bin/php artisan cache:clear
+```
+
+**Session 97 needs `migrate --force`** — #44 creates two new tables and the
+messaging endpoints 500 until it runs. Verify both landed:
+
+```bash
+/opt/alt/php83/usr/bin/php artisan route:list --path=staff-messages   # expect 8 routes
+/opt/alt/php83/usr/bin/php artisan tinker --execute="echo Schema::hasTable('staff_messages') ? 'live' : 'NOT LIVE';"
 ```
 
 **`route:cache` is the critical line** — Session 96 is a new route, and a stale
@@ -2567,6 +2580,72 @@ See `FRONTEND_NOTE_product-optimization.md`.
 
 ---
 
+## Staff-to-staff messaging & forwarding (Session 97)
+
+> **Deploy status:** built and tested, **not yet deployed**. **Migration #44
+> required.** Unlike #29 and #42, this is NOT deploy-order safe: there is no
+> previous behaviour to degrade to, so the endpoints 500 until it runs.
+> Frontend keeps the feature behind a flag until the deploy is confirmed.
+
+Ask, from the order manager: staff e-mail addresses are already in the system,
+so a colleague should be reachable from the admin panel without opening
+Outlook — and a customer e-mail already in the system should be forwardable to
+whoever should actually handle it.
+
+**The gap was total.** Every messaging path built to this point runs admin →
+*customer*: `customer_communications` is keyed to a customer or a quote request
+and cannot represent "Ada sent this to Ben". Checked for an existing internal
+channel first — `staff_activities`/`staff_contributions` (Session 89) is a
+performance ledger, not a message channel, and nothing else came close.
+
+**Delivery is both, confirmed with the user before building:** the message
+lands in the colleague's panel inbox *and* as a real e-mail to their
+`@okelcor.com` address *and* in their notification bell *and* on their phone
+via the existing Expo push. Same "Email = Inbox" pattern as customer
+notifications (Session 47). Forward targets are staff-only, also confirmed.
+
+| Change | Status | Notes |
+|--------|--------|-------|
+| `staff_messages` + `staff_message_recipients` (migration #44) | 🔧 | Two new tables. **Deliberately not a nullable `customer_id` on `customer_communications`** — that would make every existing customer-scoped query (the unified inbox, the per-customer thread, the customer's own portal) responsible for remembering to exclude internal mail. One forgotten `whereNotNull` leaks staff correspondence into a customer's portal. |
+| Per-recipient delivery status | 🔧 | `email_status` lives on the recipient row, not the message. With three people on a message and one bad address, a single column would have to choose between reporting "sent" (hiding a failure) and "failed" (implying nobody got it). Neither is true. |
+| Message row written **before** the send | 🔧 | Inverted from `AdminCommunicationController::composeAndSend`, which sends first and logs after. There the e-mail is the artefact and the log records it; here the panel thread is the artefact and the e-mail is a copy. A mail failure returns **201** with the recipient ids in `meta.email_failures` — the message is already in their inbox. |
+| `GET /admin/staff-messages/directory` | 🔧 | Its own endpoint because listing admin accounts otherwise sits behind `admins.manage`, which is **super_admin only** — an order manager could not have seen a single colleague's name to write to. Returns strictly what a compose box needs; no password state, login history or 2FA status. |
+| **No permission gate on messaging** | 🔧 | Every authenticated admin can write to a colleague, like editing their own signature. A permission here would mean an account that can log in but cannot be told anything. Visibility is per-message (sender or recipient), not by role. Forwarding *is* gated — `crm.view`, since you must already be allowed to read what you are forwarding. |
+| Reply recipients come from the parent, never the request | 🔧 | A `to[]` on a reply is ignored. Otherwise a reply becomes a way to pull a colleague into a thread they were never on and hand them its entire history. Adding someone is a forward. Proved by a test that passes an outsider's id and asserts they still get a 404. |
+| Forward quotes the original and **copies** attachments | 🔧 | Quoted, not linked — a link is useless to someone reading it on their phone at a port. Files are copied to new paths, so a forward survives the original communication being deleted (asserted directly). A missing source file is skipped with a log line rather than sinking the forward. |
+| Forward targets are staff ids only | 🔧 | No free-text address anywhere. It would make "staff only" unenforceable and let a typo send internal correspondence to a stranger. External forwarding is a real feature needing its own permission and audit trail — flagged to frontend, not smuggled in. |
+| Not-yours is **404, not 403** | 🔧 | On show, reply and attachment download. A 403 confirms that a message with that id exists. |
+| **Reply-To is the sender, not the capture address** | 🔧 | Unlike `CustomerAdHocEmail`, which plus-addresses replies back into the system. `InboundEmailProcessor::isOwnDomainSender()` silently drops mail from an okelcor.com address — the guard that stops the app's own order/quote notifications spawning fake leads — so it would have swallowed every staff reply sent from Outlook without a trace. Pointing Reply-To at the sender makes an Outlook reply a normal e-mail between two colleagues: delivered, but outside the system. The guard was left alone; a test pins the behaviour. |
+| Notification dedupe key made per-message | 🔧 | `AdminNotificationService`'s default key is type+related, which would have collapsed a second message from the same colleague while the first was still unread. Two messages are two events. |
+| Backend tests (29 new) | ✅ | `StaffMessagingTest` — **29 passed / 97 assertions, actually executed** on the minimal-schema sqlite harness rather than behind the MySQL gate. Full suite: **632 passed, 0 failed**, 206 skipped. |
+
+**Bug found by its own tests:** `subject` and `note` on the forward endpoint
+are `nullable`, which leaves the key *absent* rather than null when not sent —
+`$data['subject']` threw a 500 on every forward that didn't override the
+subject, i.e. the common case. Three tests caught it before it left the machine.
+
+**Numbering caught late, worth recording:** this was first written as
+"Session 76 / migration #31" against a stale reading of this file, and the
+migration filename `2026_08_11_000001_…` collided with the existing
+milestone-ENUM migration of that exact prefix. Renamed to `2026_08_24_000001`
+and renumbered before commit. Check `git log -1` and the tail of the migration
+list before assigning either number.
+
+**Deliberately not built:** drafts, delete/archive, group aliases
+("all order managers"), read receipts shown to recipients, and external
+forwarding. Each is listed in the frontend note with its reason rather than
+left as a silent gap. Whether colleagues should see who has read a message is
+a culture question, not a technical one — `read_at` is captured either way.
+
+**Needs a frontend route:** the e-mail's "Open in the admin panel" button
+points at `{FRONTEND_URL}/admin/messages/{id}`, which does not exist yet.
+There is also no UI for any of this — `/admin/partner-sales`-style, the API is
+live and nothing calls it until frontend builds the inbox and compose box.
+
+See `FRONTEND_NOTE_staff-messaging.md`.
+
+---
+
 ## The primary-image button that never worked (Session 96)
 
 > **Deploy status:** built and tested, **not yet deployed**. No migration,
@@ -3145,6 +3224,8 @@ still has `QUEUE_CONNECTION=sync`, so `SendBulkEmailCampaignJob` would run
 inline during the HTTP request. Set `QUEUE_CONNECTION=database` and run a
 queue worker before the order manager sends to the full contact list — see
 Session 50 note above.
+
+44. `2026_08_24_000001_create_staff_messages_tables` (Session 97 — staff-to-staff messaging; creates `staff_messages` + `staff_message_recipients`. Both NEW: nothing existing is read, altered or backfilled, so this cannot affect a live row. Every table guarded with `Schema::hasTable`. Proved by `StaffMessagingTest::test_the_migration_applies_against_real_sql_and_is_idempotent`, which runs the migration file itself and re-runs it. **Like #28 and unlike #42/#43, the code is NOT deploy-order safe, deliberately** — there is no previous behaviour to degrade to, so the messaging endpoints 500 until this runs rather than silently accepting messages into nowhere. Note the filename: first written as `2026_08_11_000001`, which collided with the milestone-ENUM migration of that exact prefix; renamed before commit.)
 
 43. `2026_08_19_000001_add_content_defaults_to_brands_table` (Session 93 — adds `description_html`, `specs`, `shipping_info`, `returns_info` to `brands`; the same four content fields products gained in #42, because the product → brand → setting chain only works when every level speaks the same shape. Guarded and additive; nothing existing read, renamed or rewritten. **Deploy-order safe**: resolution reads whole brand rows, so before this runs the attributes are simply absent and behaviour is unchanged. Proved by `ProductOptimizationTest::test_the_brand_migration_applies_against_real_sql_and_is_idempotent`, which runs the migration file itself and re-runs it.)
 
