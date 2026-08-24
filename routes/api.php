@@ -28,6 +28,7 @@ use App\Http\Controllers\Admin\AdminArticleController;
 use App\Http\Controllers\Admin\AdminBrandController;
 use App\Http\Controllers\Admin\AdminCategoryController;
 use App\Http\Controllers\Admin\AdminBehaviourAnalyticsController;
+use App\Http\Controllers\Admin\AdminMarketIntelligenceController;
 use App\Http\Controllers\Admin\AdminBulkEmailController;
 use App\Http\Controllers\Admin\AdminCampaignImportController;
 use App\Http\Controllers\Admin\AdminCampaignTemplateController;
@@ -397,6 +398,14 @@ Route::prefix('v1')->group(function () {
         // Customer behaviour — what people search for and cannot find.
         Route::middleware('permission:analytics.view')->group(function () {
             Route::get('analytics/behaviour', [AdminBehaviourAnalyticsController::class, 'index']);
+
+            // Market intelligence — which market to go after next. Same
+            // permission because `analytics.view` already includes the
+            // `marketing` role, which is the audience for this one.
+            // `/export` is declared before nothing else here, but keep it
+            // above any future `analytics/markets/{code}` wildcard.
+            Route::get('analytics/markets/export', [AdminMarketIntelligenceController::class, 'export']);
+            Route::get('analytics/markets', [AdminMarketIntelligenceController::class, 'index']);
         });
 
         // Auth — all authenticated admin users

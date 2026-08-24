@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-24 | Branch: `main` | Latest commit: Session 97 (**pushed — sessions 86–95 deployed to production, 96–97 pending**)
+Last updated: 2026-08-24 | Branch: `main` | Latest commit: Session 98 (**pushed — sessions 86–95 deployed to production, 96–98 pending**)
 
 ---
 
@@ -14,10 +14,11 @@ therefore applied. The Step 3 data commands (staff backfill, `orders:payment-sta
 "AB - 1182"`, `customers:stuck`) and the marketer's role flip have **not** been
 confirmed run — they remain in the Outstanding table below.
 
-## 🔧 Sessions 96–97 pushed, NOT deployed
+## 🔧 Sessions 96–98 pushed, NOT deployed
 
 **Session 97 adds migration #44 and 9 new routes — `route:cache` must be
-rebuilt, and #44 must run or the messaging endpoints 500.**
+rebuilt, and #44 must run or the messaging endpoints 500. Session 98 adds
+migration #45 and 2 more routes; unlike #44 it is deploy-order safe.**
 
 | Session | What it is | Migration | Routes |
 |---|---|---|---|
@@ -35,6 +36,7 @@ rebuilt, and #44 must run or the messaging endpoints 500.**
 | **95** | Product search actually works — the panel sent `q`, the API read `search`, pagination was never forwarded; plus tokenized search over specs/brand defaults/description | none | none |
 | **96** | The primary-image route the product form has always called and the backend never had | none | **1 new** |
 | **97** | Staff-to-staff messaging and forwarding — reach a colleague from the panel instead of Outlook | **#44** | **9 new** |
+| **98** | Market intelligence — one row per country joining demand, inquiries, revenue and reach, to answer which market to enter next | **#45** | **2 new** |
 
 **Session 96 deploy — code-only, no migrations:**
 
@@ -57,6 +59,7 @@ messaging endpoints 500 until it runs. Verify both landed:
 
 ```bash
 /opt/alt/php83/usr/bin/php artisan route:list --path=staff-messages   # expect 8 routes
+/opt/alt/php83/usr/bin/php artisan route:list --path=analytics/markets  # expect 2 routes
 /opt/alt/php83/usr/bin/php artisan tinker --execute="echo Schema::hasTable('staff_messages') ? 'live' : 'NOT LIVE';"
 ```
 
@@ -2580,6 +2583,52 @@ See `FRONTEND_NOTE_product-optimization.md`.
 
 ---
 
+## Market intelligence — which market to enter next (Session 98)
+
+> **Deploy status:** built and tested, **not yet deployed**. Migration **#45**
+> is needed only for *imported* external data — the scorecard itself runs on
+> data already in the database, so this is **deploy-order safe**: the report
+> works before the migration and simply reports no reference data.
+
+Ask, from the business: the behaviour data is useful but the tool has to be
+*valuable* — convertible into a market database the marketing team can use to
+decide **which market to penetrate**, not only a developer's diagnostic.
+
+Session 79 already records demand (`search_events`, live on production since
+2026-08-13). What did not exist was any join between demand and the commercial
+side: quotes, orders, customers and marketing reach all key on country, and
+nothing had ever put them in one row.
+
+| Change | Status | Notes |
+|--------|--------|-------|
+| **`CountryNormaliser`** | 🔧 | The foundation, and the thing most likely to have made this silently wrong. `search_events.country` is ISO-2 from a CDN header; `orders`, `quote_requests`, `customers` and `marketing_contacts` all store free text. Joined raw, Germany becomes four markets with a quarter of the figures each — **no error anywhere**. Handles ISO codes, canonical names, native spellings (`Deutschland`, `Hrvatska`, `Türkiye`), accents and punctuation. |
+| Unresolvable values are **returned, not dropped** | 🔧 | `unrecognised` lists every country string that could not be resolved, with its source table and row count. One `"Deutchland"` silently removes orders from Germany's row; the only way anyone finds out is if the report says so. |
+| `GET /admin/analytics/markets` | 🔧 | `analytics.view` — which already includes the `marketing` role, deliberately, since marketing is the reader. Default window **90 days**, not 30: a quote needs time to become an order, and 30 days makes every market look worse at converting than it is. |
+| **Named signals, not a 0-100 score** | 🔧 | Eight states, each implying different work. `demand_not_served` (searched a lot, found nothing) is a stock gap that campaigns cannot fix; `interest_no_reach` (interest, no contacts) is the clearest *penetrate* signal on the report. A single score would invite an argument about weightings and hide why a market ranks where it does. Thresholds are named constants, not literals, so they can be argued with. |
+| Signal legend travels in the payload | 🔧 | `data.signals` carries every label and action string, so the UI does not hardcode them and the two cannot drift. |
+| **Revenue is never blended across currencies** | 🔧 | Returned as a per-currency map. Converting a three-month-old order at today's rate is not the money Okelcor received, and a market ranked on it would move when the euro moves. `CurrencyConversionService` also throws on a failed lookup — using it here would let a Frankfurter outage break the whole report. |
+| Rates are `null`, not `0`, on a zero denominator | 🔧 | "0% converted" on a market nobody enquired about reads as failure when it means nobody asked. |
+| `unmeasured` — the blind spot, named | 🔧 | A country with no traffic scores zero, which on a page is indistinguishable from no demand — and that is precisely the market worth entering. Countries with imported data and no observed signal are listed **outside** the ranked table rather than scored zero. |
+| `market_reference_stats` (migration #45) | 🔧 | Where outside evidence lands. Thin key/value (`country_code`, `metric`, `value`, `unit`, `period`, `source`) because nobody has produced this data yet and a schema guess needs a migration the first time it is wrong. `metric` is a plain string, not an ENUM — see the ENUM trap this project has hit three times. |
+| `markets:import-reference` | 🔧 | Survey by default, writes only with `--fix`. **Rejects rather than guesses**: an unresolvable country, a non-numeric value or a blank metric is refused and listed with its line number. A statistic filed under the wrong country is worse than one that is absent, because it looks like evidence. Handles Excel's BOM and thousands separators; re-importing a corrected figure replaces it via `updateOrCreate`. |
+| CSV export carries the reasoning | 🔧 | The "market database" the business asked for. Signal, recommended action, unrecognised values, unmeasured markets **and** the caveats all travel in the file — a spreadsheet gets forwarded and its caveats have to go with it. BOM-prefixed so Excel does not mangle accented country names. |
+| Hands off into the existing campaign builder | 🔧 | `reach.market_slugs` are the same slugs `POST /admin/bulk-emails` already filters on, so "build a campaign for this market" is a deep link, not a new endpoint on either side. |
+| Backend tests (30 new) | ✅ | `MarketIntelligenceTest` — **30 passed / 104 assertions, actually executed**. Includes the end-to-end proof that five spellings of Germany merge into one row, every signal, the null-rate rule, cancelled orders excluded, the export's caveats, and six tests on the import command's rejection paths. Full suite **662 passed, 0 failed**, 206 skipped. |
+
+**What it cannot do, returned in `meta.not_covered` rather than left implied:**
+rank a market nobody has ever visited from (that is what `unmeasured` and the
+import path are for), break below country level, forecast, or say anything
+about page views and click paths — none of which reach this API.
+
+**Deliberately not built:** a single opportunity score, and any bundled
+market-size data. The import path exists; someone still has to obtain the
+figures. Until then `reference` and `unmeasured` are both empty, which is
+honest rather than empty-looking.
+
+See `FRONTEND_NOTE_market-intelligence.md`.
+
+---
+
 ## Staff-to-staff messaging & forwarding (Session 97)
 
 > **Deploy status:** built and tested, **not yet deployed**. **Migration #44
@@ -3224,6 +3273,8 @@ still has `QUEUE_CONNECTION=sync`, so `SendBulkEmailCampaignJob` would run
 inline during the HTTP request. Set `QUEUE_CONNECTION=database` and run a
 queue worker before the order manager sends to the full contact list — see
 Session 50 note above.
+
+45. `2026_08_24_000002_create_market_reference_stats_table` (Session 98 — external per-country market data for the market intelligence report; creates `market_reference_stats`. One new table, nothing existing read, altered or backfilled. Guarded with `Schema::hasTable`. Proved by `MarketIntelligenceTest::test_the_migration_applies_against_real_sql_and_is_idempotent`, which runs the migration file itself and re-runs it. **Deploy-order safe, unlike #44** — the market report checks for the table and simply reports no reference data while it is absent, so the scorecard works before this runs. `metric` is a plain string, not an ENUM, and `unique(country_code, metric, period)` is what makes re-importing a corrected figure a replacement rather than a duplicate.)
 
 44. `2026_08_24_000001_create_staff_messages_tables` (Session 97 — staff-to-staff messaging; creates `staff_messages` + `staff_message_recipients`. Both NEW: nothing existing is read, altered or backfilled, so this cannot affect a live row. Every table guarded with `Schema::hasTable`. Proved by `StaffMessagingTest::test_the_migration_applies_against_real_sql_and_is_idempotent`, which runs the migration file itself and re-runs it. **Like #28 and unlike #42/#43, the code is NOT deploy-order safe, deliberately** — there is no previous behaviour to degrade to, so the messaging endpoints 500 until this runs rather than silently accepting messages into nowhere. Note the filename: first written as `2026_08_11_000001`, which collided with the milestone-ENUM migration of that exact prefix; renamed before commit.)
 
