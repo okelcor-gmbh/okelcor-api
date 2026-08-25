@@ -80,6 +80,9 @@ class AdminFinanceSnapshotController extends Controller
         $byId  = $request->user()->id;
 
         foreach ($request->input('items') as $i => $raw) {
+            if (is_array($raw)) {
+                $raw['date'] = $this->coerceDate($raw['date'] ?? null);
+            }
             $validated = validator($raw, $this->itemRules())->validate();
             $rows[] = array_merge($this->normalizeItem($validated), [
                 'created_by' => $byId,
@@ -156,7 +159,12 @@ class AdminFinanceSnapshotController extends Controller
             'items.*.category'             => ['required', Rule::in(FinanceSnapshotItem::CATEGORIES)],
             'items.*.person'               => ['required', 'string', 'max:100'],
             'items.*.ref'                  => ['required', 'string', 'max:50'],
-            'items.*.date'                 => ['nullable', 'date'],
+            // No `date` rule here on purpose: the real backups carry
+            // European DD/MM/YYYY dates that PHP's parser either rejects
+            // (30/12/2024) or, far worse, silently reads as American
+            // month-first (05/02/2026 → 2nd of May). coerceDate() below
+            // handles both correctly; an unreadable date costs that one
+            // date, never the restore.
             'items.*.client'               => ['nullable', 'string', 'max:255'],
             'items.*.status'               => ['nullable', 'string', 'max:30'],
             'items.*.comment'              => ['nullable', 'string', 'max:500'],
@@ -172,6 +180,7 @@ class AdminFinanceSnapshotController extends Controller
 
         $itemRows = [];
         foreach ($request->input('items') as $raw) {
+            $raw['date'] = $this->coerceDate(is_scalar($raw['date'] ?? null) ? (string) $raw['date'] : null);
             $itemRows[] = array_merge($this->normalizeItem($raw), [
                 'created_by' => $byId,
                 'created_at' => $now,
@@ -267,6 +276,45 @@ class AdminFinanceSnapshotController extends Controller
             'comment'           => $data['comment'] ?? null,
             'amount'            => round((float) $data['amount'], 2),
         ];
+    }
+
+    /**
+     * Read a date the way the finance team writes them: day-first.
+     *
+     * Accepts ISO (2026-08-19), European slash/dot/dash forms (30/12/2024,
+     * 5.2.2026), and named-month strings (13-Aug-2026). A `/`-date is NEVER
+     * handed to PHP's parser directly — it would read 05/02/2026 as the 2nd
+     * of May, which is worse than any error. Unreadable input returns null:
+     * one lost date, not a failed restore.
+     */
+    private function coerceDate(?string $value): ?string
+    {
+        $value = trim((string) $value);
+        if ($value === '' || $value === '0000-00-00') {
+            return null;
+        }
+
+        if (preg_match('/^(\d{4})-(\d{2})-(\d{2})/', $value, $m)) {
+            return checkdate((int) $m[2], (int) $m[3], (int) $m[1]) ? "{$m[1]}-{$m[2]}-{$m[3]}" : null;
+        }
+
+        if (preg_match('#^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})$#', $value, $m)) {
+            [$a, $b, $year] = [(int) $m[1], (int) $m[2], (int) $m[3]];
+            if (checkdate($b, $a, $year)) {          // day-first, the house convention
+                return sprintf('%04d-%02d-%02d', $year, $b, $a);
+            }
+            if (checkdate($a, $b, $year)) {          // only readable month-first (e.g. 12/25/2026)
+                return sprintf('%04d-%02d-%02d', $year, $a, $b);
+            }
+
+            return null;
+        }
+
+        try {
+            return \Carbon\Carbon::parse($value)->format('Y-m-d');
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**

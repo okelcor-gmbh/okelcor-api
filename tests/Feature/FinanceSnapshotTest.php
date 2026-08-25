@@ -423,6 +423,38 @@ class FinanceSnapshotTest extends TestCase
         $this->assertStringContainsString('overdue', $reminders[0]->title);
     }
 
+    public function test_restore_reads_european_dates_day_first_and_salvages_bad_ones(): void
+    {
+        // The real backup mixes ISO dates with DD/MM/YYYY. 30/12/2024 used to
+        // fail validation outright; 05/02/2026 was worse — PHP would silently
+        // read it month-first as the 2nd of May.
+        $backup = [
+            'items' => [
+                ['category' => 'PENDING RECEIPTS', 'person' => 'A', 'ref' => 'D-1', 'date' => '30/12/2024', 'amount' => 1],
+                ['category' => 'PENDING RECEIPTS', 'person' => 'A', 'ref' => 'D-2', 'date' => '05/02/2026', 'amount' => 1],
+                ['category' => 'PENDING RECEIPTS', 'person' => 'A', 'ref' => 'D-3', 'date' => '2026-08-19', 'amount' => 1],
+                ['category' => 'PENDING RECEIPTS', 'person' => 'A', 'ref' => 'D-4', 'date' => '13-Aug-2026', 'amount' => 1],
+                ['category' => 'PENDING RECEIPTS', 'person' => 'A', 'ref' => 'D-5', 'date' => 'no idea', 'amount' => 1],
+                ['category' => 'PENDING RECEIPTS', 'person' => 'A', 'ref' => 'D-6', 'date' => '', 'amount' => 1],
+            ],
+            'liquidityItems' => [],
+        ];
+
+        $this->actingAs($this->admin('finance'), 'sanctum')
+            ->postJson('/api/v1/admin/finance-snapshot/import', $backup)
+            ->assertOk();
+
+        $dates = FinanceSnapshotItem::orderBy('ref')->pluck('date', 'ref')
+            ->map(fn ($d) => $d?->format('Y-m-d'));
+
+        $this->assertSame('2024-12-30', $dates['D-1']);
+        $this->assertSame('2026-02-05', $dates['D-2'], 'slash dates must be read day-first');
+        $this->assertSame('2026-08-19', $dates['D-3']);
+        $this->assertSame('2026-08-13', $dates['D-4']);
+        $this->assertNull($dates['D-5'], 'an unreadable date costs the date, not the restore');
+        $this->assertNull($dates['D-6']);
+    }
+
     public function test_bulk_item_upload(): void
     {
         $this->actingAs($this->admin('finance'), 'sanctum')
