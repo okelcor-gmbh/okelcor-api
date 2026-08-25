@@ -42,6 +42,7 @@ use App\Http\Controllers\Partner\PartnerAuthController;
 use App\Http\Controllers\Partner\PartnerSaleController;
 use App\Http\Controllers\Admin\AdminNewsletterController;
 use App\Http\Controllers\Admin\AdminFinanceInvoiceController;
+use App\Http\Controllers\Admin\AdminFinanceSnapshotController;
 use App\Http\Controllers\Admin\AdminOperationsSummaryController;
 use App\Http\Controllers\Admin\AdminOrderController;
 use App\Http\Controllers\Admin\AdminOrderSignoffController;
@@ -847,6 +848,26 @@ Route::prefix('v1')->group(function () {
             Route::get('operations/invoice-reconciliation', [AdminOperationsSummaryController::class, 'reconciliation']);
             Route::get('finance-invoices', [AdminFinanceInvoiceController::class, 'index']);
             Route::get('finance-invoices/{id}/download', [AdminFinanceInvoiceController::class, 'download']);
+
+            // Finance snapshot board (read)
+            Route::get('finance-snapshot', [AdminFinanceSnapshotController::class, 'index']);
+        });
+
+        // -----------------------------------------------------------------
+        // Finance snapshot board — writes (finance.manage)
+        // The six-category pipeline + liquidity working, previously tracked
+        // in a single browser's localStorage.
+        // -----------------------------------------------------------------
+        Route::middleware('permission:finance.manage')->group(function () {
+            Route::post('finance-snapshot/items', [AdminFinanceSnapshotController::class, 'storeItem']);
+            Route::post('finance-snapshot/items/bulk', [AdminFinanceSnapshotController::class, 'storeItemsBulk']);
+            Route::put('finance-snapshot/items/{id}', [AdminFinanceSnapshotController::class, 'updateItem']);
+            Route::delete('finance-snapshot/items/{id}', [AdminFinanceSnapshotController::class, 'destroyItem']);
+            Route::post('finance-snapshot/liquidity', [AdminFinanceSnapshotController::class, 'storeLiquidity']);
+            Route::put('finance-snapshot/liquidity/{id}', [AdminFinanceSnapshotController::class, 'updateLiquidity']);
+            Route::delete('finance-snapshot/liquidity/{id}', [AdminFinanceSnapshotController::class, 'destroyLiquidity']);
+            // Restore of a D13-format JSON backup — replaces the whole board
+            Route::post('finance-snapshot/import', [AdminFinanceSnapshotController::class, 'import']);
         });
 
         Route::middleware('permission:finance.manage')->group(function () {
