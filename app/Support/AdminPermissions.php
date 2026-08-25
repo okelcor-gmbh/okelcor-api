@@ -110,8 +110,13 @@ class AdminPermissions
         'settings.manage'         => ['super_admin', 'admin', 'editor', 'marketing'],
 
         // ── Quotes ────────────────────────────────────────────────────────
-        'quotes.manage'           => ['super_admin', 'admin', 'order_manager', 'sales_manager'],
-        'quotes.view'             => ['super_admin', 'admin', 'order_manager', 'sales_manager'],
+        // `finance` added read-only (manage/view, not update): a quote turns
+        // into a proforma and then an order finance must reconcile, so the
+        // person doing the finance half of sign-off needs to see where a
+        // figure came from. Mutating the pipeline stays with the roles that
+        // run it.
+        'quotes.manage'           => ['super_admin', 'admin', 'order_manager', 'sales_manager', 'finance'],
+        'quotes.view'             => ['super_admin', 'admin', 'order_manager', 'sales_manager', 'finance'],
         'quotes.update'           => ['super_admin', 'admin', 'order_manager'],
 
         // ── CRM (follow-ups, communications, email templates) ─────────────
