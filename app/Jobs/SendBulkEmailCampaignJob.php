@@ -36,6 +36,13 @@ class SendBulkEmailCampaignJob implements ShouldQueue
             return;
         }
 
+        // When the sync driver runs this after the response (see
+        // BulkEmailService::dispatch), the send still lives inside a web PHP
+        // process whose execution limit was sized for requests, not for
+        // hundreds of SMTP round-trips. Lift it — $timeout above stays the
+        // guard on real queue workers.
+        @set_time_limit(0);
+
         $campaign->update(['status' => 'sending']);
 
         $campaign->recipients()
@@ -46,6 +53,17 @@ class SendBulkEmailCampaignJob implements ShouldQueue
                 $mergeTags = app(CampaignMergeTags::class);
 
                 foreach ($chunk as $recipient) {
+                    // A contact deleted between snapshot and send must cost one
+                    // recipient, not the whole campaign: unguarded, the null
+                    // deref below aborts the job mid-list and every remaining
+                    // recipient is silently never sent to.
+                    if (! $recipient->contact) {
+                        $recipient->update(['status' => 'failed', 'error' => 'Marketing contact no longer exists']);
+                        $campaign->increment('failed_count');
+
+                        continue;
+                    }
+
                     $unsubscribeUrl = url("/api/v1/marketing-contacts/unsubscribe/{$recipient->contact->unsubscribe_token}");
 
                     // Substitutes every merge tag for this one recipient:

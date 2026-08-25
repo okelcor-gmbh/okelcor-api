@@ -1056,15 +1056,22 @@ Route::prefix('v1')->group(function () {
         });
 
         // -----------------------------------------------------------------
-        // Security dashboard — security.view (super_admin, admin)
+        // Security dashboard — security.view (super_admin only)
         // -----------------------------------------------------------------
         Route::middleware('permission:security.view')->group(function () {
             Route::get('security/summary', [SecurityController::class, 'summary']);
             Route::get('security/events', [SecurityController::class, 'events']);
             Route::get('security/login-history', [SecurityController::class, 'loginHistory']);
             Route::get('security/2fa-status', [SecurityController::class, 'twoFactorStatus']);
+        });
 
-            // System health monitor
+        // -----------------------------------------------------------------
+        // System health monitor — system.view (super_admin, admin).
+        // Deliberately NOT security.view: when that was hardened to
+        // super_admin-only these routes went with it, and the panel's
+        // health section has been a wall of 403s for everyone else since.
+        // -----------------------------------------------------------------
+        Route::middleware('permission:system.view')->group(function () {
             Route::get('system/health', [SystemHealthController::class, 'index']);
             Route::get('system/errors', [SystemHealthController::class, 'errors']);
         });

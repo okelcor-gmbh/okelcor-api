@@ -124,6 +124,19 @@ class BulkEmailService
 
     public function dispatch(BulkEmailCampaign $campaign): void
     {
+        // On the sync driver a plain dispatch() runs the entire send inside
+        // the HTTP request. A market-sized campaign (a few hundred contacts at
+        // ~1s each) then outlives the web server's timeout: the marketer is
+        // shown an error while PHP quietly carries on delivering every email.
+        // After-response defers the send until the 201 has been flushed to the
+        // browser, so the UI reports the truth and can poll the campaign for
+        // progress. With a real queue driver the job is queued as normal.
+        if (config('queue.default') === 'sync') {
+            SendBulkEmailCampaignJob::dispatchAfterResponse($campaign->id);
+
+            return;
+        }
+
         SendBulkEmailCampaignJob::dispatch($campaign->id);
     }
 

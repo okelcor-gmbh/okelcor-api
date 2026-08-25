@@ -22,6 +22,7 @@ class SystemHealthController extends Controller
             'database'      => $this->checkDatabase(),
             'backups'       => $this->checkBackups(),
             'mail'          => $this->checkMail(),
+            'queue'         => $this->checkQueue(),
             'security'      => $this->checkSecurity(),
             'inquiries'     => $this->checkInquiryQueue(),
             'data_quality'  => $this->checkDataQuality(),
@@ -349,6 +350,61 @@ class SystemHealthController extends Controller
                 'fix_hint' => ! config('mail.order_email')
                     ? 'Set ORDER_EMAIL=support@okelcor.com in .env' : null,
             ]),
+        ];
+    }
+
+    /**
+     * The sync driver never writes to failed_jobs — an inline job that dies
+     * throws straight into the HTTP request — so without this group the
+     * dashboard reported 'pass' while campaign sends were timing out in the
+     * browser. This is the check that would have named that misconfiguration.
+     *
+     * @return array<int, array>
+     */
+    public function checkQueue(): array
+    {
+        return [
+            $this->check('queue_driver', 'Queue Driver', function () {
+                $driver = (string) config('queue.default');
+                $sync   = $driver === 'sync';
+
+                return [
+                    'status'   => $sync ? 'warning' : 'pass',
+                    'severity' => 'high',
+                    'message'  => $sync
+                        ? 'QUEUE_CONNECTION = sync — queued work (bulk email campaigns, imports) runs inside web requests'
+                        : 'QUEUE_CONNECTION = ' . ($driver !== '' ? $driver : 'not set'),
+                    'fix_hint' => $sync
+                        ? 'Set QUEUE_CONNECTION=database and keep a worker running (php artisan queue:work) under Supervisor or cron'
+                        : null,
+                ];
+            }),
+            $this->check('stuck_campaigns', 'Bulk Campaigns Stuck Mid-Send', function () {
+                try {
+                    $stuck = DB::table('bulk_email_campaigns')
+                        ->whereIn('status', ['queued', 'sending'])
+                        ->where('created_at', '<', now()->subHours(3))
+                        ->count();
+                } catch (\Throwable) {
+                    return [
+                        'status'   => 'pass',
+                        'severity' => 'low',
+                        'message'  => 'Campaign check unavailable',
+                        'fix_hint' => null,
+                    ];
+                }
+
+                return [
+                    'status'   => $stuck > 0 ? 'warning' : 'pass',
+                    'severity' => 'medium',
+                    'message'  => $stuck > 0
+                        ? "{$stuck} campaign(s) queued/sending for over 3 hours — the send likely died mid-list"
+                        : 'No campaigns stuck in queued/sending',
+                    'fix_hint' => $stuck > 0
+                        ? 'Re-dispatch is safe: the job only ever processes recipients still marked pending'
+                        : null,
+                ];
+            }),
         ];
     }
 

@@ -75,9 +75,12 @@ class AdminBulkEmailController extends Controller
         ArticleHtmlSanitizer $sanitizer
     ): JsonResponse {
         $data = $request->validate([
-            'blocks'    => ['required_without:body_html', 'array'],
+            // `nullable` matters: clients serialize an unused editor as
+            // `blocks: null` alongside a pasted body, and a bare `array` rule
+            // turns that into a spurious 422 on a perfectly sendable email.
+            'blocks'    => ['nullable', 'required_without:body_html', 'array'],
             'theme'     => ['nullable', 'array'],
-            'body_html' => ['required_without:blocks', 'string'],
+            'body_html' => ['nullable', 'required_without:blocks', 'string'],
             'subject'   => ['nullable', 'string', 'max:255'],
         ]);
 
@@ -89,7 +92,10 @@ class AdminBulkEmailController extends Controller
             $html = $renderer->render($data['blocks'], $data['theme'] ?? []);
             $text = $renderer->renderText($data['blocks']);
         } else {
-            $html = $sanitizer->sanitize($data['body_html']);
+            $html = $this->sanitizePastedBody($sanitizer, $data['body_html'] ?? null);
+            if ($html instanceof JsonResponse) {
+                return $html;
+            }
             $text = null;
         }
 
@@ -127,9 +133,9 @@ class AdminBulkEmailController extends Controller
         $data = $request->validate([
             'to'        => ['required', 'email', 'max:255'],
             'subject'   => ['required', 'string', 'max:255'],
-            'blocks'    => ['required_without:body_html', 'array'],
+            'blocks'    => ['nullable', 'required_without:body_html', 'array'],
             'theme'     => ['nullable', 'array'],
-            'body_html' => ['required_without:blocks', 'string'],
+            'body_html' => ['nullable', 'required_without:blocks', 'string'],
         ]);
 
         if (! empty($data['blocks'])) {
@@ -140,7 +146,10 @@ class AdminBulkEmailController extends Controller
             $html = $renderer->render($data['blocks'], $data['theme'] ?? []);
             $text = $renderer->renderText($data['blocks']);
         } else {
-            $html = $sanitizer->sanitize($data['body_html']);
+            $html = $this->sanitizePastedBody($sanitizer, $data['body_html'] ?? null);
+            if ($html instanceof JsonResponse) {
+                return $html;
+            }
             $text = null;
         }
 
@@ -193,9 +202,9 @@ class AdminBulkEmailController extends Controller
     ): JsonResponse {
         $request->validate([
             'subject'         => ['required', 'string', 'max:255'],
-            'blocks'          => ['required_without:body_html', 'array'],
+            'blocks'          => ['nullable', 'required_without:body_html', 'array'],
             'theme'           => ['nullable', 'array'],
-            'body_html'       => ['required_without:blocks', 'string'],
+            'body_html'       => ['nullable', 'required_without:blocks', 'string'],
             'filters'           => ['nullable', 'array'],
             'filters.market'    => ['nullable', 'string', 'max:50'],
             // Several markets in one send. A contact in two of them is still
@@ -231,7 +240,10 @@ class AdminBulkEmailController extends Controller
         } else {
             $blocks   = null;
             $theme    = null;
-            $bodyHtml = $sanitizer->sanitize($request->input('body_html'));
+            $bodyHtml = $this->sanitizePastedBody($sanitizer, $request->input('body_html'));
+            if ($bodyHtml instanceof JsonResponse) {
+                return $bodyHtml;
+            }
             $bodyText = null;
         }
 
@@ -260,9 +272,19 @@ class AdminBulkEmailController extends Controller
         // send, and failing the request over draft bookkeeping would tell the
         // marketer their send failed when it did not.
         if ($request->filled('draft_id')) {
-            CampaignDraft::where('admin_user_id', $request->user()->id)
-                ->where('id', $request->integer('draft_id'))
-                ->delete();
+            try {
+                CampaignDraft::where('admin_user_id', $request->user()->id)
+                    ->where('id', $request->integer('draft_id'))
+                    ->delete();
+            } catch (\Throwable $e) {
+                // The campaign is already queued; a draft-bookkeeping failure
+                // must not be reported to the marketer as a failed send.
+                Log::warning('BulkEmail: draft cleanup failed after queueing campaign', [
+                    'campaign_id' => $campaign->id,
+                    'draft_id'    => $request->integer('draft_id'),
+                    'error'       => $e->getMessage(),
+                ]);
+            }
         }
 
         return response()->json([
@@ -280,6 +302,34 @@ class AdminBulkEmailController extends Controller
      *
      * @param  array<int, string>  $errors
      */
+    /**
+     * Sanitize a pasted HTML body, or explain why it can't be used.
+     *
+     * Returns the cleaned HTML, or a 422 JsonResponse ready to send back:
+     * an empty/missing body (e.g. `blocks: []` alongside no `body_html`
+     * slips past `required_without`), or HTML the purifier cannot process
+     * — which without this guard surfaced as a bare 500 the panel could
+     * only render as "something went wrong".
+     */
+    private function sanitizePastedBody(ArticleHtmlSanitizer $sanitizer, ?string $bodyHtml): string|JsonResponse
+    {
+        if ($bodyHtml === null || trim($bodyHtml) === '') {
+            return response()->json([
+                'message' => 'The email has no content yet — add blocks or paste the HTML body.',
+                'code'    => 'empty_body',
+            ], 422);
+        }
+
+        try {
+            return $sanitizer->sanitize($bodyHtml);
+        } catch (\RuntimeException) {
+            return response()->json([
+                'message' => 'That HTML could not be processed. Simplify the pasted markup and try again.',
+                'code'    => 'body_unprocessable',
+            ], 422);
+        }
+    }
+
     private function blockErrors(array $errors): JsonResponse
     {
         return response()->json([

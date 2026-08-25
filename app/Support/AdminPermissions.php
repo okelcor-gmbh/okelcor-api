@@ -36,6 +36,14 @@ class AdminPermissions
         'security.view'           => ['super_admin'],   // hardened: super_admin only
         'security.manage'         => ['super_admin'],
 
+        // ── System health ─────────────────────────────────────────────────
+        // Split out of security.view: hardening that to super_admin-only was
+        // right for the audit trail, but it silently took the system-health
+        // panel away from `admin` too, and the section has 403'd for them
+        // since. Operational state (queue, mail, backups) is an admin
+        // concern; login/audit history stays super_admin-only above.
+        'system.view'             => ['super_admin', 'admin'],
+
         // ── Orders ────────────────────────────────────────────────────────
         // `support` added in Session 84, settling a divergence frontend found:
         // the admin panel has been offering the Orders page to support all
