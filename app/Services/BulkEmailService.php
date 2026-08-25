@@ -109,6 +109,12 @@ class BulkEmailService
                     'contact_id'  => $contactId,
                     'email'       => $email,
                     'status'      => 'pending',
+                    // Per-recipient engagement key for the open pixel and
+                    // click redirects — survives-if-absent for deploys where
+                    // the tracking migration has not run yet.
+                    ...(Schema::hasColumn('bulk_email_campaign_recipients', 'tracking_token')
+                        ? ['tracking_token' => \Illuminate\Support\Str::random(40)]
+                        : []),
                     'created_at'  => $now,
                     'updated_at'  => $now,
                 ];

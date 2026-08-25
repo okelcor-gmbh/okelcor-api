@@ -294,6 +294,101 @@ class AdminBulkEmailController extends Controller
     }
 
     // -------------------------------------------------------------------------
+    // GET /api/v1/admin/bulk-emails/scoreboard — marketing.manage
+    //
+    // The boss's feedback tracker: every tracked campaign's open rate and
+    // completion rate (a recipient who clicked through completed), rolled up
+    // into a 0–100 score per campaign and per marketer. Campaigns sent
+    // before tracking existed report as untracked, never as zero engagement.
+    //
+    // Score = 60% open rate + 40% completion rate. Opens are directional —
+    // image-blocking undercounts them and Apple's mail privacy inflates
+    // them — which is why completion (a real click) carries meaningful
+    // weight despite being the rarer event.
+    // -------------------------------------------------------------------------
+    public function scoreboard(): JsonResponse
+    {
+        $stats = \DB::table('bulk_email_campaign_recipients')
+            ->groupBy('campaign_id')
+            ->select(
+                'campaign_id',
+                \DB::raw('SUM(CASE WHEN tracking_token IS NOT NULL THEN 1 ELSE 0 END) as tracked'),
+                \DB::raw("SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) as delivered"),
+                \DB::raw('SUM(CASE WHEN opened_at IS NOT NULL THEN 1 ELSE 0 END) as opened'),
+                \DB::raw('SUM(CASE WHEN clicked_at IS NOT NULL THEN 1 ELSE 0 END) as clicked'),
+            )
+            ->get()->keyBy('campaign_id');
+
+        $campaigns = BulkEmailCampaign::with('creator:id,name,display_name')
+            ->orderByDesc('created_at')
+            ->limit(100)
+            ->get()
+            ->map(function (BulkEmailCampaign $c) use ($stats) {
+                $s         = $stats->get($c->id);
+                $tracked   = (int) ($s->tracked ?? 0) > 0;
+                $delivered = (int) ($s->delivered ?? $c->sent_count);
+                $opened    = (int) ($s->opened ?? 0);
+                $clicked   = (int) ($s->clicked ?? 0);
+
+                $openRate       = $tracked && $delivered > 0 ? round($opened / $delivered * 100, 1) : null;
+                $completionRate = $tracked && $delivered > 0 ? round($clicked / $delivered * 100, 1) : null;
+
+                return [
+                    'id'              => $c->id,
+                    'subject'         => $c->subject,
+                    'created_by'      => $c->creator ? trim($c->creator->display_name ?: $c->creator->name) : null,
+                    'created_by_id'   => $c->created_by,
+                    'created_at'      => $c->created_at?->toIso8601String(),
+                    'status'          => $c->status,
+                    'delivered'       => $delivered,
+                    'opened'          => $opened,
+                    'clicked'         => $clicked,
+                    'open_rate'       => $openRate,
+                    'completion_rate' => $completionRate,
+                    'tracked'         => $tracked,
+                    'score'           => ($openRate !== null && $completionRate !== null)
+                        ? (int) round(0.6 * $openRate + 0.4 * $completionRate)
+                        : null,
+                ];
+            })->values();
+
+        // Per marketer, over their TRACKED campaigns only.
+        $marketers = $campaigns
+            ->filter(fn ($c) => $c['tracked'] && $c['created_by_id'] !== null)
+            ->groupBy('created_by_id')
+            ->map(function ($group) {
+                $delivered = $group->sum('delivered');
+                $opened    = $group->sum('opened');
+                $clicked   = $group->sum('clicked');
+                $openRate       = $delivered > 0 ? round($opened / $delivered * 100, 1) : 0.0;
+                $completionRate = $delivered > 0 ? round($clicked / $delivered * 100, 1) : 0.0;
+
+                return [
+                    'name'            => $group->first()['created_by'] ?? 'Unknown',
+                    'campaigns'       => $group->count(),
+                    'delivered'       => $delivered,
+                    'opened'          => $opened,
+                    'clicked'         => $clicked,
+                    'open_rate'       => $openRate,
+                    'completion_rate' => $completionRate,
+                    'score'           => (int) round(0.6 * $openRate + 0.4 * $completionRate),
+                ];
+            })->sortByDesc('score')->values();
+
+        return response()->json([
+            'data' => [
+                'campaigns' => $campaigns,
+                'marketers' => $marketers,
+            ],
+            'meta' => [
+                'score_formula' => 'score = 60% open rate + 40% completion rate (completion = recipient clicked a link)',
+                'caveats'       => 'Opens are directional: image-blocking undercounts, Apple Mail privacy inflates. Clicks are hard evidence.',
+            ],
+            'message' => 'success',
+        ]);
+    }
+
+    // -------------------------------------------------------------------------
 
     /**
      * Block problems come back as a plain list under `errors.blocks`, already

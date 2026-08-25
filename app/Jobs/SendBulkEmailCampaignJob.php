@@ -83,6 +83,12 @@ class SendBulkEmailCampaignJob implements ShouldQueue
 
                     $personalizedSubject = $mergeTags->apply($campaign->subject, $recipient->contact, $unsubscribeUrl);
 
+                    // Engagement tracking: the open pixel + signed click
+                    // redirects, per recipient. This is what feeds the
+                    // marketer scoreboard's open and completion rates.
+                    $personalizedBody = app(\App\Services\CampaignTrackingService::class)
+                        ->instrument($personalizedBody, $recipient, $unsubscribeUrl);
+
                     try {
                         Mail::to($recipient->email)->send(
                             new BulkCampaignEmail($personalizedSubject, $personalizedBody, $unsubscribeUrl, $personalizedText)

@@ -357,6 +357,12 @@ Route::prefix('v1')->group(function () {
     // Marketing contact unsubscribe (GET — no rate limit needed)
     Route::get('marketing-contacts/unsubscribe/{token}', [MarketingContactController::class, 'unsubscribe']);
 
+    // Campaign engagement tracking — the open pixel and the signed click
+    // redirect. Public by necessity (loaded from recipients' mail clients);
+    // both fail silently toward the reader.
+    Route::get('campaign/open/{token}.gif', [\App\Http\Controllers\CampaignTrackingController::class, 'open']);
+    Route::get('campaign/click/{token}', [\App\Http\Controllers\CampaignTrackingController::class, 'click']);
+
     // -------------------------------------------------------------------------
     // Admin auth (no Sanctum guard — these issue the token)
     // -------------------------------------------------------------------------
@@ -955,6 +961,8 @@ Route::prefix('v1')->group(function () {
 
             Route::get('bulk-emails', [AdminBulkEmailController::class, 'index']);
             Route::get('bulk-emails/recipient-count', [AdminBulkEmailController::class, 'recipientCount']);
+            // Before bulk-emails/{id}: literal segment must win the match.
+            Route::get('bulk-emails/scoreboard', [AdminBulkEmailController::class, 'scoreboard']);
             Route::post('bulk-emails/preview', [AdminBulkEmailController::class, 'preview']);
             Route::post('bulk-emails/test-send', [AdminBulkEmailController::class, 'testSend']);
             Route::get('bulk-emails/{id}', [AdminBulkEmailController::class, 'show']);
