@@ -29,6 +29,7 @@ use App\Http\Controllers\Admin\AdminBrandController;
 use App\Http\Controllers\Admin\AdminCategoryController;
 use App\Http\Controllers\Admin\AdminBehaviourAnalyticsController;
 use App\Http\Controllers\Admin\AdminMarketIntelligenceController;
+use App\Http\Controllers\Admin\AdminProductMixController;
 use App\Http\Controllers\Admin\AdminBulkEmailController;
 use App\Http\Controllers\Admin\AdminCampaignImportController;
 use App\Http\Controllers\Admin\AdminCampaignTemplateController;
@@ -408,6 +409,10 @@ Route::prefix('v1')->group(function () {
             // above any future `analytics/markets/{code}` wildcard.
             Route::get('analytics/markets/export', [AdminMarketIntelligenceController::class, 'export']);
             Route::get('analytics/markets', [AdminMarketIntelligenceController::class, 'index']);
+
+            // Promotion insight — new-vs-used sales split and repeat-buyer
+            // bundle suggestions per country (marketing proposal)
+            Route::get('analytics/product-mix', [AdminProductMixController::class, 'index']);
         });
 
         // Auth — all authenticated admin users
