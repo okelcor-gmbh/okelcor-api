@@ -24,9 +24,30 @@ class FinanceSnapshotTest extends TestCase
         parent::setUp();
 
         Schema::disableForeignKeyConstraints();
-        foreach (['finance_liquidity_entries', 'finance_snapshot_items', 'admin_security_events', 'admin_users'] as $t) {
+        foreach (['finance_liquidity_entries', 'finance_snapshot_items', 'admin_notifications', 'admin_security_events', 'quote_requests', 'admin_users'] as $t) {
             Schema::dropIfExists($t);
         }
+
+        // Minimal quote_requests: the My Work endpoint reads it for the CRM
+        // groups alongside the finance tasks under test here.
+        Schema::create('quote_requests', function (Blueprint $table) {
+            $table->id();
+            $table->string('ref_number')->nullable();
+            $table->string('company_name')->nullable();
+            $table->string('full_name')->nullable();
+            $table->string('status', 40)->nullable();
+            $table->string('qualification_status', 40)->nullable();
+            $table->string('lead_priority', 20)->nullable();
+            $table->unsignedBigInteger('assigned_to')->nullable();
+            $table->timestamp('assigned_at')->nullable();
+            $table->timestamp('follow_up_at')->nullable();
+            $table->timestamp('follow_up_completed_at')->nullable();
+            $table->string('proposal_status', 40)->nullable();
+            $table->string('proposal_number')->nullable();
+            $table->timestamp('proposal_accepted_at')->nullable();
+            $table->unsignedBigInteger('order_id')->nullable();
+            $table->timestamps();
+        });
 
         Schema::create('admin_users', function (Blueprint $table) {
             $table->id();
@@ -53,10 +74,29 @@ class FinanceSnapshotTest extends TestCase
             $table->timestamps();
         });
 
+        Schema::create('admin_notifications', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('admin_user_id')->constrained('admin_users')->cascadeOnDelete();
+            $table->string('type', 100);
+            $table->string('severity', 20)->default('info');
+            $table->string('title', 255);
+            $table->text('body')->nullable();
+            $table->text('message')->nullable();
+            $table->string('action_url', 255)->nullable();
+            $table->string('link', 255)->nullable();
+            $table->string('related_type', 100)->nullable();
+            $table->unsignedBigInteger('related_id')->nullable();
+            $table->timestamp('read_at')->nullable();
+            $table->timestamp('dismissed_at')->nullable();
+            $table->json('metadata')->nullable();
+            $table->timestamps();
+        });
+
         Schema::create('finance_snapshot_items', function (Blueprint $table) {
             $table->id();
             $table->string('category', 40);
             $table->string('person', 100);
+            $table->foreignId('assigned_admin_id')->nullable()->constrained('admin_users')->nullOnDelete();
             $table->string('ref', 50);
             $table->date('date')->nullable();
             $table->string('client', 255)->nullable();
@@ -83,7 +123,7 @@ class FinanceSnapshotTest extends TestCase
     protected function tearDown(): void
     {
         Schema::disableForeignKeyConstraints();
-        foreach (['finance_liquidity_entries', 'finance_snapshot_items', 'admin_security_events', 'admin_users'] as $t) {
+        foreach (['finance_liquidity_entries', 'finance_snapshot_items', 'admin_notifications', 'admin_security_events', 'quote_requests', 'admin_users'] as $t) {
             Schema::dropIfExists($t);
         }
         Schema::enableForeignKeyConstraints();
@@ -238,6 +278,149 @@ class FinanceSnapshotTest extends TestCase
         $this->assertDatabaseHas('finance_liquidity_entries', [
             'line' => 'salaries', 'period' => 'next_month', 'reference' => 'PAY-SEP',
         ]);
+    }
+
+    // -------------------------------------------------------------------------
+    // Staff tagging, My Work, and reminders
+    // -------------------------------------------------------------------------
+
+    public function test_tagging_a_staff_member_notifies_them(): void
+    {
+        $finance = $this->admin('finance');
+        $edinah  = $this->admin('marketing');
+
+        $this->actingAs($finance, 'sanctum')
+            ->postJson('/api/v1/admin/finance-snapshot/items', [
+                'category' => 'OPEN PROPOSALS', 'person' => 'Edinah', 'ref' => 'AN-1298',
+                'assigned_admin_id' => $edinah->id, 'client' => 'NIOS GROUP', 'amount' => 20712,
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.assigned_admin_id', $edinah->id);
+
+        $this->assertDatabaseHas('admin_notifications', [
+            'admin_user_id' => $edinah->id,
+            'type'          => 'finance_task_assigned',
+            'related_type'  => 'finance_snapshot_item',
+        ]);
+    }
+
+    public function test_self_assignment_and_plain_edits_do_not_notify(): void
+    {
+        $finance = $this->admin('finance');
+        $edinah  = $this->admin('marketing');
+
+        // Assigning to yourself: silence.
+        $self = $this->actingAs($finance, 'sanctum')
+            ->postJson('/api/v1/admin/finance-snapshot/items', [
+                'category' => 'OPEN ORDERS', 'person' => 'Me', 'ref' => 'SELF-1',
+                'assigned_admin_id' => $finance->id, 'amount' => 1,
+            ])->assertCreated()->json('data');
+
+        // Editing an amount on an already-assigned record: silence.
+        $item = $this->actingAs($finance, 'sanctum')
+            ->postJson('/api/v1/admin/finance-snapshot/items', [
+                'category' => 'OPEN ORDERS', 'person' => 'Edinah', 'ref' => 'EDIT-1',
+                'assigned_admin_id' => $edinah->id, 'amount' => 1,
+            ])->assertCreated()->json('data');
+
+        $before = \DB::table('admin_notifications')->where('admin_user_id', $edinah->id)->count();
+
+        $this->actingAs($finance, 'sanctum')
+            ->putJson("/api/v1/admin/finance-snapshot/items/{$item['id']}", [
+                'category' => 'OPEN ORDERS', 'person' => 'Edinah', 'ref' => 'EDIT-1',
+                'assigned_admin_id' => $edinah->id, 'amount' => 999,
+            ])->assertOk();
+
+        $this->assertSame($before, \DB::table('admin_notifications')->where('admin_user_id', $edinah->id)->count());
+        $this->assertSame(0, \DB::table('admin_notifications')->where('admin_user_id', $finance->id)->count());
+        $this->assertSame('SELF-1', $self['ref']);
+    }
+
+    public function test_my_work_lists_tagged_finance_records_for_the_assignee_only(): void
+    {
+        $finance = $this->admin('finance');
+        $edinah  = $this->admin('marketing');
+
+        $this->actingAs($finance, 'sanctum')->postJson('/api/v1/admin/finance-snapshot/items', [
+            'category' => 'OUTSTANDING INVOICES', 'person' => 'Edinah', 'ref' => 'INV-9',
+            'assigned_admin_id' => $edinah->id, 'client' => 'Muscali Tyres', 'amount' => 500,
+        ])->assertCreated();
+
+        $this->actingAs($edinah, 'sanctum')
+            ->getJson('/api/v1/admin/my-work')
+            ->assertOk()
+            ->assertJsonPath('meta.counts.finance_tasks', 1)
+            ->assertJsonPath('data.finance_tasks.0.type', 'finance_task')
+            ->assertJsonPath('data.finance_tasks.0.editable', true);
+
+        $this->actingAs($finance, 'sanctum')
+            ->getJson('/api/v1/admin/my-work')
+            ->assertOk()
+            ->assertJsonPath('meta.counts.finance_tasks', 0);
+    }
+
+    public function test_the_assignee_can_update_status_from_my_work_and_the_creator_hears_back(): void
+    {
+        $finance = $this->admin('finance');
+        $edinah  = $this->admin('marketing');
+        $other   = $this->admin('viewer');
+
+        $item = $this->actingAs($finance, 'sanctum')->postJson('/api/v1/admin/finance-snapshot/items', [
+            'category' => 'OPEN PROPOSALS', 'person' => 'Edinah', 'ref' => 'AN-1333',
+            'assigned_admin_id' => $edinah->id, 'amount' => 20000,
+        ])->json('data');
+
+        // A bystander may not touch it.
+        $this->actingAs($other, 'sanctum')
+            ->patchJson("/api/v1/admin/my-work/finance-items/{$item['id']}", ['status' => 'Completed'])
+            ->assertForbidden();
+
+        // The assignee may, without finance.manage.
+        $this->actingAs($edinah, 'sanctum')
+            ->patchJson("/api/v1/admin/my-work/finance-items/{$item['id']}", [
+                'status' => 'In Progress', 'comment' => 'Client reviewing, call booked Friday',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'In Progress');
+
+        $this->assertDatabaseHas('admin_notifications', [
+            'admin_user_id' => $finance->id,
+            'type'          => 'finance_task_updated',
+        ]);
+    }
+
+    public function test_due_and_overdue_tasks_are_reminded_once_per_day(): void
+    {
+        $edinah = $this->admin('marketing');
+
+        FinanceSnapshotItem::create([
+            'category' => 'PENDING RECEIPTS', 'person' => 'Edinah', 'ref' => 'RE-7',
+            'assigned_admin_id' => $edinah->id, 'date' => now()->subDays(3)->toDateString(),
+            'status' => 'Pending', 'amount' => 750,
+        ]);
+        // Closed and future items must stay silent.
+        FinanceSnapshotItem::create([
+            'category' => 'PENDING RECEIPTS', 'person' => 'Edinah', 'ref' => 'RE-8',
+            'assigned_admin_id' => $edinah->id, 'date' => now()->subDay()->toDateString(),
+            'status' => 'Completed', 'amount' => 10,
+        ]);
+        FinanceSnapshotItem::create([
+            'category' => 'PENDING RECEIPTS', 'person' => 'Edinah', 'ref' => 'RE-9',
+            'assigned_admin_id' => $edinah->id, 'date' => now()->addWeek()->toDateString(),
+            'status' => 'Pending', 'amount' => 10,
+        ]);
+
+        $this->artisan('finance:remind-assignees')->assertSuccessful();
+        $this->artisan('finance:remind-assignees')->assertSuccessful();   // same day: deduped
+
+        $reminders = \DB::table('admin_notifications')
+            ->where('admin_user_id', $edinah->id)
+            ->where('type', 'finance_task_reminder')
+            ->get();
+
+        $this->assertCount(1, $reminders);
+        $this->assertStringContainsString('RE-7', $reminders[0]->title);
+        $this->assertStringContainsString('overdue', $reminders[0]->title);
     }
 
     public function test_bulk_item_upload(): void

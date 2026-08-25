@@ -31,9 +31,13 @@ class FinanceSnapshotItem extends Model
         'Cancelled',
     ];
 
+    /** Statuses that mean the record needs nobody's attention any more. */
+    public const CLOSED_STATUSES = ['Completed', 'Cancelled'];
+
     protected $fillable = [
         'category',
         'person',
+        'assigned_admin_id',
         'ref',
         'date',
         'client',
@@ -47,4 +51,9 @@ class FinanceSnapshotItem extends Model
         'date'   => 'date:Y-m-d',
         'amount' => 'float',
     ];
+
+    public function assignee()
+    {
+        return $this->belongsTo(AdminUser::class, 'assigned_admin_id');
+    }
 }

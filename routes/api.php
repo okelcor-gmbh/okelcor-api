@@ -427,6 +427,10 @@ Route::prefix('v1')->group(function () {
 
         // Work queue (CRM-3B) — actionable work for the logged-in admin
         Route::get('my-work', [AdminWorkQueueController::class, 'index']);
+        // Assignee self-service on a tagged finance record: being the
+        // assignee is the authorization (checked in the controller), so no
+        // permission middleware here.
+        Route::patch('my-work/finance-items/{id}', [AdminWorkQueueController::class, 'updateFinanceItem']);
 
         // 2FA management — all authenticated admin users
         Route::prefix('2fa')->group(function () {

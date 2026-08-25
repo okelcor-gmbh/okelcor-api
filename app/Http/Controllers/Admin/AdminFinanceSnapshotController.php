@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\AdminUser;
 use App\Models\FinanceLiquidityEntry;
 use App\Models\FinanceSnapshotItem;
 use App\Services\AdminAuditLogger;
+use App\Services\AdminNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -26,7 +28,8 @@ class AdminFinanceSnapshotController extends Controller
     {
         return response()->json([
             'data' => [
-                'items'     => FinanceSnapshotItem::orderBy('category')->orderBy('person')->orderBy('date')
+                'items'     => FinanceSnapshotItem::with('assignee:id,name,display_name')
+                    ->orderBy('category')->orderBy('person')->orderBy('date')
                     ->get()->map(fn ($i) => $this->formatItem($i))->values(),
                 'liquidity' => FinanceLiquidityEntry::orderBy('line')->orderBy('period')->orderBy('id')
                     ->get()->map(fn ($e) => $this->formatEntry($e))->values(),
@@ -35,6 +38,13 @@ class AdminFinanceSnapshotController extends Controller
                     'statuses'        => FinanceSnapshotItem::STATUSES,
                     'liquidity_lines' => collect(FinanceLiquidityEntry::LINES)
                         ->map(fn ($label, $key) => ['key' => $key, 'label' => $label])->values(),
+                    // For the "assign to staff" picker: tagging someone is how
+                    // a record reaches their My Work queue and notifies them.
+                    'staff'           => AdminUser::where('is_active', true)
+                        ->orderBy('name')
+                        ->get(['id', 'name', 'display_name'])
+                        ->map(fn ($a) => ['id' => $a->id, 'name' => trim($a->display_name ?: $a->name)])
+                        ->values(),
                 ],
             ],
         ]);
@@ -49,7 +59,9 @@ class AdminFinanceSnapshotController extends Controller
 
         $item = FinanceSnapshotItem::create($data);
 
-        return response()->json(['data' => $this->formatItem($item)], 201);
+        $this->notifyAssignee($item, $request->user()->id);
+
+        return response()->json(['data' => $this->formatItem($item->load('assignee:id,name,display_name'))], 201);
     }
 
     /**
@@ -86,9 +98,17 @@ class AdminFinanceSnapshotController extends Controller
     public function updateItem(Request $request, int $id): JsonResponse
     {
         $item = FinanceSnapshotItem::findOrFail($id);
+
+        $previousAssignee = $item->assigned_admin_id;
         $item->update($this->validateItem($request));
 
-        return response()->json(['data' => $this->formatItem($item->fresh())]);
+        // Notify only on a NEW assignment — editing an amount must not ping
+        // the person who has held the task all along.
+        if ($item->assigned_admin_id && $item->assigned_admin_id !== $previousAssignee) {
+            $this->notifyAssignee($item, $request->user()->id);
+        }
+
+        return response()->json(['data' => $this->formatItem($item->fresh()->load('assignee:id,name,display_name'))]);
     }
 
     public function destroyItem(int $id): JsonResponse
@@ -210,14 +230,15 @@ class AdminFinanceSnapshotController extends Controller
     private function itemRules(): array
     {
         return [
-            'category' => ['required', Rule::in(FinanceSnapshotItem::CATEGORIES)],
-            'person'   => ['required', 'string', 'max:100'],
-            'ref'      => ['required', 'string', 'max:50'],
-            'date'     => ['nullable', 'date'],
-            'client'   => ['nullable', 'string', 'max:255'],
-            'status'   => ['nullable', 'string', 'max:30'],
-            'comment'  => ['nullable', 'string', 'max:500'],
-            'amount'   => ['required', 'numeric'],
+            'category'          => ['required', Rule::in(FinanceSnapshotItem::CATEGORIES)],
+            'person'            => ['required', 'string', 'max:100'],
+            'assigned_admin_id' => ['nullable', 'integer', Rule::exists('admin_users', 'id')->where('is_active', true)],
+            'ref'               => ['required', 'string', 'max:50'],
+            'date'              => ['nullable', 'date'],
+            'client'            => ['nullable', 'string', 'max:255'],
+            'status'            => ['nullable', 'string', 'max:30'],
+            'comment'           => ['nullable', 'string', 'max:500'],
+            'amount'            => ['required', 'numeric'],
         ];
     }
 
@@ -236,15 +257,46 @@ class AdminFinanceSnapshotController extends Controller
             ->first(fn ($s) => strcasecmp($s, $status) === 0);
 
         return [
-            'category' => $data['category'],
-            'person'   => trim((string) $data['person']),
-            'ref'      => trim((string) $data['ref']),
-            'date'     => $data['date'] ?? null,
-            'client'   => $data['client'] ?? null,
-            'status'   => $matched ?? 'Pending',
-            'comment'  => $data['comment'] ?? null,
-            'amount'   => round((float) $data['amount'], 2),
+            'category'          => $data['category'],
+            'person'            => trim((string) $data['person']),
+            'assigned_admin_id' => $data['assigned_admin_id'] ?? null,
+            'ref'               => trim((string) $data['ref']),
+            'date'              => $data['date'] ?? null,
+            'client'            => $data['client'] ?? null,
+            'status'            => $matched ?? 'Pending',
+            'comment'           => $data['comment'] ?? null,
+            'amount'            => round((float) $data['amount'], 2),
         ];
+    }
+
+    /**
+     * Tell a tagged staff member what landed on their plate. Best-effort by
+     * design — AdminNotificationService catches its own failures — and never
+     * self-notifies: assigning your own task needs no announcement.
+     */
+    private function notifyAssignee(FinanceSnapshotItem $item, int $actorId): void
+    {
+        if (! $item->assigned_admin_id || $item->assigned_admin_id === $actorId) {
+            return;
+        }
+
+        $bodyParts = array_filter([
+            $item->client,
+            'Amount ' . number_format($item->amount, 2),
+            $item->date ? 'Due ' . $item->date->format('d M Y') : null,
+            $item->comment,
+        ]);
+
+        AdminNotificationService::notifyUser(
+            adminUserId: $item->assigned_admin_id,
+            type: 'finance_task_assigned',
+            title: "Finance task for you: {$item->ref} — " . ucwords(strtolower($item->category)),
+            body: implode(' · ', $bodyParts) ?: null,
+            actionUrl: '/admin/my-work',
+            severity: 'info',
+            relatedType: 'finance_snapshot_item',
+            relatedId: $item->id,
+        );
     }
 
     private function validateEntry(Request $request): array
@@ -261,15 +313,17 @@ class AdminFinanceSnapshotController extends Controller
     private function formatItem(FinanceSnapshotItem $i): array
     {
         return [
-            'id'       => $i->id,
-            'category' => $i->category,
-            'person'   => $i->person,
-            'ref'      => $i->ref,
-            'date'     => $i->date?->format('Y-m-d'),
-            'client'   => $i->client,
-            'status'   => $i->status,
-            'comment'  => $i->comment,
-            'amount'   => (float) $i->amount,
+            'id'                => $i->id,
+            'category'          => $i->category,
+            'person'            => $i->person,
+            'assigned_admin_id' => $i->assigned_admin_id,
+            'assignee_name'     => $i->assignee ? trim($i->assignee->display_name ?: $i->assignee->name) : null,
+            'ref'               => $i->ref,
+            'date'              => $i->date?->format('Y-m-d'),
+            'client'            => $i->client,
+            'status'            => $i->status,
+            'comment'           => $i->comment,
+            'amount'            => (float) $i->amount,
         ];
     }
 

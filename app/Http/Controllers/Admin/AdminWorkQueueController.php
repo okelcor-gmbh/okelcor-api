@@ -5,10 +5,13 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\CustomerAccessRequest;
 use App\Models\Customer;
+use App\Models\FinanceSnapshotItem;
 use App\Models\QuoteRequest;
+use App\Services\AdminNotificationService;
 use App\Support\AdminPermissions;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 /**
  * CRM-3B — "My Work" queue.
@@ -83,6 +86,34 @@ class AdminWorkQueueController extends Controller
                 'status'     => 'accepted',
             ])->values();
 
+        // Finance snapshot records tagged to this person. try/catch because
+        // this code can reach production before the snapshot migration runs,
+        // and My Work must not 500 over a table that is not there yet.
+        $financeTasks = collect();
+        try {
+            $financeTasks = FinanceSnapshotItem::where('assigned_admin_id', $userId)
+                ->whereNotIn('status', FinanceSnapshotItem::CLOSED_STATUSES)
+                ->orderByRaw('date IS NULL, date')
+                ->limit(100)
+                ->get()
+                ->map(fn (FinanceSnapshotItem $i) => [
+                    'type'       => 'finance_task',
+                    'id'         => $i->id,
+                    'title'      => $i->ref . ($i->client ? " — {$i->client}" : ''),
+                    'subtitle'   => ucwords(strtolower($i->category))
+                        . ' · ' . number_format($i->amount, 2)
+                        . ($i->comment ? " · {$i->comment}" : ''),
+                    'priority'   => $i->date && $i->date->isPast() ? 'urgent' : ($i->status === 'Pending' ? 'high' : 'medium'),
+                    'due_at'     => $i->date?->toIso8601String(),
+                    'action_url' => '/admin/finance-snapshot',
+                    'status'     => $i->status,
+                    // Tells the panel this row can be updated in place by its
+                    // assignee via PATCH /admin/my-work/finance-items/{id}.
+                    'editable'   => true,
+                ])->values();
+        } catch (\Throwable) {
+        }
+
         $pendingApprovals = collect();
         $accessRequests   = collect();
 
@@ -124,6 +155,7 @@ class AdminWorkQueueController extends Controller
                 'assigned_leads'      => $assignedLeads,
                 'due_follow_ups'      => $dueFollowUps,
                 'proposals_accepted'  => $proposalsAccepted,
+                'finance_tasks'       => $financeTasks,
                 'pending_approvals'   => $pendingApprovals->values(),
                 'access_requests'     => $accessRequests->values(),
             ],
@@ -132,12 +164,67 @@ class AdminWorkQueueController extends Controller
                     'assigned_leads'     => $assignedLeads->count(),
                     'due_follow_ups'     => $dueFollowUps->count(),
                     'proposals_accepted' => $proposalsAccepted->count(),
+                    'finance_tasks'      => $financeTasks->count(),
                     'pending_approvals'  => $pendingApprovals->count(),
                     'access_requests'    => $accessRequests->count(),
                 ],
                 'can_manage_customers' => $canManageCustomers,
             ],
             'message' => 'success',
+        ]);
+    }
+
+    // ── PATCH /admin/my-work/finance-items/{id} ──────────────────────────────
+    //
+    // The assignee's half of the loop: the person a finance record was tagged
+    // to updates its status and comment from My Work, without needing
+    // finance.manage — being the assignee IS the authorization. Whoever
+    // created the record is notified of the change, so finance hears back
+    // without chasing anyone.
+    public function updateFinanceItem(Request $request, int $id): JsonResponse
+    {
+        $item = FinanceSnapshotItem::findOrFail($id);
+        $user = $request->user();
+
+        $mayEdit = $item->assigned_admin_id === $user->id
+            || $user->hasPermission('finance.manage');
+
+        if (! $mayEdit) {
+            return response()->json([
+                'message' => 'Only the person this task is assigned to (or finance) can update it.',
+            ], 403);
+        }
+
+        $data = $request->validate([
+            'status'  => ['required', Rule::in(FinanceSnapshotItem::STATUSES)],
+            'comment' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $previousStatus = $item->status;
+        $item->update([
+            'status'  => $data['status'],
+            'comment' => array_key_exists('comment', $data) && $data['comment'] !== null
+                ? $data['comment']
+                : $item->comment,
+        ]);
+
+        if ($item->created_by && $item->created_by !== $user->id && $previousStatus !== $item->status) {
+            AdminNotificationService::notifyUser(
+                adminUserId: $item->created_by,
+                type: 'finance_task_updated',
+                title: "{$user->name} set {$item->ref} to {$item->status}",
+                body: $item->comment,
+                actionUrl: '/admin/finance-snapshot',
+                severity: in_array($item->status, FinanceSnapshotItem::CLOSED_STATUSES, true) ? 'success' : 'info',
+                relatedType: 'finance_snapshot_item',
+                relatedId: $item->id,
+                dedupeKey: "finance_task_updated:{$item->id}:{$item->status}",
+            );
+        }
+
+        return response()->json([
+            'data'    => ['id' => $item->id, 'status' => $item->status, 'comment' => $item->comment],
+            'message' => "{$item->ref} updated.",
         ]);
     }
 
