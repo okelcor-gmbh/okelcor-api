@@ -284,24 +284,26 @@ class FinanceSnapshotTest extends TestCase
     // Staff tagging, My Work, and reminders
     // -------------------------------------------------------------------------
 
-    public function test_tagging_a_staff_member_notifies_them(): void
+    public function test_tagging_notifies_once_per_batch_not_once_per_record(): void
     {
         $finance = $this->admin('finance');
         $edinah  = $this->admin('marketing');
 
-        $this->actingAs($finance, 'sanctum')
-            ->postJson('/api/v1/admin/finance-snapshot/items', [
-                'category' => 'OPEN PROPOSALS', 'person' => 'Edinah', 'ref' => 'AN-1298',
-                'assigned_admin_id' => $edinah->id, 'client' => 'NIOS GROUP', 'amount' => 20712,
-            ])
-            ->assertCreated()
-            ->assertJsonPath('data.assigned_admin_id', $edinah->id);
+        // Finance tags three records in one sitting…
+        foreach (['AN-1298', 'AN-1327', 'AN-1333'] as $ref) {
+            $this->actingAs($finance, 'sanctum')
+                ->postJson('/api/v1/admin/finance-snapshot/items', [
+                    'category' => 'OPEN PROPOSALS', 'person' => 'Edinah', 'ref' => $ref,
+                    'assigned_admin_id' => $edinah->id, 'amount' => 100,
+                ])
+                ->assertCreated();
+        }
 
-        $this->assertDatabaseHas('admin_notifications', [
-            'admin_user_id' => $edinah->id,
-            'type'          => 'finance_task_assigned',
-            'related_type'  => 'finance_snapshot_item',
-        ]);
+        // …and Edinah gets ONE nudge, not three.
+        $this->assertSame(1, \DB::table('admin_notifications')
+            ->where('admin_user_id', $edinah->id)
+            ->where('type', 'finance_task_assigned')
+            ->count());
     }
 
     public function test_self_assignment_and_plain_edits_do_not_notify(): void
@@ -389,38 +391,54 @@ class FinanceSnapshotTest extends TestCase
         ]);
     }
 
-    public function test_due_and_overdue_tasks_are_reminded_once_per_day(): void
+    public function test_the_daily_digest_is_one_report_per_person_with_one_email(): void
     {
-        $edinah = $this->admin('marketing');
+        \Illuminate\Support\Facades\Mail::fake();
 
+        $edinah = $this->admin('marketing');
+        $lisa   = $this->admin('viewer');
+
+        // Edinah: two open (one overdue), one closed (must not appear).
         FinanceSnapshotItem::create([
             'category' => 'PENDING RECEIPTS', 'person' => 'Edinah', 'ref' => 'RE-7',
             'assigned_admin_id' => $edinah->id, 'date' => now()->subDays(3)->toDateString(),
             'status' => 'Pending', 'amount' => 750,
         ]);
-        // Closed and future items must stay silent.
+        FinanceSnapshotItem::create([
+            'category' => 'OPEN PROPOSALS', 'person' => 'Edinah', 'ref' => 'AN-2',
+            'assigned_admin_id' => $edinah->id, 'date' => now()->addWeek()->toDateString(),
+            'status' => 'Pending', 'amount' => 100,
+        ]);
         FinanceSnapshotItem::create([
             'category' => 'PENDING RECEIPTS', 'person' => 'Edinah', 'ref' => 'RE-8',
             'assigned_admin_id' => $edinah->id, 'date' => now()->subDay()->toDateString(),
             'status' => 'Completed', 'amount' => 10,
         ]);
+        // Lisa: one open.
         FinanceSnapshotItem::create([
-            'category' => 'PENDING RECEIPTS', 'person' => 'Edinah', 'ref' => 'RE-9',
-            'assigned_admin_id' => $edinah->id, 'date' => now()->addWeek()->toDateString(),
-            'status' => 'Pending', 'amount' => 10,
+            'category' => 'OPEN ORDERS', 'person' => 'Lisa', 'ref' => 'ORD-1',
+            'assigned_admin_id' => $lisa->id, 'status' => 'Sent', 'amount' => 40,
         ]);
 
         $this->artisan('finance:remind-assignees')->assertSuccessful();
         $this->artisan('finance:remind-assignees')->assertSuccessful();   // same day: deduped
 
-        $reminders = \DB::table('admin_notifications')
-            ->where('admin_user_id', $edinah->id)
-            ->where('type', 'finance_task_reminder')
-            ->get();
+        // One panel notification per person — a report, not one per record.
+        $digests = \DB::table('admin_notifications')->where('type', 'finance_task_digest')->get();
+        $this->assertCount(2, $digests);
 
-        $this->assertCount(1, $reminders);
-        $this->assertStringContainsString('RE-7', $reminders[0]->title);
-        $this->assertStringContainsString('overdue', $reminders[0]->title);
+        $edinahDigest = $digests->firstWhere('admin_user_id', $edinah->id);
+        $this->assertStringContainsString('2 open', $edinahDigest->title);
+        $this->assertStringContainsString('1 overdue', $edinahDigest->title);
+        $this->assertStringNotContainsString('RE-8', (string) $edinahDigest->body);
+
+        // And one email per person, listing everything, never re-sent same day.
+        \Illuminate\Support\Facades\Mail::assertSent(\App\Mail\FinanceTaskDigest::class, 2);
+        \Illuminate\Support\Facades\Mail::assertSent(\App\Mail\FinanceTaskDigest::class, function ($mail) use ($edinah) {
+            return $mail->hasTo($edinah->email)
+                && count($mail->tasks) === 2
+                && $mail->summary['overdue'] === 1;
+        });
     }
 
     public function test_restore_reads_european_dates_day_first_and_salvages_bad_ones(): void

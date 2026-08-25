@@ -318,9 +318,13 @@ class AdminFinanceSnapshotController extends Controller
     }
 
     /**
-     * Tell a tagged staff member what landed on their plate. Best-effort by
-     * design — AdminNotificationService catches its own failures — and never
-     * self-notifies: assigning your own task needs no announcement.
+     * Tell a tagged staff member something landed on their plate — as ONE
+     * deduped nudge, not one notification per record. Finance tags in
+     * batches; the person gets a single "new finance tasks" notification
+     * pointing at My Work (where everything is listed), and the full
+     * itemized report follows in the daily digest (panel + email, see
+     * finance:remind-assignees). Reading the nudge re-arms it, so a later
+     * same-day batch still notifies. Never self-notifies.
      */
     private function notifyAssignee(FinanceSnapshotItem $item, int $actorId): void
     {
@@ -328,22 +332,14 @@ class AdminFinanceSnapshotController extends Controller
             return;
         }
 
-        $bodyParts = array_filter([
-            $item->client,
-            'Amount ' . number_format($item->amount, 2),
-            $item->date ? 'Due ' . $item->date->format('d M Y') : null,
-            $item->comment,
-        ]);
-
         AdminNotificationService::notifyUser(
             adminUserId: $item->assigned_admin_id,
             type: 'finance_task_assigned',
-            title: "Finance task for you: {$item->ref} — " . ucwords(strtolower($item->category)),
-            body: implode(' · ', $bodyParts) ?: null,
+            title: 'New finance tasks were assigned to you',
+            body: 'Open My Work to see everything on your plate. You will also get a daily email report while tasks are open.',
             actionUrl: '/admin/my-work',
             severity: 'info',
-            relatedType: 'finance_snapshot_item',
-            relatedId: $item->id,
+            dedupeKey: 'finance_tasks_assigned:' . $item->assigned_admin_id . ':' . now()->toDateString(),
         );
     }
 
