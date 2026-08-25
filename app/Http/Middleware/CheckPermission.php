@@ -12,7 +12,9 @@ use Symfony\Component\HttpFoundation\Response;
  * Usage in routes:
  *   ->middleware('permission:orders.update')
  *
- * Derives access from AdminPermissions::MAP — never from raw role strings.
+ * Derives access from the user's EFFECTIVE permissions — the role's set from
+ * AdminPermissions::MAP plus per-user grants, minus per-user revokes (see
+ * AdminUser::effectivePermissions()). Never from raw role strings.
  * Logs all denied attempts on sensitive endpoints for audit trail.
  */
 class CheckPermission
@@ -21,7 +23,11 @@ class CheckPermission
     {
         $user = $request->user();
 
-        if ($user && AdminPermissions::can($user->role, $permission)) {
+        $allowed = $user instanceof \App\Models\AdminUser
+            ? $user->hasPermission($permission)
+            : ($user && AdminPermissions::can($user->role ?? '', $permission));
+
+        if ($allowed) {
             return $next($request);
         }
 

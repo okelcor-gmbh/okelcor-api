@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\AdminPermissions;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Laravel\Sanctum\HasApiTokens;
 
@@ -42,11 +43,54 @@ class AdminUser extends Authenticatable
         'must_change_password'     => 'boolean',
         'is_active'                => 'boolean',
         'available_for_chat'       => 'boolean',
+        // Deliberately NOT in $fillable: overrides change what a person can
+        // do, so they are only ever written by the dedicated endpoint in
+        // AdminUserController::updatePermissions, never by mass assignment.
+        'permission_grants'        => 'array',
+        'permission_revokes'       => 'array',
     ];
 
     public function hasTwoFactorEnabled(): bool
     {
         return $this->two_factor_confirmed_at !== null;
+    }
+
+    /**
+     * What this person can actually do: role baseline + per-user grants,
+     * minus per-user revokes.
+     *
+     * super_admin is immune to overrides in both directions — the role is
+     * the system's break-glass and a revoke that could lock the last
+     * super admin out of admin management must not be storable, let alone
+     * effective. Columns are survived-if-absent (pre-migration deploys and
+     * the many tests that build a minimal admin_users table).
+     *
+     * @return array<int, string>
+     */
+    public function effectivePermissions(): array
+    {
+        $base = AdminPermissions::for($this->role);
+
+        if ($this->role === 'super_admin') {
+            return $base;
+        }
+
+        $known   = array_keys(AdminPermissions::MAP);
+        $grants  = array_intersect((array) ($this->permission_grants ?? []), $known);
+        $revokes = (array) ($this->permission_revokes ?? []);
+
+        return array_values(array_diff(array_unique(array_merge($base, $grants)), $revokes));
+    }
+
+    public function hasPermission(string $permission): bool
+    {
+        return in_array($permission, $this->effectivePermissions(), true);
+    }
+
+    /** True when this user carries any override beyond their role. */
+    public function hasPermissionOverrides(): bool
+    {
+        return ! empty($this->permission_grants) || ! empty($this->permission_revokes);
     }
 
     /**

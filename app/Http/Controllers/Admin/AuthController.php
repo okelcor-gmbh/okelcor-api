@@ -151,7 +151,7 @@ class AuthController extends Controller
             'must_change_password'   => (bool) $u->must_change_password,
             'two_factor_enabled'     => $u->hasTwoFactorEnabled(),
             'two_factor_enabled_at'  => $u->two_factor_confirmed_at?->toIso8601String(),
-            'permissions'            => AdminPermissions::for($u->role),
+            'permissions'            => $u->effectivePermissions(),
             'available_for_chat'     => (bool) $u->available_for_chat,
         ];
     }

@@ -455,6 +455,11 @@ Route::prefix('v1')->group(function () {
             Route::put('users/{id}', [AdminUserController::class, 'update']);
             Route::delete('users/{id}', [AdminUserController::class, 'destroy']);
             Route::post('users/{id}/resend-credentials', [AdminUserController::class, 'resendCredentials']);
+
+            // Per-user permission overrides: tune one person's access without
+            // moving them to a different role.
+            Route::get('permissions/catalog', [AdminUserController::class, 'permissionsCatalog']);
+            Route::put('users/{id}/permissions', [AdminUserController::class, 'updatePermissions']);
         });
 
         // -----------------------------------------------------------------

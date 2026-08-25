@@ -287,10 +287,106 @@ class AdminUserController extends Controller
             'must_change_password'   => (bool) $u->must_change_password,
             'two_factor_enabled'     => $u->hasTwoFactorEnabled(),
             'two_factor_enabled_at'  => $u->two_factor_confirmed_at?->toIso8601String(),
-            'permissions'            => AdminPermissions::for($u->role),
+            'permissions'            => $u->effectivePermissions(),
+            // The override halves, so the editor can show "from role" vs
+            // "added/removed for this person" instead of one opaque list.
+            'permission_grants'      => array_values((array) ($u->permission_grants ?? [])),
+            'permission_revokes'     => array_values((array) ($u->permission_revokes ?? [])),
+            'has_permission_overrides' => $u->hasPermissionOverrides(),
             'last_login_at'          => $u->last_login_at?->toIso8601String(),
             'created_at'             => $u->created_at?->toIso8601String(),
             'email_signature'        => $u->email_signature,
         ];
+    }
+
+    // -------------------------------------------------------------------------
+    // GET /api/v1/admin/permissions/catalog — admins.manage
+    //
+    // Everything the permission editor needs to render: every permission key,
+    // the roles holding it by default, and the full role list. The catalog is
+    // code, not data — it changes only on deploy — so the panel never has to
+    // hardcode a permission name again.
+    // -------------------------------------------------------------------------
+    public function permissionsCatalog(): JsonResponse
+    {
+        $permissions = [];
+        foreach (AdminPermissions::MAP as $key => $roles) {
+            $permissions[] = [
+                'key'   => $key,
+                // "orders.signoff_finance" → group "orders"
+                'group' => explode('.', $key)[0],
+                'roles' => array_values($roles),
+            ];
+        }
+
+        return response()->json([
+            'data' => [
+                'permissions' => $permissions,
+                'roles'       => AdminPermissions::ROLES,
+            ],
+        ]);
+    }
+
+    // -------------------------------------------------------------------------
+    // PUT /api/v1/admin/users/{id}/permissions — admins.manage
+    //
+    // Replaces the target's override sets wholesale (send the full lists each
+    // time — no diff protocol to get wrong). Sending two empty arrays returns
+    // the person to exactly their role.
+    // -------------------------------------------------------------------------
+    public function updatePermissions(Request $request, int $id): JsonResponse
+    {
+        $known = array_keys(AdminPermissions::MAP);
+
+        $data = $request->validate([
+            'grants'    => ['present', 'array'],
+            'grants.*'  => ['string', \Illuminate\Validation\Rule::in($known)],
+            'revokes'   => ['present', 'array'],
+            'revokes.*' => ['string', \Illuminate\Validation\Rule::in($known)],
+        ]);
+
+        $user = AdminUser::findOrFail($id);
+
+        if ($user->role === 'super_admin') {
+            return response()->json([
+                'message' => 'super_admin access is fixed and cannot be overridden — the role is the break-glass account.',
+                'code'    => 'super_admin_immutable',
+            ], 422);
+        }
+
+        $grants  = array_values(array_unique($data['grants']));
+        $revokes = array_values(array_unique($data['revokes']));
+
+        if ($overlap = array_intersect($grants, $revokes)) {
+            return response()->json([
+                'message' => 'A permission cannot be both granted and revoked: ' . implode(', ', $overlap),
+                'code'    => 'grant_revoke_conflict',
+            ], 422);
+        }
+
+        // Store only real overrides: a grant the role already holds, or a
+        // revoke of something the role never had, is noise that would show
+        // every such user as "customized".
+        $base    = AdminPermissions::for($user->role);
+        $grants  = array_values(array_diff($grants, $base));
+        $revokes = array_values(array_intersect($revokes, $base));
+
+        $user->forceFill([
+            'permission_grants'  => $grants,
+            'permission_revokes' => $revokes,
+        ])->save();
+
+        AdminAuditLogger::warning('admin_permissions_changed', "Permission overrides changed for {$user->email} ({$user->role})", $request, $request->user(), [
+            'target_admin_id' => $user->id,
+            'grants'          => $grants,
+            'revokes'         => $revokes,
+        ]);
+
+        return response()->json([
+            'data'    => $this->formatUser($user->fresh()),
+            'message' => ($grants === [] && $revokes === [])
+                ? "{$user->name} is back to the standard {$user->role} access."
+                : "Permissions updated for {$user->name}.",
+        ]);
     }
 }
