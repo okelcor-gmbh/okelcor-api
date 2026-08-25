@@ -1129,6 +1129,10 @@ Route::prefix('v1')->group(function () {
             // and the audited one-step price correction (site + eBay together)
             Route::get('ebay/audit', [AdminEbayAuditController::class, 'index']);
             Route::post('ebay/audit/{id}/apply-price', [AdminEbayAuditController::class, 'applyPrice']);
+            // Live snapshot refresh — walks every SKU on eBay, so throttled
+            // like the other whole-account syncs
+            Route::post('ebay/audit/sync-live', [AdminEbayAuditController::class, 'syncLive'])
+                ->middleware('throttle:ebay-sync');
             Route::post('products/{id}/ebay/list', [EbayListingController::class, 'listProduct']);
             Route::patch('products/{id}/ebay/update', [EbayListingController::class, 'updateProduct']);
             Route::delete('products/{id}/ebay/remove', [EbayListingController::class, 'removeListing']);

@@ -32,7 +32,7 @@ class EbayPricingAuditTest extends TestCase
         ]);
 
         Schema::disableForeignKeyConstraints();
-        foreach (['ebay_listing_logs', 'order_items', 'orders', 'products', 'admin_security_events', 'admin_users'] as $t) {
+        foreach (['ebay_live_listings', 'ebay_listing_logs', 'order_items', 'orders', 'products', 'admin_security_events', 'admin_users'] as $t) {
             Schema::dropIfExists($t);
         }
 
@@ -102,6 +102,20 @@ class EbayPricingAuditTest extends TestCase
             $table->timestamps();
         });
 
+        Schema::create('ebay_live_listings', function (Blueprint $table) {
+            $table->id();
+            $table->string('sku')->unique();
+            $table->string('offer_id')->nullable();
+            $table->string('listing_id')->nullable();
+            $table->string('status', 30)->default('unknown');
+            $table->decimal('price', 10, 2)->nullable();
+            $table->string('currency', 3)->nullable();
+            $table->integer('quantity')->nullable();
+            $table->unsignedBigInteger('product_id')->nullable();
+            $table->timestamp('fetched_at');
+            $table->timestamps();
+        });
+
         Schema::create('ebay_listing_logs', function (Blueprint $table) {
             $table->id();
             $table->unsignedBigInteger('product_id')->nullable();
@@ -123,7 +137,7 @@ class EbayPricingAuditTest extends TestCase
     protected function tearDown(): void
     {
         Schema::disableForeignKeyConstraints();
-        foreach (['ebay_listing_logs', 'order_items', 'orders', 'products', 'admin_security_events', 'admin_users'] as $t) {
+        foreach (['ebay_live_listings', 'ebay_listing_logs', 'order_items', 'orders', 'products', 'admin_security_events', 'admin_users'] as $t) {
             Schema::dropIfExists($t);
         }
         Schema::enableForeignKeyConstraints();
@@ -253,6 +267,82 @@ class EbayPricingAuditTest extends TestCase
             ->assertJsonPath('code', 'ebay_update_failed');
 
         $this->assertSame(100.0, (float) $product->fresh()->price, 'price must roll back when eBay refuses');
+    }
+
+    public function test_the_live_snapshot_reconciles_ebay_reality_against_the_catalogue(): void
+    {
+        // Our DB says 100 €; eBay is actually showing 79.90 → drift, and the
+        // margin must be judged on what buyers see.
+        $this->listedProduct(['sku' => 'DRIFT-1', 'price' => 100, 'cost_price' => 78]);
+        // Marked listed in the DB, absent from the live snapshot → phantom.
+        $this->listedProduct(['sku' => 'GHOST-1', 'price' => 50, 'cost_price' => 30]);
+
+        DB::table('ebay_live_listings')->insert([
+            ['sku' => 'DRIFT-1', 'status' => 'published', 'price' => 79.90, 'currency' => 'EUR',
+             'quantity' => 4, 'fetched_at' => now(), 'created_at' => now(), 'updated_at' => now()],
+            // On eBay, unknown to the catalogue entirely.
+            ['sku' => 'MYSTERY-9', 'status' => 'published', 'price' => 60, 'currency' => 'EUR',
+             'quantity' => 1, 'fetched_at' => now(), 'created_at' => now(), 'updated_at' => now()],
+        ]);
+
+        $response = $this->actingAs($this->admin(), 'sanctum')
+            ->getJson('/api/v1/admin/ebay/audit')
+            ->assertOk();
+
+        $rows = collect($response->json('data'))->keyBy('sku');
+
+        // Drift detected, margin computed on the LIVE price:
+        // fee = 79.90*10% + 0.35 = 8.34 → net = 79.90 - 8.34 - 78 = -6.44 → LOSS
+        $this->assertEquals(-20.10, $rows['DRIFT-1']['price_drift']);
+        $this->assertEquals(79.90, $rows['DRIFT-1']['ebay_price']);
+        $this->assertEquals(100, $rows['DRIFT-1']['db_price']);
+        $this->assertSame('loss', $rows['DRIFT-1']['verdict']);
+
+        $this->assertTrue($rows['GHOST-1']['live_missing']);
+
+        $meta = $response->json('meta');
+        $this->assertSame(1, $meta['counts']['price_drift']);
+        $this->assertSame(1, $meta['counts']['live_missing']);
+        $this->assertSame(1, $meta['counts']['unmatched']);
+        $this->assertSame('MYSTERY-9', $meta['unmatched_listings'][0]['sku']);
+        $this->assertSame(2, $meta['live']['total_on_ebay']);
+        $this->assertNotNull($meta['live']['fetched_at']);
+    }
+
+    public function test_sync_live_dispatches_the_snapshot_job(): void
+    {
+        config(['queue.default' => 'sync']);
+        \Illuminate\Support\Facades\Bus::fake([\App\Jobs\SyncEbayLiveListingsJob::class]);
+
+        $this->actingAs($this->admin(), 'sanctum')
+            ->postJson('/api/v1/admin/ebay/audit/sync-live')
+            ->assertStatus(202);
+
+        \Illuminate\Support\Facades\Bus::assertDispatchedAfterResponse(\App\Jobs\SyncEbayLiveListingsJob::class);
+    }
+
+    public function test_the_snapshot_job_stores_what_ebay_returns(): void
+    {
+        $product = $this->listedProduct(['sku' => 'REAL-1', 'price' => 100, 'cost_price' => 70]);
+
+        $this->mock(\App\Services\EbaySellingService::class)
+            ->shouldReceive('fetchAllLiveListings')
+            ->once()
+            ->andReturn([
+                ['sku' => 'REAL-1', 'offer_id' => 'O-1', 'listing_id' => '110', 'status' => 'published',
+                 'price' => 88.5, 'currency' => 'EUR', 'quantity' => 3],
+                ['sku' => 'ALIEN-1', 'offer_id' => 'O-2', 'listing_id' => '111', 'status' => 'published',
+                 'price' => 42.0, 'currency' => 'EUR', 'quantity' => 1],
+            ]);
+
+        (new \App\Jobs\SyncEbayLiveListingsJob())->handle(app(\App\Services\EbaySellingService::class));
+
+        $this->assertDatabaseHas('ebay_live_listings', [
+            'sku' => 'REAL-1', 'product_id' => $product->id, 'price' => 88.5,
+        ]);
+        $this->assertDatabaseHas('ebay_live_listings', [
+            'sku' => 'ALIEN-1', 'product_id' => null,
+        ]);
     }
 
     public function test_only_ebay_manage_roles_can_audit(): void

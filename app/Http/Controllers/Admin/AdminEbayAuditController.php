@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\SyncEbayLiveListingsJob;
 use App\Models\EbayListingLog;
+use App\Models\EbayLiveListing;
 use App\Models\Product;
 use App\Services\AdminAuditLogger;
 use App\Services\EbaySellingService;
@@ -69,8 +71,22 @@ class AdminEbayAuditController extends Controller
             Log::warning('EbayAudit: sold-stats query failed', ['error' => $e->getMessage()]);
         }
 
-        $rows = $products->map(function (Product $p) use ($sold, $feePercent, $feeFixed, $thinPercent, $targetPercent) {
-            $price = (float) $p->price;
+        // The live snapshot: what eBay is actually showing buyers right now
+        // (refreshed by the sync-live action). Graceful pre-migration.
+        $live          = collect();
+        $liveFetchedAt = null;
+        try {
+            $live          = EbayLiveListing::all()->keyBy('sku');
+            $liveFetchedAt = $live->max('fetched_at')?->toIso8601String();
+        } catch (\Throwable) {
+        }
+
+        $rows = $products->map(function (Product $p) use ($sold, $live, $liveFetchedAt, $feePercent, $feeFixed, $thinPercent, $targetPercent) {
+            $liveRow = $p->sku ? $live->get($p->sku) : null;
+
+            // The margin is judged on the price buyers actually see when we
+            // have it — the DB price is only the intention.
+            $price = $liveRow?->price !== null && $liveRow !== null ? (float) $liveRow->price : (float) $p->price;
             $cost  = $p->cost_price !== null ? (float) $p->cost_price : null;
 
             $fee = round($price * $feePercent / 100 + $feeFixed, 2);
@@ -94,6 +110,12 @@ class AdminEbayAuditController extends Controller
 
             $soldRow = $p->sku ? $sold->get($p->sku) : null;
 
+            $dbPrice = (float) $p->price;
+            // Drift: eBay shows one price, our system believes another.
+            $priceDrift = ($liveRow !== null && $liveRow->price !== null && abs((float) $liveRow->price - $dbPrice) >= 0.01)
+                ? round((float) $liveRow->price - $dbPrice, 2)
+                : null;
+
             return [
                 'id'            => $p->id,
                 'sku'           => $p->sku,
@@ -104,6 +126,18 @@ class AdminEbayAuditController extends Controller
                 'season'        => $p->season,
                 'stock'         => $p->stock,
                 'ebay_price'    => $price,
+                'db_price'      => $dbPrice,
+                'live'          => $liveRow ? [
+                    'price'      => $liveRow->price !== null ? (float) $liveRow->price : null,
+                    'currency'   => $liveRow->currency,
+                    'status'     => $liveRow->status,
+                    'quantity'   => $liveRow->quantity,
+                    'listing_id' => $liveRow->listing_id,
+                ] : null,
+                // A snapshot exists but this "listed" product is not in it —
+                // eBay is not actually showing it.
+                'live_missing'  => $liveFetchedAt !== null && $liveRow === null,
+                'price_drift'   => $priceDrift,
                 'cost_price'    => $cost,
                 'price_b2b'     => $p->price_b2b !== null ? (float) $p->price_b2b : null,
                 'price_b2c'     => $p->price_b2c !== null ? (float) $p->price_b2c : null,
@@ -128,6 +162,20 @@ class AdminEbayAuditController extends Controller
             2
         );
 
+        // Live eBay listings whose SKU matches nothing in the catalogue —
+        // selling on eBay outside the system entirely.
+        $knownSkus = $products->pluck('sku')->filter()->flip();
+        $unmatched = $live->values()
+            ->filter(fn ($l) => ! isset($knownSkus[$l->sku]))
+            ->map(fn ($l) => [
+                'sku'        => $l->sku,
+                'price'      => $l->price !== null ? (float) $l->price : null,
+                'currency'   => $l->currency,
+                'status'     => $l->status,
+                'quantity'   => $l->quantity,
+                'listing_id' => $l->listing_id,
+            ])->values();
+
         return response()->json([
             'data' => $rows,
             'meta' => [
@@ -137,10 +185,18 @@ class AdminEbayAuditController extends Controller
                     'thin'         => $rows->where('verdict', 'thin')->count(),
                     'missing_cost' => $rows->where('verdict', 'missing_cost')->count(),
                     'healthy'      => $rows->where('verdict', 'healthy')->count(),
+                    'price_drift'  => $rows->whereNotNull('price_drift')->count(),
+                    'live_missing' => $rows->where('live_missing', true)->count(),
+                    'unmatched'    => $unmatched->count(),
                 ],
                 // If every loss-maker sold once at today's price, this is
                 // the money burned. The headline number for the meeting.
                 'loss_per_full_sale' => $estimatedLossPerSale,
+                'live' => [
+                    'fetched_at'    => $liveFetchedAt,
+                    'total_on_ebay' => $live->count(),
+                ],
+                'unmatched_listings' => $unmatched,
                 'fee_model' => [
                     'fee_percent'           => $feePercent,
                     'fee_fixed'             => $feeFixed,
@@ -150,6 +206,27 @@ class AdminEbayAuditController extends Controller
             ],
             'message' => 'success',
         ]);
+    }
+
+    // ── POST /api/v1/admin/ebay/audit/sync-live — ebay.manage + ebay-sync ────
+    //
+    // Refreshes the live snapshot from eBay itself. One offer call per SKU
+    // makes it minutes-long, so it runs as a job: queued on a real driver,
+    // after-the-response on sync (same pattern as bulk email). The board
+    // shows meta.live.fetched_at — refresh the page when it moves.
+    public function syncLive(Request $request): JsonResponse
+    {
+        if (config('queue.default') === 'sync') {
+            SyncEbayLiveListingsJob::dispatchAfterResponse();
+        } else {
+            SyncEbayLiveListingsJob::dispatch();
+        }
+
+        AdminAuditLogger::info('ebay_live_sync_started', 'eBay live listing snapshot refresh started', $request, $request->user(), []);
+
+        return response()->json([
+            'message' => 'Fetching live listings from eBay — this takes a minute or two. Refresh the board to see when the snapshot updates.',
+        ], 202);
     }
 
     // ── POST /api/v1/admin/ebay/audit/{id}/apply-price — ebay.manage ─────────

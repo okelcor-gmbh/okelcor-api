@@ -528,6 +528,84 @@ class EbaySellingService
     }
 
     // -------------------------------------------------------------------------
+    // Full live-listing snapshot — what is ACTUALLY on eBay right now
+    // -------------------------------------------------------------------------
+
+    /**
+     * Walk eBay's own inventory (every SKU eBay holds for this account,
+     * whether or not our catalogue knows it) and read each offer's live
+     * price, status and quantity. This is the ground truth the pricing
+     * audit reconciles against — our database's opinion of a listing is
+     * not evidence of what eBay is showing buyers.
+     *
+     * One paginated inventory call plus one offer call per SKU; a few
+     * hundred SKUs take a minute or two, which is why the caller runs it
+     * as a background sync, never inside a page load.
+     *
+     * @return array<int, array{sku: string, offer_id: ?string, listing_id: ?string,
+     *                          status: string, price: ?float, currency: ?string, quantity: ?int}>
+     */
+    public function fetchAllLiveListings(): array
+    {
+        $token = $this->getAccessToken();
+
+        // 1. Every SKU eBay has in inventory.
+        $skus   = [];
+        $offset = 0;
+        $limit  = 200;
+        do {
+            $response = Http::withToken($token)
+                ->withHeaders($this->commonHeaders())
+                ->get("{$this->inventoryBaseUrl()}/inventory_item", ['limit' => $limit, 'offset' => $offset]);
+
+            if (! $response->ok()) {
+                $this->logEbayApiError('fetch_live_listings', "{$this->inventoryBaseUrl()}/inventory_item", $response->status(), $response->body());
+                throw new \RuntimeException("eBay inventory fetch failed (HTTP {$response->status()})");
+            }
+
+            $page = $response->json('inventoryItems') ?? [];
+            foreach ($page as $item) {
+                if (! empty($item['sku'])) {
+                    $skus[] = (string) $item['sku'];
+                }
+            }
+
+            $total   = (int) ($response->json('total') ?? count($skus));
+            $offset += $limit;
+        } while ($offset < $total && ! empty($page));
+
+        // 2. The live offer per SKU. A missing offer is itself a finding
+        //    (inventory item with no listing), reported as status no_offer.
+        $rows = [];
+        foreach ($skus as $sku) {
+            $response = Http::withToken($token)
+                ->withHeaders($this->commonHeaders())
+                ->get("{$this->inventoryBaseUrl()}/offer", ['sku' => $sku]);
+
+            if (! $response->ok()) {
+                // One unreadable SKU must not sink the snapshot.
+                $this->logEbayApiError('fetch_live_offer', "{$this->inventoryBaseUrl()}/offer", $response->status(), $response->body(), ['sku' => $sku]);
+                continue;
+            }
+
+            $offer = ($response->json('offers') ?? [])[0] ?? null;
+
+            $rows[] = [
+                'sku'        => $sku,
+                'offer_id'   => $offer['offerId'] ?? null,
+                'listing_id' => $offer['listing']['listingId'] ?? null,
+                'status'     => $offer ? strtolower((string) ($offer['status'] ?? 'unknown')) : 'no_offer',
+                'price'      => isset($offer['pricingSummary']['price']['value'])
+                    ? (float) $offer['pricingSummary']['price']['value'] : null,
+                'currency'   => $offer['pricingSummary']['price']['currency'] ?? null,
+                'quantity'   => isset($offer['availableQuantity']) ? (int) $offer['availableQuantity'] : null,
+            ];
+        }
+
+        return $rows;
+    }
+
+    // -------------------------------------------------------------------------
     // Sell Fulfillment API — order fetching
     //
     // Requires sell.fulfillment or sell.fulfillment.readonly scope.
