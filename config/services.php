@@ -102,6 +102,18 @@ return [
         'seller_postal_code'     => env('EBAY_SELLER_POSTAL_CODE'),
         'seller_location'        => env('EBAY_SELLER_LOCATION', 'Germany'),
         'merchant_location_key'  => env('EBAY_MERCHANT_LOCATION_KEY', 'OKELCOR-MAIN'),
+
+        // Pricing-audit fee model. eBay never tells us the fee up front and
+        // the Finances API scope is not granted, so the audit board models
+        // it: final-value fee % of the sale price plus the fixed per-order
+        // fee. Defaults approximate eBay.de's vehicle-parts rates — correct
+        // them from a real payout statement, in .env, without a deploy.
+        'fee_percent'            => (float) env('EBAY_FEE_PERCENT', 11.0),
+        'fee_fixed'              => (float) env('EBAY_FEE_FIXED', 0.35),
+        // Below `thin` (net margin as % of price) a listing is flagged;
+        // `target` is what the suggested price aims for after fees.
+        'thin_margin_percent'    => (float) env('EBAY_THIN_MARGIN_PERCENT', 8.0),
+        'target_margin_percent'  => (float) env('EBAY_TARGET_MARGIN_PERCENT', 15.0),
     ],
 
     // Inbound e-mail capture — a Cloudflare Email Worker POSTs parsed

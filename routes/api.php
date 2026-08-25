@@ -42,6 +42,7 @@ use App\Http\Controllers\Partner\PartnerAuthController;
 use App\Http\Controllers\Partner\PartnerSaleController;
 use App\Http\Controllers\Admin\AdminNewsletterController;
 use App\Http\Controllers\Admin\AdminFinanceInvoiceController;
+use App\Http\Controllers\Admin\AdminEbayAuditController;
 use App\Http\Controllers\Admin\AdminFinanceSnapshotController;
 use App\Http\Controllers\Admin\AdminOperationsSummaryController;
 use App\Http\Controllers\Admin\AdminOrderController;
@@ -1123,6 +1124,11 @@ Route::prefix('v1')->group(function () {
             Route::post('ebay/disconnect', [EbayListingController::class, 'disconnect']);
             Route::get('ebay/listings', [EbayListingController::class, 'listings']);
             Route::get('ebay/logs', [EbayListingController::class, 'logs']);
+
+            // Pricing audit — cost vs price vs fees for every listed product,
+            // and the audited one-step price correction (site + eBay together)
+            Route::get('ebay/audit', [AdminEbayAuditController::class, 'index']);
+            Route::post('ebay/audit/{id}/apply-price', [AdminEbayAuditController::class, 'applyPrice']);
             Route::post('products/{id}/ebay/list', [EbayListingController::class, 'listProduct']);
             Route::patch('products/{id}/ebay/update', [EbayListingController::class, 'updateProduct']);
             Route::delete('products/{id}/ebay/remove', [EbayListingController::class, 'removeListing']);
