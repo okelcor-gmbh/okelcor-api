@@ -13,6 +13,7 @@ class EbayLiveListing extends Model
 {
     protected $fillable = [
         'sku',
+        'title',
         'offer_id',
         'listing_id',
         'status',

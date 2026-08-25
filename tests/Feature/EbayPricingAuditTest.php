@@ -105,6 +105,7 @@ class EbayPricingAuditTest extends TestCase
         Schema::create('ebay_live_listings', function (Blueprint $table) {
             $table->id();
             $table->string('sku')->unique();
+            $table->string('title')->nullable();
             $table->string('offer_id')->nullable();
             $table->string('listing_id')->nullable();
             $table->string('status', 30)->default('unknown');
@@ -343,6 +344,69 @@ class EbayPricingAuditTest extends TestCase
         $this->assertDatabaseHas('ebay_live_listings', [
             'sku' => 'ALIEN-1', 'product_id' => null,
         ]);
+    }
+
+    public function test_the_snapshot_merges_classic_ebay_listings_the_inventory_api_cannot_see(): void
+    {
+        // The real-world failure this guards: the team lists by hand on
+        // ebay.de (classic system), the Inventory API returns only the
+        // panel-created listings, and the "audit" saw 2 of a whole store.
+        config(['services.ebay.environment' => 'production']);
+        \Illuminate\Support\Facades\Cache::put('ebay_sell_user_token_production', 'test-token', 300);
+
+        $tradingXml = <<<XML
+<?xml version="1.0" encoding="utf-8"?>
+<GetMyeBaySellingResponse xmlns="urn:ebay:apis:eBLBaseComponents">
+  <Ack>Success</Ack>
+  <ActiveList>
+    <ItemArray>
+      <Item>
+        <ItemID>555001</ItemID>
+        <Title>Michelin Pilot Sport 225/45 R17 gebraucht</Title>
+        <SellingStatus><CurrentPrice currencyID="EUR">64.90</CurrentPrice></SellingStatus>
+        <QuantityAvailable>2</QuantityAvailable>
+      </Item>
+      <Item>
+        <ItemID>110999</ItemID>
+        <Title>Duplicate of an inventory listing</Title>
+        <SKU>INV-1</SKU>
+        <SellingStatus><CurrentPrice currencyID="EUR">80.00</CurrentPrice></SellingStatus>
+        <QuantityAvailable>1</QuantityAvailable>
+      </Item>
+    </ItemArray>
+    <PaginationResult><TotalNumberOfPages>1</TotalNumberOfPages></PaginationResult>
+  </ActiveList>
+</GetMyeBaySellingResponse>
+XML;
+
+        \Illuminate\Support\Facades\Http::fake([
+            'api.ebay.com/sell/inventory/v1/inventory_item*' => \Illuminate\Support\Facades\Http::response([
+                'inventoryItems' => [['sku' => 'INV-1']],
+                'total'          => 1,
+            ]),
+            'api.ebay.com/sell/inventory/v1/offer*' => \Illuminate\Support\Facades\Http::response([
+                'offers' => [[
+                    'offerId' => 'O-1', 'status' => 'PUBLISHED',
+                    'listing' => ['listingId' => '110999'],
+                    'pricingSummary' => ['price' => ['value' => '80.00', 'currency' => 'EUR']],
+                    'availableQuantity' => 1,
+                ]],
+            ]),
+            'api.ebay.com/ws/api.dll' => \Illuminate\Support\Facades\Http::response($tradingXml),
+        ]);
+
+        $rows = collect(app(EbaySellingService::class)->fetchAllLiveListings());
+
+        $this->assertCount(2, $rows, 'the duplicate classic listing must be merged, not doubled');
+
+        $manual = $rows->firstWhere('listing_id', '555001');
+        $this->assertNotNull($manual, 'the hand-made ebay.de listing must be in the snapshot');
+        $this->assertSame('EBAY-555001', $manual['sku'], 'a SKU-less listing keys by its eBay item id');
+        $this->assertSame(64.90, $manual['price']);
+        $this->assertSame('Michelin Pilot Sport 225/45 R17 gebraucht', $manual['title']);
+        $this->assertSame(2, $manual['quantity']);
+
+        $this->assertSame('O-1', $rows->firstWhere('sku', 'INV-1')['offer_id']);
     }
 
     public function test_only_ebay_manage_roles_can_audit(): void

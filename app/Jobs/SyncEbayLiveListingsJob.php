@@ -44,6 +44,7 @@ class SyncEbayLiveListingsJob implements ShouldQueue
             foreach (array_chunk($rows, 200) as $chunk) {
                 EbayLiveListing::insert(array_map(fn ($r) => [
                     'sku'        => $r['sku'],
+                    'title'      => isset($r['title']) ? mb_substr((string) $r['title'], 0, 255) : null,
                     'offer_id'   => $r['offer_id'],
                     'listing_id' => $r['listing_id'],
                     'status'     => mb_substr($r['status'], 0, 30),

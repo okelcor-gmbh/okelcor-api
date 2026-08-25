@@ -169,6 +169,7 @@ class AdminEbayAuditController extends Controller
             ->filter(fn ($l) => ! isset($knownSkus[$l->sku]))
             ->map(fn ($l) => [
                 'sku'        => $l->sku,
+                'title'      => $l->title,
                 'price'      => $l->price !== null ? (float) $l->price : null,
                 'currency'   => $l->currency,
                 'status'     => $l->status,

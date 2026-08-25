@@ -45,6 +45,13 @@ class EbaySellingService
             : 'https://api.ebay.com/sell/inventory/v1';
     }
 
+    private function tradingApiUrl(): string
+    {
+        return $this->isSandbox()
+            ? 'https://api.sandbox.ebay.com/ws/api.dll'
+            : 'https://api.ebay.com/ws/api.dll';
+    }
+
     private function authBaseUrl(): string
     {
         return $this->isSandbox()
@@ -592,6 +599,7 @@ class EbaySellingService
 
             $rows[] = [
                 'sku'        => $sku,
+                'title'      => null,
                 'offer_id'   => $offer['offerId'] ?? null,
                 'listing_id' => $offer['listing']['listingId'] ?? null,
                 'status'     => $offer ? strtolower((string) ($offer['status'] ?? 'unknown')) : 'no_offer',
@@ -602,7 +610,121 @@ class EbaySellingService
             ];
         }
 
+        // 3. The Inventory API only sees listings CREATED through it. The
+        //    listings the team makes by hand on ebay.de live in the classic
+        //    system and are invisible above — and they are precisely the
+        //    ones an audit must see. GetMyeBaySelling (Trading API) returns
+        //    every active listing regardless of origin; merge in the ones
+        //    the inventory walk did not already cover. A Trading failure
+        //    degrades the snapshot to inventory-only rather than sinking it.
+        try {
+            $seenListingIds = array_flip(array_filter(array_column($rows, 'listing_id')));
+            $seenSkus       = array_flip(array_column($rows, 'sku'));
+
+            foreach ($this->fetchTradingActiveListings($token) as $item) {
+                if (isset($seenListingIds[$item['listing_id']])) {
+                    continue;   // already captured via the Inventory API
+                }
+                if ($item['sku'] !== null && isset($seenSkus[$item['sku']])) {
+                    continue;
+                }
+
+                $rows[] = [
+                    // A manual listing often has no SKU at all; key it by the
+                    // eBay item id so it still lands on the audit board.
+                    'sku'        => $item['sku'] ?? ('EBAY-' . $item['listing_id']),
+                    'title'      => $item['title'],
+                    'offer_id'   => null,
+                    'listing_id' => $item['listing_id'],
+                    'status'     => 'published',
+                    'price'      => $item['price'],
+                    'currency'   => $item['currency'],
+                    'quantity'   => $item['quantity'],
+                ];
+            }
+        } catch (\Throwable $e) {
+            Log::warning('eBay Trading active-listings fetch failed — snapshot is inventory-only', [
+                'error' => mb_substr($e->getMessage(), 0, 300),
+            ]);
+        }
+
         return $rows;
+    }
+
+    /**
+     * Every active listing on the account via the classic Trading API —
+     * including listings created by hand on the eBay website, which the
+     * Inventory API cannot see.
+     *
+     * @return array<int, array{listing_id: string, sku: ?string, title: ?string,
+     *                          price: ?float, currency: ?string, quantity: ?int}>
+     */
+    private function fetchTradingActiveListings(string $token): array
+    {
+        $ns    = 'urn:ebay:apis:eBLBaseComponents';
+        $items = [];
+        $page  = 1;
+
+        do {
+            $body = <<<XML
+<?xml version="1.0" encoding="utf-8"?>
+<GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <ActiveList>
+    <Include>true</Include>
+    <Pagination>
+      <EntriesPerPage>200</EntriesPerPage>
+      <PageNumber>{$page}</PageNumber>
+    </Pagination>
+  </ActiveList>
+  <DetailLevel>ReturnAll</DetailLevel>
+</GetMyeBaySellingRequest>
+XML;
+
+            $response = Http::withHeaders([
+                'X-EBAY-API-COMPATIBILITY-LEVEL' => '1193',
+                'X-EBAY-API-CALL-NAME'           => 'GetMyeBaySelling',
+                'X-EBAY-API-SITEID'              => '77',   // eBay.de
+                'X-EBAY-API-IAF-TOKEN'           => $token,
+                'Content-Type'                   => 'text/xml',
+            ])->withBody($body, 'text/xml')->post($this->tradingApiUrl());
+
+            if (! $response->ok()) {
+                throw new \RuntimeException("Trading API HTTP {$response->status()}");
+            }
+
+            $xml = simplexml_load_string($response->body());
+            if ($xml === false) {
+                throw new \RuntimeException('Trading API returned unparseable XML');
+            }
+
+            $root = $xml->children($ns);
+            $ack  = strtolower((string) $root->Ack);
+            if (! in_array($ack, ['success', 'warning'], true)) {
+                $error = (string) ($root->Errors->LongMessage ?? $root->Errors->ShortMessage ?? 'unknown error');
+                throw new \RuntimeException("Trading API Ack={$ack}: {$error}");
+            }
+
+            $active = $root->ActiveList;
+            foreach ($active->ItemArray->Item ?? [] as $item) {
+                $price    = $item->SellingStatus->CurrentPrice ?? ($item->BuyItNowPrice ?? null);
+                $sku      = trim((string) ($item->SKU ?? ''));
+                $quantity = (string) ($item->QuantityAvailable ?? $item->Quantity ?? '');
+
+                $items[] = [
+                    'listing_id' => (string) $item->ItemID,
+                    'sku'        => $sku !== '' ? $sku : null,
+                    'title'      => trim((string) $item->Title) ?: null,
+                    'price'      => $price !== null ? (float) ((string) $price) : null,
+                    'currency'   => $price !== null ? ((string) $price->attributes()['currencyID'] ?: null) : null,
+                    'quantity'   => $quantity !== '' ? (int) $quantity : null,
+                ];
+            }
+
+            $totalPages = (int) ($active->PaginationResult->TotalNumberOfPages ?? 1);
+            $page++;
+        } while ($page <= $totalPages);
+
+        return $items;
     }
 
     // -------------------------------------------------------------------------
