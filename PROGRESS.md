@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-28 | Branch: `main` | Sessions 86–99 deployed (production confirmed at `f474a5e`, migrations through #54); **Session 100 (EC Invoice List, migration #55) built and tested, pending deploy**
+Last updated: 2026-08-28 | Branch: `main` | **Production is at `dd672b3` — sessions 86–100 all deployed, migrations through #55 applied, confirmed 2026-08-28**
 
 ---
 
@@ -2565,10 +2565,8 @@ See `FRONTEND_NOTE_product-optimization.md`.
 
 ## EC Invoice List — the ZM portal (Session 100)
 
-> **Deploy status:** built and tested, **not yet deployed**. Migration **#55**
-> unapplied. **14 new routes**, so `route:cache` must be rebuilt. Deploy-order
-> safe: the page answers `ec_invoices_available: false` and My Work counts
-> zero until the migration runs — proved by test.
+> **Deploy status:** **deployed 2026-08-28** — migration #55 applied, route
+> cache rebuilt, `/admin/ec-invoices` answering 401-not-404 from outside.
 
 From finance's `File6.html` mockup: the Zusammenfassende Meldung (§ 18a UStG,
 BZSt/ELSTER) with its audit trail. Per reporting period ('2026-Q3' or
