@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-28 | Branch: `main` | **Production is at `c235f29` — sessions 86–102 all deployed, migrations through #57 applied, confirmed 2026-08-28**
+Last updated: 2026-08-28 | Branch: `main` | **Production is at `374b89c` — sessions 86–102 and the 2026-08-25 batch all deployed, migrations #1–57 applied, every deploy verified from outside the same day**
 
 ---
 
@@ -14,15 +14,17 @@ therefore applied. The Step 3 data commands (staff backfill, `orders:payment-sta
 "AB - 1182"`, `customers:stuck`) and the marketer's role flip have **not** been
 confirmed run — they remain in the Outstanding table below.
 
-## ✅ Sessions 96–99 + the 2026-08-25 batch deployed (confirmed 2026-08-28)
+## ✅ Sessions 96–102 + the 2026-08-25 batch deployed (confirmed 2026-08-28)
 
-Deployed over SSH and verified rather than assumed: production HEAD is
-`fef2052`, `migrate:status` shows every migration through
-`2026_08_28_000003` as **Ran** (batch 119 = #52–54), `config:cache` and
-`route:cache` rebuilt, `route:list` answers for the profitability and
-liquidity paths, and from outside the live API returns 200 on
-`/api/v1/categories` and **401 (not 404)** on the new
-`/admin/finance/profitability` and `/admin/finance/liquidity` endpoints.
+Four deploys over SSH on 2026-08-28, each verified rather than assumed:
+production HEAD is `374b89c`, `migrate:status` shows every migration through
+`2026_08_28_000006` as **Ran** (#52–57), `config:cache` and `route:cache`
+rebuilt after each, and from outside the live API returns 200 on
+`/api/v1/categories` and **401 (not 404)** on every new endpoint —
+`/admin/finance/profitability`, `/admin/finance/liquidity`,
+`/admin/ec-invoices`, `/admin/sales-orders` and `/admin/todos`. The frontend
+half of each session is pushed on okelcor-website `main` (through `45ebbcd`),
+which Vercel deploys automatically.
 
 **The real app path is `/home/okelvaxj/public_html/okelcor-api`** — there is
 no `domains/` segment; both older paths recorded in this file are wrong on the
@@ -49,6 +51,10 @@ current account. The server's git remote is the old repo URL
 | **98** | Market intelligence — one row per country joining demand, inquiries, revenue and reach, to answer which market to enter next | **#45** | **2 new** |
 | **2026-08-25 batch** | Permission overrides, finance snapshot board, eBay live-listing audit, campaign feedback tracking | **#46–51** | several |
 | **99** | Per-order profitability (revenue invoice + costs + sign-off, export, dashboard) and the weekly liquidity ladder | **#52–54** | **16 new** |
+| **99b** | Finance's walkthrough: liquidity weeks folded INTO the snapshot board's liquidity working, long names wrap instead of scrolling, My Work "Open" deep-links to the exact record | none | none |
+| **100** | EC Invoice List — the ZM/§ 18a portal from `File6.html`: groups × itemized invoices with PDFs + delivery proofs, assignee chase, CSV audit file, ELSTER XML | **#55** | **14 new** |
+| **101** | Sales & Order Management board from `OT 3.html`: customer vs supplier lines, computed GP/margin/status, the five KPI cards | **#56** | **9 new** |
+| **102** | The shared team to-do list — anyone adds, tag a teammate, it lands in their My Work | **#57** | **4 new** |
 
 The Session 96 fix is therefore live — the marketer can retry the image
 replace on product 3834 — and the messaging, market-intelligence, snapshot
@@ -92,7 +98,12 @@ follow them has been confirmed run. In order:
 
 ---
 
-## ⚠️ Outstanding on production (as of 2026-08-22)
+## ⚠️ Outstanding on production (reviewed 2026-08-28 — all still open)
+
+None of today's deploys touched these; they remain waiting on data commands
+or human steps. One nuance: item 2's timeout risk is softened — the campaign
+send now defers until after the response is flushed (commit `c5a867a`) — but
+`QUEUE_CONNECTION=database` + a worker is still the real fix.
 
 Live data and configuration items — none of them is fixed by shipping code.
 Items 8 and the ledger/role steps above overlap deliberately: this table is the
