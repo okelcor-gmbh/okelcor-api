@@ -45,7 +45,10 @@ use App\Http\Controllers\Admin\AdminNewsletterController;
 use App\Http\Controllers\Admin\AdminFinanceInvoiceController;
 use App\Http\Controllers\Admin\AdminEbayAuditController;
 use App\Http\Controllers\Admin\AdminFinanceSnapshotController;
+use App\Http\Controllers\Admin\AdminFinanceProfitabilityController;
+use App\Http\Controllers\Admin\AdminLiquidityController;
 use App\Http\Controllers\Admin\AdminOperationsSummaryController;
+use App\Http\Controllers\Admin\AdminOrderProfitabilityController;
 use App\Http\Controllers\Admin\AdminOrderController;
 use App\Http\Controllers\Admin\AdminOrderSignoffController;
 use App\Http\Controllers\Admin\AdminOrderItemController;
@@ -867,6 +870,18 @@ Route::prefix('v1')->group(function () {
 
             // Finance snapshot board (read)
             Route::get('finance-snapshot', [AdminFinanceSnapshotController::class, 'index']);
+
+            // Profitability (Session 99). Static segments before anything
+            // parameterised, same rule as the orders block.
+            Route::get('finance/profitability/export', [AdminFinanceProfitabilityController::class, 'export'])
+                ->middleware('permission:orders.export');
+            Route::get('finance/profitability/dashboard', [AdminFinanceProfitabilityController::class, 'dashboard']);
+            Route::get('finance/profitability', [AdminFinanceProfitabilityController::class, 'index']);
+            Route::get('finance/liquidity/history', [AdminLiquidityController::class, 'history']);
+            Route::get('finance/liquidity', [AdminLiquidityController::class, 'index']);
+            Route::get('orders/{id}/profitability', [AdminOrderProfitabilityController::class, 'show']);
+            Route::get('orders/{id}/profitability/revenue/download', [AdminOrderProfitabilityController::class, 'downloadRevenueFile']);
+            Route::get('orders/{id}/profitability/costs/{costId}/download', [AdminOrderProfitabilityController::class, 'downloadCostFile']);
         });
 
         // -----------------------------------------------------------------
@@ -891,6 +906,18 @@ Route::prefix('v1')->group(function () {
             Route::post('finance-invoices/{id}/file', [AdminFinanceInvoiceController::class, 'uploadFile']);
             Route::patch('finance-invoices/{id}', [AdminFinanceInvoiceController::class, 'update']);
             Route::delete('finance-invoices/{id}', [AdminFinanceInvoiceController::class, 'destroy']);
+
+            // Profitability writes (Session 99).
+            Route::post('orders/{id}/profitability/revenue', [AdminOrderProfitabilityController::class, 'setRevenue']);
+            Route::post('orders/{id}/profitability/costs', [AdminOrderProfitabilityController::class, 'storeCost']);
+            Route::patch('orders/{id}/profitability/costs/{costId}', [AdminOrderProfitabilityController::class, 'updateCost']);
+            Route::delete('orders/{id}/profitability/costs/{costId}', [AdminOrderProfitabilityController::class, 'destroyCost']);
+            Route::post('orders/{id}/profitability/costs/{costId}/file', [AdminOrderProfitabilityController::class, 'uploadCostFile']);
+            Route::post('orders/{id}/profitability/verify', [AdminOrderProfitabilityController::class, 'verify']);
+            Route::delete('orders/{id}/profitability/verify', [AdminOrderProfitabilityController::class, 'unverify']);
+
+            // The liquidity ladder — one week at a time, keyed '2026-W35'.
+            Route::put('finance/liquidity/{weekKey}', [AdminLiquidityController::class, 'upsert']);
         });
 
         // -----------------------------------------------------------------

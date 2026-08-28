@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-24 | Branch: `main` | Latest commit: Session 98 (**pushed — sessions 86–95 deployed to production, 96–98 pending**)
+Last updated: 2026-08-28 | Branch: `main` | Sessions 86–95 deployed to production; **96–99 + the 2026-08-25 batch pending deploy; 99 = profitability & liquidity (migrations #52–54)**
 
 ---
 
@@ -2583,6 +2583,61 @@ See `FRONTEND_NOTE_product-optimization.md`.
 
 ---
 
+## What did each order actually make — profitability & liquidity (Session 99)
+
+> **Deploy status:** built and tested, **not yet deployed**. Migrations
+> **#52–54** (`2026_08_28_*`) unapplied. **16 new routes**, so `route:cache` must be rebuilt.
+> Deploy-order safe — every reader checks for its own tables and the order
+> page shows `finance: null` until the migration runs, proved by test.
+
+From the finance discussion note, verbatim asks and where each landed:
+
+1. *"Order tracking should know we have a finalized invoice the customer
+   agreed to — that's our revenue invoice"* → `order_finance_records`, and a
+   `finance` block embedded on the order detail itself.
+2. *"Then other invoices from other suppliers"* + *"bank cost from eBay,
+   Stripe costs"* → `order_cost_lines` (`supplier_invoice` / `fee`, fee
+   categories stripe/ebay/bank/shipping/other).
+3. *"See the profitability as soon as the order completes"* → computed in one
+   service, shown on the order page, the list, the export and the dashboard.
+4. *"Upload the revenue invoice PDF"* → same one-request upload pattern and
+   private-disk download as `finance_invoices`.
+5. *"Export the list, one reference, sign it off showing what's verified"* →
+   verification sign-off per order + BOM-prefixed CSV export.
+6. *"Dashboard with summary from January"* → month-by-month, gap-free, from
+   January of the year.
+7. *"Break liquidity into weeks — current week plus, 4 weeks, rolling"* →
+   `liquidity_weeks`, keyed `2026-W35`.
+
+| Change | Status | Notes |
+|--------|--------|-------|
+| **#52** `order_finance_records` + `order_cost_lines` | 🔧 | Revenue side one-per-order (unique `order_id`), cost side many. Profit is **never stored** — always revenue minus the lines, computed in `OrderProfitabilityService` and nowhere else, so the order page, list, export and dashboard cannot disagree. |
+| `POST /admin/orders/{id}/profitability/revenue` | 🔧 | `finance.manage`. Number, amount, optional PDF in the same request. `customer_agreed` defaults **true** — a revenue invoice is by definition the one the customer agreed to; passing false records the figure while being honest the agreement isn't confirmed. Response carries `variance_from_order_total`, the reconciliation figure. |
+| Costs: `POST/PATCH/DELETE …/profitability/costs[/{id}]` | 🔧 | A fee **requires a category** (a fee that can't be reported by channel defeats the point of recording it); a supplier invoice requires a supplier name. Files attach and download like finance-invoice PDFs, private disk. |
+| **Currencies matched, never converted** | 🔧 | A cost in a currency other than the revenue invoice's is named in `other_currencies` and left out of the profit — the operations-board rule. Dashboard sums are EUR-only and say so in `definitions`. |
+| Verification sign-off | 🔧 | `POST/DELETE …/profitability/verify`. Refuses (422 `no_revenue_invoice`) until a revenue figure exists — signing a profit with no revenue signs nothing. Manual withdrawal requires a written reason. |
+| **Money moving withdraws the signature** | 🔧 | Same philosophy as the Session 83 order sign-off: any change to revenue amount/currency or a cost line's amount/currency/kind clears `verified_at` and writes `profitability_verification_withdrawn` to the order log — but editing a note does **not**, because a control that fires on typo fixes gets routed around. |
+| `finance` block on the order detail | 🔧 | The ask was that order tracking *knows*. Compact block (revenue present, agreed, costs, profit, margin, verified) rides on `GET /admin/orders/{id}` behind `OrderFinanceRecord::available()` — the order page must never fail because a reporting feature arrived before its migration. Proved by a test that drops the tables and reads the order. |
+| `GET /admin/finance/profitability` | 🔧 | `finance.view` (order managers hold it — same board logic as Session 83). One row per order ref: order total, revenue, costs split, profit, margin, verified/by/when. Filters: period, channel, `verified=yes|no`, `has_revenue=yes|no`, search. Excludes cancelled orders and `cs_test_` checkouts — the same two exclusions as the board, so the figures agree. |
+| `GET /admin/finance/profitability/export` | 🔧 | `finance.view` + `orders.export` stacked, like the operations export. UTF-8 BOM for Excel, title/period/generated rows, one line per order ref with the verification columns, caveat row inside the file. Defaults to January-to-today — the document finance signs runs from January. |
+| `GET /admin/finance/profitability/dashboard` | 🔧 | Month-by-month from January (`?year=` for a past year), gap-free, orders bucketed by `created_at` to match the operations report. Revenue/supplier/fees/profit/margin/verified per month + totals, `definitions` shipped with the numbers. |
+| **#53** `liquidity_weeks` + `GET/PUT /admin/finance/liquidity` | 🔧 | Keyed `2026-W35` — the same `o-\WW` format the report buckets by. GET returns the current ISO week + 3; **the window rolls by reading**: it always starts at today's week, so a finished week falls out by the calendar moving — no job, no cleanup — and its row survives under `/history`. `projected_closing` chains: each week opens on its entered balance or the previous week's projected close. |
+| Past weeks correctable, flagged | 🔧 | Finance reconciles after the fact, so a closed week's PUT is accepted — the response says plainly it has ended and lives in history. A key that isn't a real ISO week, or is more than a year out, is a 422: 2026-W54 filed silently under a different week would be evidence of nothing. |
+| **#54** order_logs ENUM widening | 🔧 | Six new actions (`revenue_invoice_set`, `cost_line_added/updated/removed`, `profitability_verified`, `profitability_verification_withdrawn`), built from `OrderLog::ACTIONS` per the standing rule; `down()` refuses if rows would be truncated. |
+| Backend tests (18 new) | ✅ | `OrderProfitabilityAndLiquidityTest` — migrations idempotent against real SQL, upload + download, both permission halves, the arithmetic incl. mixed currency, verification and its automatic withdrawal, the order-page embed and its pre-migration inertness, list filters and exclusions, the export's BOM and columns, the gap-free dashboard, the rolling window, history, and the week-key validation. Full suite **689 passed, 0 failed**, 206 skipped, up from 662. |
+
+**Deliberately not built:** automatic Stripe/eBay fee capture. The webhook
+never retrieves Stripe's `balance_transaction` and the eBay sync stores no
+fee fields, so any "automatic" figure would be an estimate typed by a
+developer instead of a fee typed by finance — the sevDesk lesson (Session 83)
+says the honest version is finance entering what the statement says. If
+automatic capture is wanted later, it is a separate session against the
+Stripe API, and the fee lands as a `fee/stripe` cost line like any other.
+
+See `FRONTEND_NOTE_finance-profitability.md`.
+
+---
+
 ## Market intelligence — which market to enter next (Session 98)
 
 > **Deploy status:** built and tested, **not yet deployed**. Migration **#45**
@@ -3273,6 +3328,14 @@ still has `QUEUE_CONNECTION=sync`, so `SendBulkEmailCampaignJob` would run
 inline during the HTTP request. Set `QUEUE_CONNECTION=database` and run a
 queue worker before the order manager sends to the full contact list — see
 Session 50 note above.
+
+54. `2026_08_28_000003_add_profitability_actions_to_order_logs_enum` (Session 99 — widens `order_logs.action` for the six profitability actions, built from `OrderLog::ACTIONS` per the standing rule; `down()` refuses if any row uses an added value. MySQL-only, no-op on sqlite. Until it runs on MySQL, profitability log writes fall into the try/catch and warn rather than fail the request — run it in the same deploy as #52.)
+
+53. `2026_08_28_000002_create_liquidity_weeks_table` (Session 99 — creates `liquidity_weeks`, one row per ISO week keyed `2026-W35`. NEW table, nothing existing read, altered or backfilled; guarded with `Schema::hasTable`. **Deploy-order safe** — `LiquidityWeek::available()` answers "not yet" until it runs and the planner returns an empty, labelled payload. Proved idempotent by `OrderProfitabilityAndLiquidityTest`, which runs the file itself and re-runs it.)
+
+52. `2026_08_28_000001_create_order_profitability_tables` (Session 99 — creates `order_finance_records` (revenue invoice + verification, unique per order) and `order_cost_lines` (supplier invoices + fees). Both NEW, guarded with `Schema::hasTable`; nothing existing read, altered or backfilled. **Deploy-order safe and load-bearing the same way #38 was**: the order DETAIL endpoint embeds a finance block behind `OrderFinanceRecord::available()`, and a test drops the tables and asserts the order page still answers with `finance: null` — a reporting table must never be able to fail the thing it reports on.)
+
+46–51. The `2026_08_25_*` batch (parallel sessions, 2026-08-25 — permission overrides on `admin_users`, the finance snapshot board tables + assignee, eBay live listings + title, campaign recipient tracking. Documented in their own sessions' notes rather than itemised here; listed so the numbering above stays truthful.)
 
 45. `2026_08_24_000002_create_market_reference_stats_table` (Session 98 — external per-country market data for the market intelligence report; creates `market_reference_stats`. One new table, nothing existing read, altered or backfilled. Guarded with `Schema::hasTable`. Proved by `MarketIntelligenceTest::test_the_migration_applies_against_real_sql_and_is_idempotent`, which runs the migration file itself and re-runs it. **Deploy-order safe, unlike #44** — the market report checks for the table and simply reports no reference data while it is absent, so the scorecard works before this runs. `metric` is a plain string, not an ENUM, and `unique(country_code, metric, period)` is what makes re-importing a corrected figure a replacement rather than a duplicate.)
 

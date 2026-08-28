@@ -350,6 +350,18 @@ class Order extends Model
         return $this->hasOne(Invoice::class, 'order_ref', 'ref');
     }
 
+    /** The revenue side of profitability — one record per order (Session 99). */
+    public function financeRecord(): HasOne
+    {
+        return $this->hasOne(OrderFinanceRecord::class);
+    }
+
+    /** The cost side — supplier invoices and channel fees (Session 99). */
+    public function costLines(): HasMany
+    {
+        return $this->hasMany(OrderCostLine::class)->orderBy('created_at');
+    }
+
     public function financialsLockedBy(): BelongsTo
     {
         return $this->belongsTo(AdminUser::class, 'financials_locked_by');

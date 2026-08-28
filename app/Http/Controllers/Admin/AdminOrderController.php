@@ -925,6 +925,12 @@ class AdminOrderController extends Controller
             // request to /signoffs for the one question of which button to
             // offer, which is the thing embedding this block was meant to save.
             'signoff'            => app(\App\Services\OrderSignoffService::class)->state($o, $viewer),
+            // Whether the finalized revenue invoice exists and what the order
+            // made — the ask was that order tracking KNOWS, so it travels on
+            // the order rather than behind a second request. Null until the
+            // Session 99 migration has run; the order page must never fail
+            // because a reporting feature arrived before its tables.
+            'finance'            => app(\App\Services\OrderProfitabilityService::class)->summaryForOrder($o),
             'company_name'       => null,
             'address'            => trim(implode(', ', array_filter([$o->address, $o->city, $o->postal_code]))),
             'country'            => $o->country,

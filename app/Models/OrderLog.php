@@ -85,6 +85,18 @@ class OrderLog extends Model
         // arrives at "paid" without anyone deciding it no longer needs a
         // developer to unstick.
         'payment_state_corrected',
+
+        // Session 99 — the profitability trail: revenue invoice, cost lines,
+        // and finance's verification of the profit they produce. The
+        // withdrawal is written automatically when figures move under a
+        // standing verification, and is the only evidence that an approved
+        // number stopped being the approved number.
+        'revenue_invoice_set',
+        'cost_line_added',
+        'cost_line_updated',
+        'cost_line_removed',
+        'profitability_verified',
+        'profitability_verification_withdrawn',
     ];
 
     public $timestamps = false;

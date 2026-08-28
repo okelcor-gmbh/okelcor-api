@@ -18,5 +18,11 @@ abstract class TestCase extends BaseTestCase
         // stale answer from the previous test would corrupt this one.
         Product::flushSlugColumnCache();
         ProductSearch::flushColumnCache();
+
+        // Same trap, same fix: the order detail endpoint embeds a finance
+        // block guarded by these, and most harnesses build orders without the
+        // profitability tables.
+        \App\Models\OrderFinanceRecord::forgetAvailableCheck();
+        \App\Models\LiquidityWeek::forgetAvailableCheck();
     }
 }
