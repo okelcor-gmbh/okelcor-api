@@ -3,7 +3,9 @@
 Canonical production API: **`https://api.okelcor.com`** (NOT `.de` — that host is
 unconfigured parking). Frontend: `https://okelcor.com`.
 
-Host: Namecheap business hosting (cPanel). Shell user `okelvaxj@business194`.
+Host: Namecheap business hosting (cPanel). Shell user `okelvaxj@business194`
+(`ssh -p 21098 okelvaxj@business194.web-hosting.com`; this Mac's key authorized 2026-08-28).
+App path: `/home/okelvaxj/public_html/okelcor-api` — **no `domains/` segment**.
 PHP binary: `/opt/alt/php83/usr/bin/php`.
 
 ---
@@ -38,7 +40,7 @@ it is safe; it is also guarded to run on MySQL only.
 ### Deploy steps
 
 ```bash
-cd /home/okelvaxj/.../okelcor-api          # adjust to the real app path
+cd /home/okelvaxj/public_html/okelcor-api
 
 # 0. BACK UP FIRST — this is the safety net for the batch.
 /opt/alt/php83/usr/bin/php artisan backup:okelcor      # project's own backup command

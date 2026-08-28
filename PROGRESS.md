@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-28 | Branch: `main` | Sessions 86–95 deployed to production; **96–99 + the 2026-08-25 batch pending deploy; 99 = profitability & liquidity (migrations #52–54)**
+Last updated: 2026-08-28 | Branch: `main` | **Production is at `fef2052` — sessions 86–99 and the 2026-08-25 batch all deployed, migrations through #54 applied (batch 119), confirmed 2026-08-28**
 
 ---
 
@@ -14,11 +14,21 @@ therefore applied. The Step 3 data commands (staff backfill, `orders:payment-sta
 "AB - 1182"`, `customers:stuck`) and the marketer's role flip have **not** been
 confirmed run — they remain in the Outstanding table below.
 
-## 🔧 Sessions 96–98 pushed, NOT deployed
+## ✅ Sessions 96–99 + the 2026-08-25 batch deployed (confirmed 2026-08-28)
 
-**Session 97 adds migration #44 and 9 new routes — `route:cache` must be
-rebuilt, and #44 must run or the messaging endpoints 500. Session 98 adds
-migration #45 and 2 more routes; unlike #44 it is deploy-order safe.**
+Deployed over SSH and verified rather than assumed: production HEAD is
+`fef2052`, `migrate:status` shows every migration through
+`2026_08_28_000003` as **Ran** (batch 119 = #52–54), `config:cache` and
+`route:cache` rebuilt, `route:list` answers for the profitability and
+liquidity paths, and from outside the live API returns 200 on
+`/api/v1/categories` and **401 (not 404)** on the new
+`/admin/finance/profitability` and `/admin/finance/liquidity` endpoints.
+
+**The real app path is `/home/okelvaxj/public_html/okelcor-api`** — there is
+no `domains/` segment; both older paths recorded in this file are wrong on the
+current account. The server's git remote is the old repo URL
+(`github.com/johnseyi/okelcor-api`), which GitHub redirects to
+`okelcor-gmbh/okelcor-api`, so pulls work unchanged.
 
 | Session | What it is | Migration | Routes |
 |---|---|---|---|
@@ -37,42 +47,12 @@ migration #45 and 2 more routes; unlike #44 it is deploy-order safe.**
 | **96** | The primary-image route the product form has always called and the backend never had | none | **1 new** |
 | **97** | Staff-to-staff messaging and forwarding — reach a colleague from the panel instead of Outlook | **#44** | **9 new** |
 | **98** | Market intelligence — one row per country joining demand, inquiries, revenue and reach, to answer which market to enter next | **#45** | **2 new** |
+| **2026-08-25 batch** | Permission overrides, finance snapshot board, eBay live-listing audit, campaign feedback tracking | **#46–51** | several |
+| **99** | Per-order profitability (revenue invoice + costs + sign-off, export, dashboard) and the weekly liquidity ladder | **#52–54** | **16 new** |
 
-**Session 96 deploy — code-only, no migrations:**
-
-```bash
-cd /home/okelvaxj/domains/okelcor.com/public_html/okelcor-api
-pwd                                     # okelvaxj, not u978121777
-git fetch origin && git reset --hard origin/main
-git rev-parse --short HEAD              # expect b039ffe or later
-
-/opt/alt/php83/usr/bin/php artisan backup:okelcor       # Session 97 adds tables
-/opt/alt/php83/usr/bin/php artisan migrate --pretend    # read it, then:
-/opt/alt/php83/usr/bin/php artisan migrate --force      # applies #44
-/opt/alt/php83/usr/bin/php artisan config:clear && /opt/alt/php83/usr/bin/php artisan config:cache
-/opt/alt/php83/usr/bin/php artisan route:cache
-/opt/alt/php83/usr/bin/php artisan cache:clear
-```
-
-**Session 97 needs `migrate --force`** — #44 creates two new tables and the
-messaging endpoints 500 until it runs. Verify both landed:
-
-```bash
-/opt/alt/php83/usr/bin/php artisan route:list --path=staff-messages   # expect 8 routes
-/opt/alt/php83/usr/bin/php artisan route:list --path=analytics/markets  # expect 2 routes
-/opt/alt/php83/usr/bin/php artisan tinker --execute="echo Schema::hasTable('staff_messages') ? 'live' : 'NOT LIVE';"
-```
-
-**`route:cache` is the critical line** — Session 96 is a new route, and a stale
-route cache keeps returning the exact "route could not be found" error from the
-marketer's screenshot. Verify:
-
-```bash
-/opt/alt/php83/usr/bin/php artisan route:list --path=primary-image   # expect 1 route
-```
-
-Then have the marketer retry the image replace on product 3834 — backend-only
-fix, no panel refresh needed.
+The Session 96 fix is therefore live — the marketer can retry the image
+replace on product 3834 — and the messaging, market-intelligence, snapshot
+and profitability endpoints are all reachable.
 
 ### Post-deploy work still outstanding from the 86–95 stack
 
@@ -2585,10 +2565,8 @@ See `FRONTEND_NOTE_product-optimization.md`.
 
 ## What did each order actually make — profitability & liquidity (Session 99)
 
-> **Deploy status:** built and tested, **not yet deployed**. Migrations
-> **#52–54** (`2026_08_28_*`) unapplied. **16 new routes**, so `route:cache` must be rebuilt.
-> Deploy-order safe — every reader checks for its own tables and the order
-> page shows `finance: null` until the migration runs, proved by test.
+> **Deploy status:** **deployed 2026-08-28** — migrations #52–54 applied
+> (batch 119), route cache rebuilt, endpoints verified live from outside.
 
 From the finance discussion note, verbatim asks and where each landed:
 
