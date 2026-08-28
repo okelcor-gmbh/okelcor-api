@@ -45,6 +45,7 @@ use App\Http\Controllers\Admin\AdminNewsletterController;
 use App\Http\Controllers\Admin\AdminFinanceInvoiceController;
 use App\Http\Controllers\Admin\AdminEbayAuditController;
 use App\Http\Controllers\Admin\AdminFinanceSnapshotController;
+use App\Http\Controllers\Admin\AdminEcInvoiceController;
 use App\Http\Controllers\Admin\AdminFinanceProfitabilityController;
 use App\Http\Controllers\Admin\AdminLiquidityController;
 use App\Http\Controllers\Admin\AdminOperationsSummaryController;
@@ -446,6 +447,7 @@ Route::prefix('v1')->group(function () {
         // assignee is the authorization (checked in the controller), so no
         // permission middleware here.
         Route::patch('my-work/finance-items/{id}', [AdminWorkQueueController::class, 'updateFinanceItem']);
+        Route::patch('my-work/ec-invoice-lines/{id}', [AdminWorkQueueController::class, 'updateEcInvoiceLine']);
 
         // 2FA management — all authenticated admin users
         Route::prefix('2fa')->group(function () {
@@ -879,6 +881,12 @@ Route::prefix('v1')->group(function () {
             Route::get('finance/profitability', [AdminFinanceProfitabilityController::class, 'index']);
             Route::get('finance/liquidity/history', [AdminLiquidityController::class, 'history']);
             Route::get('finance/liquidity', [AdminLiquidityController::class, 'index']);
+            // EC Invoice List (ZM) — Session 100. Static segments first.
+            Route::get('ec-invoices/export', [AdminEcInvoiceController::class, 'export'])
+                ->middleware('permission:orders.export');
+            Route::get('ec-invoices/elster', [AdminEcInvoiceController::class, 'elster']);
+            Route::get('ec-invoices/lines/{id}/download', [AdminEcInvoiceController::class, 'downloadLineFile']);
+            Route::get('ec-invoices', [AdminEcInvoiceController::class, 'index']);
             Route::get('orders/{id}/profitability', [AdminOrderProfitabilityController::class, 'show']);
             Route::get('orders/{id}/profitability/revenue/download', [AdminOrderProfitabilityController::class, 'downloadRevenueFile']);
             Route::get('orders/{id}/profitability/costs/{costId}/download', [AdminOrderProfitabilityController::class, 'downloadCostFile']);
@@ -918,6 +926,17 @@ Route::prefix('v1')->group(function () {
 
             // The liquidity ladder — one week at a time, keyed '2026-W35'.
             Route::put('finance/liquidity/{weekKey}', [AdminLiquidityController::class, 'upsert']);
+
+            // EC Invoice List (ZM) writes — Session 100.
+            Route::put('ec-invoices/company-vat', [AdminEcInvoiceController::class, 'setCompanyVat']);
+            Route::patch('ec-invoices/periods/{period}', [AdminEcInvoiceController::class, 'setPeriodStatus']);
+            Route::post('ec-invoices/groups', [AdminEcInvoiceController::class, 'storeGroup']);
+            Route::patch('ec-invoices/groups/{id}', [AdminEcInvoiceController::class, 'updateGroup']);
+            Route::delete('ec-invoices/groups/{id}', [AdminEcInvoiceController::class, 'destroyGroup']);
+            Route::post('ec-invoices/groups/{id}/lines', [AdminEcInvoiceController::class, 'storeLine']);
+            Route::patch('ec-invoices/lines/{id}', [AdminEcInvoiceController::class, 'updateLine']);
+            Route::delete('ec-invoices/lines/{id}', [AdminEcInvoiceController::class, 'destroyLine']);
+            Route::post('ec-invoices/lines/{id}/file', [AdminEcInvoiceController::class, 'uploadLineFile']);
         });
 
         // -----------------------------------------------------------------

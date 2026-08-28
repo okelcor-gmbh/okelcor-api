@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\CustomerAccessRequest;
 use App\Models\Customer;
+use App\Models\EcInvoiceLine;
 use App\Models\FinanceSnapshotItem;
 use App\Models\QuoteRequest;
 use App\Services\AdminNotificationService;
@@ -117,6 +118,46 @@ class AdminWorkQueueController extends Controller
         } catch (\Throwable) {
         }
 
+        // Same shape and same guard as the finance tasks above: the EC
+        // Invoice List can reach production before its migration.
+        $ecInvoiceTasks = collect();
+        try {
+            $ecInvoiceTasks = EcInvoiceLine::with('group')
+                ->where('assigned_admin_id', $userId)
+                ->where('task_status', '!=', EcInvoiceLine::STATUS_COMPLETE)
+                ->orderByRaw('invoice_date IS NULL, invoice_date')
+                ->limit(100)
+                ->get()
+                ->map(function (EcInvoiceLine $l) {
+                    $missing = array_values(array_filter([
+                        $l->hasInvoiceFile() ? null : 'invoice PDF',
+                        $l->hasProofFile() ? null : 'delivery proof',
+                    ]));
+
+                    return [
+                        'type'       => 'ec_invoice_task',
+                        'id'         => $l->id,
+                        'title'      => $l->invoice_number
+                            . ' — ' . trim(($l->group?->country_code ?? '') . ' ' . ($l->group?->customer_vat_id ?? '')),
+                        'subtitle'   => 'ZM ' . ($l->group?->period ?? '?')
+                            . ' · ' . number_format((float) $l->amount, 2)
+                            . ($missing !== [] ? ' · missing: ' . implode(' and ', $missing) : ''),
+                        'priority'   => $l->task_status === EcInvoiceLine::STATUS_REVIEW ? 'high' : 'medium',
+                        'due_at'     => null,
+                        // Deep link: the list opens the period and highlights
+                        // the exact line, same contract as finance tasks.
+                        'action_url' => '/admin/ec-invoices?period=' . ($l->group?->period ?? '') . '&line=' . $l->id,
+                        'status'     => $l->task_status,
+                        'editable'   => true,
+                        // The EC statuses are not the finance-task statuses, so
+                        // the select's options travel with the item.
+                        'status_options' => collect(EcInvoiceLine::STATUS_LABELS)
+                            ->map(fn ($label, $key) => ['value' => $key, 'label' => $label])->values(),
+                    ];
+                })->values();
+        } catch (\Throwable) {
+        }
+
         $pendingApprovals = collect();
         $accessRequests   = collect();
 
@@ -159,6 +200,7 @@ class AdminWorkQueueController extends Controller
                 'due_follow_ups'      => $dueFollowUps,
                 'proposals_accepted'  => $proposalsAccepted,
                 'finance_tasks'       => $financeTasks,
+                'ec_invoice_tasks'    => $ecInvoiceTasks,
                 'pending_approvals'   => $pendingApprovals->values(),
                 'access_requests'     => $accessRequests->values(),
             ],
@@ -168,6 +210,7 @@ class AdminWorkQueueController extends Controller
                     'due_follow_ups'     => $dueFollowUps->count(),
                     'proposals_accepted' => $proposalsAccepted->count(),
                     'finance_tasks'      => $financeTasks->count(),
+                    'ec_invoice_tasks'   => $ecInvoiceTasks->count(),
                     'pending_approvals'  => $pendingApprovals->count(),
                     'access_requests'    => $accessRequests->count(),
                 ],
@@ -228,6 +271,54 @@ class AdminWorkQueueController extends Controller
         return response()->json([
             'data'    => ['id' => $item->id, 'status' => $item->status, 'comment' => $item->comment],
             'message' => "{$item->ref} updated.",
+        ]);
+    }
+
+    // ── PATCH /admin/my-work/ec-invoice-lines/{id} ───────────────────────────
+    //
+    // Same contract as the finance-item update above: being the assignee IS
+    // the authorization — the logistics person chasing a CMR does not hold
+    // finance.manage — and whoever set the line up hears the status change
+    // without chasing anyone.
+    public function updateEcInvoiceLine(Request $request, int $id): JsonResponse
+    {
+        $line = EcInvoiceLine::with('group')->findOrFail($id);
+        $user = $request->user();
+
+        $mayEdit = $line->assigned_admin_id === $user->id
+            || $user->hasPermission('finance.manage');
+
+        if (! $mayEdit) {
+            return response()->json([
+                'message' => 'Only the person this line is assigned to (or finance) can update it.',
+            ], 403);
+        }
+
+        $data = $request->validate([
+            'task_status' => ['required', Rule::in(EcInvoiceLine::STATUSES)],
+        ]);
+
+        $previous = $line->task_status;
+        $line->update(['task_status' => $data['task_status']]);
+
+        if ($line->created_by && $line->created_by !== $user->id && $previous !== $line->task_status) {
+            AdminNotificationService::notifyUser(
+                adminUserId: $line->created_by,
+                type: 'ec_invoice_task_updated',
+                title: "{$user->name} set {$line->invoice_number} to "
+                    . (EcInvoiceLine::STATUS_LABELS[$line->task_status] ?? $line->task_status),
+                body: null,
+                actionUrl: '/admin/ec-invoices?period=' . ($line->group?->period ?? '') . '&line=' . $line->id,
+                severity: $line->task_status === EcInvoiceLine::STATUS_COMPLETE ? 'success' : 'info',
+                relatedType: 'ec_invoice_line',
+                relatedId: $line->id,
+                dedupeKey: "ec_invoice_task_updated:{$line->id}:{$line->task_status}",
+            );
+        }
+
+        return response()->json([
+            'data'    => ['id' => $line->id, 'task_status' => $line->task_status],
+            'message' => "{$line->invoice_number} updated.",
         ]);
     }
 

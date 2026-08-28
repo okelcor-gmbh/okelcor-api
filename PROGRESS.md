@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-28 | Branch: `main` | **Production is at `fef2052` — sessions 86–99 and the 2026-08-25 batch all deployed, migrations through #54 applied (batch 119), confirmed 2026-08-28**
+Last updated: 2026-08-28 | Branch: `main` | Sessions 86–99 deployed (production confirmed at `f474a5e`, migrations through #54); **Session 100 (EC Invoice List, migration #55) built and tested, pending deploy**
 
 ---
 
@@ -2563,6 +2563,31 @@ See `FRONTEND_NOTE_product-optimization.md`.
 
 ---
 
+## EC Invoice List — the ZM portal (Session 100)
+
+> **Deploy status:** built and tested, **not yet deployed**. Migration **#55**
+> unapplied. **14 new routes**, so `route:cache` must be rebuilt. Deploy-order
+> safe: the page answers `ec_invoices_available: false` and My Work counts
+> zero until the migration runs — proved by test.
+
+From finance's `File6.html` mockup: the Zusammenfassende Meldung (§ 18a UStG,
+BZSt/ELSTER) with its audit trail. Per reporting period ('2026-Q3' or
+'2026-05'): ZM groups (EU country × customer VAT ID × transaction type), each
+itemizing the invoices behind its aggregate.
+
+| Change | Status | Notes |
+|--------|--------|-------|
+| **#55** `ec_invoice_periods` + `ec_invoice_groups` + `ec_invoice_lines` | 🔧 | Group totals never stored — the sum of the lines, computed in one place. `unique(period, country, vat, type)` because a duplicated group would double its ZM line; the duplicate is a friendly 422 carrying the existing group. |
+| `GET/POST/PATCH/DELETE /admin/ec-invoices/…` | 🔧 | Reads `finance.view`, writes `finance.manage`. Lines carry the invoice PDF **and the delivery proof** (CMR/POD) on the private disk — the proof is what makes a zero-rated intra-EU supply defensible, and the mockup's rule is kept: a proof arriving completes a "Pending Proof" line. |
+| The assignee chase | 🔧 | Same contract as the snapshot board: tagging a staff member notifies them (one deduped nudge/day) and the line lands in their **My Work** (`ec_invoice_tasks`, deep-linked `?period=&line=`). The assignee updates status via `PATCH /admin/my-work/ec-invoice-lines/{id}` — being the assignee IS the authorization, no finance permission needed — and the creator is notified back. The EC status options travel on the work item, because they are not the finance-task statuses. |
+| Filing status per period | 🔧 | draft → ready → submitted, with `submitted_at` following the status in both directions — a period moved back to draft was NOT submitted. Taxpayer USt-IdNr. lives in `site_settings.company_vat_id`, editable from the page via `PUT …/company-vat` rather than behind `settings.manage`, which finance does not hold. |
+| `GET …/export` (CSV) | 🔧 | `finance.view` + `orders.export` stacked. BOM-prefixed, one row per invoice with both documents named — a missing one prints as **"missing"**, because an audit gap should read as one. |
+| `GET …/elster` (XML) | 🔧 | The § 18a payload: one `<Zeile>` per group, `Betrag` in whole euros (14500.51 → 14501), `Art` L/S/D from the transaction type, Melder VAT + Zeitraum. Values XML-escaped. Served as a downloadable `.xml`; the panel shows it in a review modal first. |
+| Frontend `/admin/ec-invoices` | 🔧 | okelcor-website: expandable ZM table per the mockup, inline editing, attach/download cells, period selector (quarters + months, data-holding periods marked •), filing badge, the CSV/ELSTER buttons, and the `?line=` deep-link with highlight. Everything wraps — the walkthrough rule. My Work gains the "EC Invoice Tasks" section. |
+| Backend tests (13 new) | ✅ | `EcInvoiceListTest` — migration idempotent against real SQL, duplicate-group 422 (case/spacing cannot evade it), period validation, totals from lines, document round-trip, proof-completes-pending, both permission halves, filing-status stamp both directions, VAT setting, the CSV's BOM/labels/gaps, the ELSTER rounding + Art codes, tagging → notification → My Work with deep link, the assignee's authorization + refusal of a stranger, and pre-migration inertness of both the page and My Work. Full suite **949 passed, 0 failed**, 206 skipped, up from 936. |
+
+---
+
 ## What did each order actually make — profitability & liquidity (Session 99)
 
 > **Deploy status:** **deployed 2026-08-28** — migrations #52–54 applied
@@ -3306,6 +3331,8 @@ still has `QUEUE_CONNECTION=sync`, so `SendBulkEmailCampaignJob` would run
 inline during the HTTP request. Set `QUEUE_CONNECTION=database` and run a
 queue worker before the order manager sends to the full contact list — see
 Session 50 note above.
+
+55. `2026_08_28_000004_create_ec_invoice_tables` (Session 100 — the EC Invoice List / ZM portal; creates `ec_invoice_periods`, `ec_invoice_groups`, `ec_invoice_lines`. Three NEW tables, guarded with `Schema::hasTable`; nothing existing read, altered or backfilled. **Deploy-order safe** — `EcInvoiceGroup::available()` answers "not yet" and the My Work section is inside the same try/catch pattern as the finance tasks. Proved idempotent by `EcInvoiceListTest`, which runs the file itself and re-runs it.)
 
 54. `2026_08_28_000003_add_profitability_actions_to_order_logs_enum` (Session 99 — widens `order_logs.action` for the six profitability actions, built from `OrderLog::ACTIONS` per the standing rule; `down()` refuses if any row uses an added value. MySQL-only, no-op on sqlite. Until it runs on MySQL, profitability log writes fall into the try/catch and warn rather than fail the request — run it in the same deploy as #52.)
 
