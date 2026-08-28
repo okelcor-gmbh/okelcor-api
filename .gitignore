@@ -28,3 +28,14 @@ database/database.sqlite
 .claude/
 cloudflare-worker/node_modules
 cloudflare-worker/.wrangler
+
+# Stray desktop exports (mockups, screenshots, spreadsheets) do not belong in
+# the repo root — implemented mockups get deleted, data gets imported.
+/*.png
+/*.jpg
+/*.jpeg
+/*.webp
+/*.pdf
+/*.docx
+/*.xlsx
+/*.html
