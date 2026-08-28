@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-28 | Branch: `main` | Sessions 86–100 deployed (production at `b1d7e3c`, migrations through #55); **Session 101 (Sales & Orders board, migration #56) built and tested, pending deploy**
+Last updated: 2026-08-28 | Branch: `main` | **Production is at `3854ff2` — sessions 86–101 all deployed, migrations through #56 applied, confirmed 2026-08-28**
 
 ---
 
@@ -2565,9 +2565,8 @@ See `FRONTEND_NOTE_product-optimization.md`.
 
 ## Sales & Order Management board (Session 101)
 
-> **Deploy status:** built and tested, **not yet deployed**. Migration **#56**
-> unapplied. **9 new routes**, so `route:cache` must be rebuilt. Deploy-order
-> safe: the page answers `sales_orders_available: false` until it runs.
+> **Deploy status:** **deployed 2026-08-28** — migration #56 applied, route
+> cache rebuilt, `/admin/sales-orders` answering 401-not-404 from outside.
 
 From finance's `OT 3.html` mockup: hand-entered orders, each itemizing
 CUSTOMER lines (revenue + tyre quantity) against SUPPLIER lines (costs +
