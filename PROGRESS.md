@@ -1,6 +1,60 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-28 | Branch: `main` | **Production is at `374b89c` — sessions 86–102 and the 2026-08-25 batch all deployed, migrations #1–57 applied, every deploy verified from outside the same day**
+Last updated: 2026-08-28 | Branch: `main` | **Production is at `97d05b6` — sessions 86–102 and the 2026-08-25 batch all deployed, migrations #1–57 applied, every deploy verified from outside the same day**
+
+---
+
+## 🐞 EC Invoice List — the taxpayer VAT ID could never be saved (fixed, deployed 2026-08-28)
+
+Finance reported a server error when saving the VAT ID at the top of the EC
+Invoice List. Not the country group — the field above it, `PUT
+/api/v1/admin/ec-invoices/company-vat`. The production log named it exactly:
+
+```
+SQLSTATE[01000]: Warning: 1265 Data truncated for column 'type' at row 1
+insert into `site_settings` (`key`,`value`,`type`,`group`)
+values (company_vat_id, DE343138173, text, finance)
+```
+
+`site_settings.type` is `enum('string','boolean','json')`. Session 100's
+`setCompanyVat` wrote `'text'`, MySQL in strict mode refused the insert, and the
+request returned an unhandled 500. Three attempts across two accounts (user 25
+and 27) on 2026-08-28; the seeder and both content migrations have always
+written `'string'`, and this was the only place that guessed at a fourth member.
+
+**The row was never written once** — `company_vat_id` did not exist in
+`site_settings`. So the ELSTER XML and the CSV audit file have both been
+carrying an **empty Melder `<UStIdNr>`** since Session 100 shipped.
+
+Why the suite never caught it: `phpunit.xml` runs on in-memory SQLite, where
+Laravel renders `enum()` as an unconstrained varchar and `'text'` stores
+happily. `test_the_taxpayer_vat_id_is_saved_and_served` asserted the value
+round-trips, which it did — in CI. The test now also asserts the persisted
+`type` is a member of the enum, which fails on `'text'` and passes on
+`'string'` on every driver. Full suite: 760 passed.
+
+Deployed as `97d05b6` — no migration, no route change; `config:cache` and
+`route:cache` rebuilt, live API 200 on `/api/v1/categories` and 401 (not 500)
+on the VAT endpoint.
+
+**This needs a person:** finance must re-enter the taxpayer USt-IdNr. in the EC
+Invoice List before any period is filed. Nothing backfills it — the value was
+never stored.
+
+### Other unhandled 500s live on production (found in the same log, NOT fixed)
+
+Counted over 2026-08-25 → 28. Listed here so they are not rediscovered from
+scratch:
+
+| Count | Error | Where |
+|---|---|---|
+| 85 | Scheduled `system:health --snapshot` fails with exit code 1 — every run | cron |
+| 7 | `Table 'okelvaxj_okelcor.login_histories' doesn't exist` | a migration that never ran |
+| 6 | `AdminOrderController::show(): Argument #2 ($id) must be of type int, string given` | `/admin/orders/OKL-13I8OT5` and similar — looking an order up by **order number** 500s instead of 404ing. The same handler also catches `/admin/customers/undefined/communications` and `/products/NaN`, so the panel is sending bad IDs too |
+
+Also on the server: `.env.save`, `.env.save.1`, `.envc` and a dozen shell-mishap
+files (`-H`, `-d`, `ref_number,`) sit untracked in the app root. Harmless to git,
+but `.env.save*` are credential copies worth deleting.
 
 ---
 
