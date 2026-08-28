@@ -111,9 +111,13 @@ class AdminEcInvoiceController extends Controller
             'vat_id' => ['required', 'string', 'max:20'],
         ]);
 
+        // `site_settings.type` is an ENUM('string','boolean','json') — 'text'
+        // is not a member of it, and MySQL in strict mode rejects the insert
+        // outright (1265 Data truncated). A VAT ID is a plain string, same as
+        // every other setting the seeder writes.
         SiteSetting::updateOrCreate(
             ['key' => self::COMPANY_VAT_KEY],
-            ['value' => strtoupper(trim($data['vat_id'])), 'type' => 'text', 'group' => 'finance'],
+            ['value' => strtoupper(trim($data['vat_id'])), 'type' => 'string', 'group' => 'finance'],
         );
 
         return response()->json(['message' => 'Taxpayer VAT ID saved.']);

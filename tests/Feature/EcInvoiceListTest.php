@@ -330,6 +330,9 @@ class EcInvoiceListTest extends TestCase
             ->assertJsonPath('data.submitted_at', null);
     }
 
+    /** The members of `site_settings.type` — enum('string','boolean','json'). */
+    private const SITE_SETTING_TYPES = ['string', 'boolean', 'json'];
+
     public function test_the_taxpayer_vat_id_is_saved_and_served(): void
     {
         $finance = $this->admin();
@@ -343,6 +346,17 @@ class EcInvoiceListTest extends TestCase
         $this->actingAs($finance, 'sanctum')
             ->getJson('/api/v1/admin/ec-invoices?period=2026-Q3')
             ->assertJsonPath('meta.company_vat_id', 'DE123456789');
+
+        // The row must also be WRITABLE on MySQL. `site_settings.type` is an
+        // ENUM; SQLite renders it as a plain varchar and accepts anything, so
+        // the round-trip above passed in CI while production answered
+        // "1265 Data truncated for column 'type'" and returned a 500. Assert
+        // the value we store is a member of the enum, on every driver.
+        $this->assertContains(
+            SiteSetting::where('key', 'company_vat_id')->value('type'),
+            self::SITE_SETTING_TYPES,
+            'The taxpayer VAT ID was stored with a type that MySQL will reject.',
+        );
     }
 
     // ── the two outputs ───────────────────────────────────────────────────
