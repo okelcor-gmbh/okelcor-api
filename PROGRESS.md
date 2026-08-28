@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-28 | Branch: `main` | **Production is at `3854ff2` — sessions 86–101 all deployed, migrations through #56 applied, confirmed 2026-08-28**
+Last updated: 2026-08-28 | Branch: `main` | Sessions 86–101 deployed (production at `3430643`, migrations through #56); **Session 102 (team to-do list, migration #57) built and tested, pending deploy**
 
 ---
 
@@ -2563,6 +2563,26 @@ See `FRONTEND_NOTE_product-optimization.md`.
 
 ---
 
+## The shared team to-do list (Session 102)
+
+> **Deploy status:** built and tested, **not yet deployed**. Migration **#57**
+> unapplied. **4 new routes**, so `route:cache` must be rebuilt. Deploy-order
+> safe: the page answers `todos_available: false` and My Work counts zero
+> until it runs.
+
+The ask: a to-do list where anyone can use it and tag a teammate.
+
+| Change | Status | Notes |
+|--------|--------|-------|
+| **#57** `todos` | 🔧 | One shared list. `assigned_admin_id` nullable — an untagged item is the team's, not nobody's. `completed_at`/`completed_by` follow the status in both directions: a reopened item was NOT done. |
+| Behind `staff.self`, decided in the controller | 🔧 | Every role holds `staff.self`, so ANYONE — a viewer included — creates and reads. Who may MOVE an item is not a role question: its creator, its assignee, or super_admin. Deleting is narrower still — the creator only, because the assignee marks things done, they do not erase that it was asked. `you_may_edit`/`you_may_delete` are served per row, never re-derived client-side. |
+| The tag is the chase | 🔧 | Same contract as the snapshot board and the EC lines: tagging notifies (one deduped nudge/day, never self-notifies), the item lands in the assignee's **My Work** (`todo_tasks`, deep-linked `?todo=`), and completing a tagged item notifies whoever created it — "done" travels back without a message written. My Work's status select PATCHes the normal `/admin/todos/{id}` endpoint; being a participant IS the authorization, so no my-work-specific route was needed. |
+| The list itself | 🔧 | Default view is `active` (open + in progress) — the list people work from; done items leave it but stay reachable. Sorted: done last, dated before undated, high priority first. Filters: scope all/mine/created, status, search. |
+| Frontend `/admin/todos` | 🔧 | okelcor-website: "Team To-Dos" in the top nav for every role (`section: null`, deliberately). Add/edit form (title, details, due date, priority, tag picker), Active/Tagged-to-me/Created-by-me/Done pills, rows with priority badge, overdue-red due date, assignee pill, done-by stamp, status select, and the `?todo=` highlight. My Work gains the "To-Dos" section. |
+| Backend tests (8 new) | ✅ | `TeamTodoListTest` — migration idempotent, a viewer creating + the shared read with per-row edit rights, tag → notification → My Work with deep link and status options, participant-only moves (bystander 403), completion notifying the creator + the reopen clearing the stamp, delete being the creator's call, retagging notifying the new assignee + the scopes and done filters, and pre-migration inertness of both the page and My Work. Full suite **967 passed, 0 failed**, 206 skipped, up from 959. |
+
+---
+
 ## Sales & Order Management board (Session 101)
 
 > **Deploy status:** **deployed 2026-08-28** — migration #56 applied, route
@@ -3349,6 +3369,8 @@ still has `QUEUE_CONNECTION=sync`, so `SendBulkEmailCampaignJob` would run
 inline during the HTTP request. Set `QUEUE_CONNECTION=database` and run a
 queue worker before the order manager sends to the full contact list — see
 Session 50 note above.
+
+57. `2026_08_28_000006_create_todos_table` (Session 102 — the shared team to-do list; creates `todos`. One NEW table, guarded with `Schema::hasTable`; nothing existing read, altered or backfilled. **Deploy-order safe** — `Todo::available()` answers "not yet" and the My Work section sits in the same try/catch as the other task sources. Proved idempotent by `TeamTodoListTest`.)
 
 56. `2026_08_28_000005_create_sales_order_board_tables` (Session 101 — the Sales & Order Management board; creates `sales_order_entries` + `sales_order_lines`. Two NEW tables, guarded with `Schema::hasTable`; nothing existing read, altered or backfilled. **Deploy-order safe** — `SalesOrderEntry::available()` answers "not yet". Proved idempotent by `SalesOrderBoardTest`, which runs the file itself and re-runs it.)
 

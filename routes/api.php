@@ -47,6 +47,7 @@ use App\Http\Controllers\Admin\AdminEbayAuditController;
 use App\Http\Controllers\Admin\AdminFinanceSnapshotController;
 use App\Http\Controllers\Admin\AdminEcInvoiceController;
 use App\Http\Controllers\Admin\AdminSalesOrderBoardController;
+use App\Http\Controllers\Admin\AdminTodoController;
 use App\Http\Controllers\Admin\AdminFinanceProfitabilityController;
 use App\Http\Controllers\Admin\AdminLiquidityController;
 use App\Http\Controllers\Admin\AdminOperationsSummaryController;
@@ -964,6 +965,14 @@ Route::prefix('v1')->group(function () {
         // their own page.
         // -----------------------------------------------------------------
         Route::middleware('permission:staff.self')->group(function () {
+            // The shared team to-do list — Session 102. Every role: anyone
+            // can use it and tag a teammate; who may move an item is decided
+            // in the controller (creator/assignee), not by role.
+            Route::get('todos', [AdminTodoController::class, 'index']);
+            Route::post('todos', [AdminTodoController::class, 'store']);
+            Route::patch('todos/{id}', [AdminTodoController::class, 'update']);
+            Route::delete('todos/{id}', [AdminTodoController::class, 'destroy']);
+
             Route::get('staff/activity', [AdminStaffLedgerController::class, 'activity']);
             Route::get('staff/summary',  [AdminStaffLedgerController::class, 'summary']);
             Route::get('staff/members',  [AdminStaffLedgerController::class, 'members']);

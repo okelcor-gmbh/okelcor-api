@@ -7,6 +7,7 @@ use App\Models\CustomerAccessRequest;
 use App\Models\Customer;
 use App\Models\EcInvoiceLine;
 use App\Models\FinanceSnapshotItem;
+use App\Models\Todo;
 use App\Models\QuoteRequest;
 use App\Services\AdminNotificationService;
 use App\Support\AdminPermissions;
@@ -158,6 +159,33 @@ class AdminWorkQueueController extends Controller
         } catch (\Throwable) {
         }
 
+        // Same guard again: the to-do list can reach production before its
+        // migration.
+        $todoTasks = collect();
+        try {
+            $todoTasks = Todo::with('creator')
+                ->where('assigned_admin_id', $userId)
+                ->where('status', '!=', 'done')
+                ->orderByRaw('due_on IS NULL, due_on')
+                ->limit(100)
+                ->get()
+                ->map(fn (Todo $t) => [
+                    'type'       => 'todo_task',
+                    'id'         => $t->id,
+                    'title'      => $t->title,
+                    'subtitle'   => trim(($t->creator ? 'From ' . ($t->creator->display_name ?: $t->creator->name) : 'Team to-do')
+                        . ($t->details ? ' · ' . \Illuminate\Support\Str::limit($t->details, 80) : '')),
+                    'priority'   => $t->due_on?->isPast() ? 'urgent' : ($t->priority === 'high' ? 'high' : ($t->priority === 'low' ? 'low' : 'medium')),
+                    'due_at'     => $t->due_on?->toIso8601String(),
+                    'action_url' => '/admin/todos?todo=' . $t->id,
+                    'status'     => $t->status,
+                    'editable'   => true,
+                    'status_options' => collect(Todo::STATUS_LABELS)
+                        ->map(fn ($label, $key) => ['value' => $key, 'label' => $label])->values(),
+                ])->values();
+        } catch (\Throwable) {
+        }
+
         $pendingApprovals = collect();
         $accessRequests   = collect();
 
@@ -201,6 +229,7 @@ class AdminWorkQueueController extends Controller
                 'proposals_accepted'  => $proposalsAccepted,
                 'finance_tasks'       => $financeTasks,
                 'ec_invoice_tasks'    => $ecInvoiceTasks,
+                'todo_tasks'          => $todoTasks,
                 'pending_approvals'   => $pendingApprovals->values(),
                 'access_requests'     => $accessRequests->values(),
             ],
@@ -211,6 +240,7 @@ class AdminWorkQueueController extends Controller
                     'proposals_accepted' => $proposalsAccepted->count(),
                     'finance_tasks'      => $financeTasks->count(),
                     'ec_invoice_tasks'   => $ecInvoiceTasks->count(),
+                    'todo_tasks'         => $todoTasks->count(),
                     'pending_approvals'  => $pendingApprovals->count(),
                     'access_requests'    => $accessRequests->count(),
                 ],
