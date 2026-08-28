@@ -105,7 +105,10 @@ class AdminWorkQueueController extends Controller
                         . ($i->comment ? " · {$i->comment}" : ''),
                     'priority'   => $i->date && $i->date->isPast() ? 'urgent' : ($i->status === 'Pending' ? 'high' : 'medium'),
                     'due_at'     => $i->date?->toIso8601String(),
-                    'action_url' => '/admin/finance-snapshot',
+                    // Deep link: the board reads ?item= and opens the exact
+                    // record's drill-down rather than leaving the assignee to
+                    // find it on the whole page.
+                    'action_url' => '/admin/finance-snapshot?item=' . $i->id,
                     'status'     => $i->status,
                     // Tells the panel this row can be updated in place by its
                     // assignee via PATCH /admin/my-work/finance-items/{id}.
@@ -214,7 +217,7 @@ class AdminWorkQueueController extends Controller
                 type: 'finance_task_updated',
                 title: "{$user->name} set {$item->ref} to {$item->status}",
                 body: $item->comment,
-                actionUrl: '/admin/finance-snapshot',
+                actionUrl: '/admin/finance-snapshot?item=' . $item->id,
                 severity: in_array($item->status, FinanceSnapshotItem::CLOSED_STATUSES, true) ? 'success' : 'info',
                 relatedType: 'finance_snapshot_item',
                 relatedId: $item->id,
