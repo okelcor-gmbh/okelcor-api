@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-28 | Branch: `main` | **Production is at `dd672b3` — sessions 86–100 all deployed, migrations through #55 applied, confirmed 2026-08-28**
+Last updated: 2026-08-28 | Branch: `main` | Sessions 86–100 deployed (production at `b1d7e3c`, migrations through #55); **Session 101 (Sales & Orders board, migration #56) built and tested, pending deploy**
 
 ---
 
@@ -2563,6 +2563,27 @@ See `FRONTEND_NOTE_product-optimization.md`.
 
 ---
 
+## Sales & Order Management board (Session 101)
+
+> **Deploy status:** built and tested, **not yet deployed**. Migration **#56**
+> unapplied. **9 new routes**, so `route:cache` must be rebuilt. Deploy-order
+> safe: the page answers `sales_orders_available: false` until it runs.
+
+From finance's `OT 3.html` mockup: hand-entered orders, each itemizing
+CUSTOMER lines (revenue + tyre quantity) against SUPPLIER lines (costs +
+their documents), with five KPI cards on top.
+
+| Change | Status | Notes |
+|--------|--------|-------|
+| **#56** `sales_order_entries` + `sales_order_lines` | 🔧 | GP, margin and the status are computed, never stored. `order_no` unique — the same real order twice would double the KPIs; the duplicate is a friendly 422 carrying the existing entry. Decoupled from operational `orders`, like the snapshot board: finance types what their books say, including orders this system never saw. |
+| The mockup's arithmetic, verbatim | 🔧 | Revenue and tyres from customer lines; costs from supplier lines; an order is **verified exactly when it has supplier lines and every one carries its document** — revenue with no recorded cost is a missing cost, not a verified margin. A tyre quantity on a supplier line is zeroed: it would double-count the same tyres. A new order is seeded with its customer line, amount 0 — the revenue side always exists. |
+| KPIs | 🔧 | Unique customers (case-insensitive), tyres sold, avg price/tyre (**null, not €0.00, over zero tyres**), B2B and B2C GP margins. Computed over the filter scope BEFORE the pending narrowing — "pending" is a worklist view, and margins must not swing when it is clicked. |
+| Routes | 🔧 | `GET/POST /admin/sales-orders`, entry PATCH/DELETE, line POST/PATCH/DELETE, line file POST + download. Reads `finance.view`, writes `finance.manage`; documents on the private disk, same upload shape as everywhere. |
+| Frontend `/admin/sales-orders` | 🔧 | okelcor-website: the five KPI cards, All/Pending pills + month filter, inline-editable summary rows (order no, customer, segment, month, category), computed status badge and coloured margin, expandable transaction lines with attach/download and per-order Customer/Supplier/GP footer. Everything wraps. |
+| Backend tests (10 new) | ✅ | `SalesOrderBoardTest` — migration idempotent against real SQL, the seeded customer line + duplicate 422 (whitespace cannot evade it), month validation, the mockup's own example (14,500/100 tyres vs 10,000+1,800 → GP 2,700, 18.62%, pending until the CMR arrives, then verified), supplier-lines-required rule, the tyre double-count guard, the KPI figures (140 tyres, €126.43, 18.6%/24.2%, case-insensitive customers), the pending filter narrowing rows but not cards, both permission halves, and pre-migration inertness. Full suite **959 passed, 0 failed**, 206 skipped, up from 949. |
+
+---
+
 ## EC Invoice List — the ZM portal (Session 100)
 
 > **Deploy status:** **deployed 2026-08-28** — migration #55 applied, route
@@ -3329,6 +3350,8 @@ still has `QUEUE_CONNECTION=sync`, so `SendBulkEmailCampaignJob` would run
 inline during the HTTP request. Set `QUEUE_CONNECTION=database` and run a
 queue worker before the order manager sends to the full contact list — see
 Session 50 note above.
+
+56. `2026_08_28_000005_create_sales_order_board_tables` (Session 101 — the Sales & Order Management board; creates `sales_order_entries` + `sales_order_lines`. Two NEW tables, guarded with `Schema::hasTable`; nothing existing read, altered or backfilled. **Deploy-order safe** — `SalesOrderEntry::available()` answers "not yet". Proved idempotent by `SalesOrderBoardTest`, which runs the file itself and re-runs it.)
 
 55. `2026_08_28_000004_create_ec_invoice_tables` (Session 100 — the EC Invoice List / ZM portal; creates `ec_invoice_periods`, `ec_invoice_groups`, `ec_invoice_lines`. Three NEW tables, guarded with `Schema::hasTable`; nothing existing read, altered or backfilled. **Deploy-order safe** — `EcInvoiceGroup::available()` answers "not yet" and the My Work section is inside the same try/catch pattern as the finance tasks. Proved idempotent by `EcInvoiceListTest`, which runs the file itself and re-runs it.)
 

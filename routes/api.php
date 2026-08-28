@@ -46,6 +46,7 @@ use App\Http\Controllers\Admin\AdminFinanceInvoiceController;
 use App\Http\Controllers\Admin\AdminEbayAuditController;
 use App\Http\Controllers\Admin\AdminFinanceSnapshotController;
 use App\Http\Controllers\Admin\AdminEcInvoiceController;
+use App\Http\Controllers\Admin\AdminSalesOrderBoardController;
 use App\Http\Controllers\Admin\AdminFinanceProfitabilityController;
 use App\Http\Controllers\Admin\AdminLiquidityController;
 use App\Http\Controllers\Admin\AdminOperationsSummaryController;
@@ -881,6 +882,9 @@ Route::prefix('v1')->group(function () {
             Route::get('finance/profitability', [AdminFinanceProfitabilityController::class, 'index']);
             Route::get('finance/liquidity/history', [AdminLiquidityController::class, 'history']);
             Route::get('finance/liquidity', [AdminLiquidityController::class, 'index']);
+            // Sales & Order Management board — Session 101.
+            Route::get('sales-orders/lines/{lineId}/download', [AdminSalesOrderBoardController::class, 'downloadLineFile']);
+            Route::get('sales-orders', [AdminSalesOrderBoardController::class, 'index']);
             // EC Invoice List (ZM) — Session 100. Static segments first.
             Route::get('ec-invoices/export', [AdminEcInvoiceController::class, 'export'])
                 ->middleware('permission:orders.export');
@@ -937,6 +941,15 @@ Route::prefix('v1')->group(function () {
             Route::patch('ec-invoices/lines/{id}', [AdminEcInvoiceController::class, 'updateLine']);
             Route::delete('ec-invoices/lines/{id}', [AdminEcInvoiceController::class, 'destroyLine']);
             Route::post('ec-invoices/lines/{id}/file', [AdminEcInvoiceController::class, 'uploadLineFile']);
+
+            // Sales & Order Management board writes — Session 101.
+            Route::post('sales-orders', [AdminSalesOrderBoardController::class, 'store']);
+            Route::patch('sales-orders/{id}', [AdminSalesOrderBoardController::class, 'update']);
+            Route::delete('sales-orders/{id}', [AdminSalesOrderBoardController::class, 'destroy']);
+            Route::post('sales-orders/{id}/lines', [AdminSalesOrderBoardController::class, 'storeLine']);
+            Route::patch('sales-orders/lines/{lineId}', [AdminSalesOrderBoardController::class, 'updateLine']);
+            Route::delete('sales-orders/lines/{lineId}', [AdminSalesOrderBoardController::class, 'destroyLine']);
+            Route::post('sales-orders/lines/{lineId}/file', [AdminSalesOrderBoardController::class, 'uploadLineFile']);
         });
 
         // -----------------------------------------------------------------
