@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-28 | Branch: `main` | Sessions 86–101 deployed (production at `3430643`, migrations through #56); **Session 102 (team to-do list, migration #57) built and tested, pending deploy**
+Last updated: 2026-08-28 | Branch: `main` | **Production is at `c235f29` — sessions 86–102 all deployed, migrations through #57 applied, confirmed 2026-08-28**
 
 ---
 
@@ -2565,10 +2565,8 @@ See `FRONTEND_NOTE_product-optimization.md`.
 
 ## The shared team to-do list (Session 102)
 
-> **Deploy status:** built and tested, **not yet deployed**. Migration **#57**
-> unapplied. **4 new routes**, so `route:cache` must be rebuilt. Deploy-order
-> safe: the page answers `todos_available: false` and My Work counts zero
-> until it runs.
+> **Deploy status:** **deployed 2026-08-28** — migration #57 applied, route
+> cache rebuilt, `/admin/todos` answering 401-not-404 from outside.
 
 The ask: a to-do list where anyone can use it and tag a teammate.
 
