@@ -43,6 +43,9 @@ use App\Http\Controllers\Partner\PartnerAuthController;
 use App\Http\Controllers\Partner\PartnerSaleController;
 use App\Http\Controllers\Admin\AdminNewsletterController;
 use App\Http\Controllers\Admin\AdminFinanceInvoiceController;
+use App\Http\Controllers\Admin\AdminFinanceLiquidityWeekController;
+use App\Http\Controllers\Admin\AdminOrderCostController;
+use App\Http\Controllers\Admin\AdminOrderProfitabilityController;
 use App\Http\Controllers\Admin\AdminEbayAuditController;
 use App\Http\Controllers\Admin\AdminFinanceSnapshotController;
 use App\Http\Controllers\Admin\AdminOperationsSummaryController;
@@ -867,6 +870,20 @@ Route::prefix('v1')->group(function () {
 
             // Finance snapshot board (read)
             Route::get('finance-snapshot', [AdminFinanceSnapshotController::class, 'index']);
+
+            // Order profitability — revenue invoice vs supplier invoices vs
+            // fees, per order and rolled up. Static segments before {ref},
+            // or `summary` becomes an order reference.
+            Route::get('finance/profitability/summary', [AdminOrderProfitabilityController::class, 'summary']);
+            Route::get('finance/profitability/export', [AdminOrderProfitabilityController::class, 'export']);
+            Route::get('finance/profitability', [AdminOrderProfitabilityController::class, 'index']);
+            Route::get('finance/profitability/{ref}', [AdminOrderProfitabilityController::class, 'show']);
+
+            // Fee/charge lines on one order
+            Route::get('orders/{id}/costs', [AdminOrderCostController::class, 'index'])->whereNumber('id');
+
+            // Liquidity, as the rolling four-week window
+            Route::get('finance-liquidity/weeks', [AdminFinanceLiquidityWeekController::class, 'index']);
         });
 
         // -----------------------------------------------------------------
@@ -889,8 +906,23 @@ Route::prefix('v1')->group(function () {
         Route::middleware('permission:finance.manage')->group(function () {
             Route::post('finance-invoices', [AdminFinanceInvoiceController::class, 'store']);
             Route::post('finance-invoices/{id}/file', [AdminFinanceInvoiceController::class, 'uploadFile']);
+            // The customer-agreed moment: the row becomes the order's revenue
+            // invoice and its money fields lock.
+            Route::post('finance-invoices/{id}/finalize', [AdminFinanceInvoiceController::class, 'finalize']);
+            Route::post('finance-invoices/{id}/unfinalize', [AdminFinanceInvoiceController::class, 'unfinalize']);
             Route::patch('finance-invoices/{id}', [AdminFinanceInvoiceController::class, 'update']);
             Route::delete('finance-invoices/{id}', [AdminFinanceInvoiceController::class, 'destroy']);
+
+            // Fee/charge lines (eBay, Stripe, bank …) against an order
+            Route::post('orders/{id}/costs', [AdminOrderCostController::class, 'store'])->whereNumber('id');
+            Route::patch('order-costs/{id}', [AdminOrderCostController::class, 'update'])->whereNumber('id');
+            Route::delete('order-costs/{id}', [AdminOrderCostController::class, 'destroy'])->whereNumber('id');
+
+            // Weekly liquidity — writes land only in the open window
+            Route::put('finance-liquidity/weeks/bank-balance', [AdminFinanceLiquidityWeekController::class, 'setBankBalance']);
+            Route::post('finance-liquidity/weeks/entries', [AdminFinanceLiquidityWeekController::class, 'storeEntry']);
+            Route::patch('finance-liquidity/weeks/entries/{id}', [AdminFinanceLiquidityWeekController::class, 'updateEntry']);
+            Route::delete('finance-liquidity/weeks/entries/{id}', [AdminFinanceLiquidityWeekController::class, 'destroyEntry']);
         });
 
         // -----------------------------------------------------------------

@@ -341,6 +341,22 @@ class Order extends Model
         return $this->hasMany(OrderSignoff::class)->orderBy('signed_at');
     }
 
+    /** Fee and charge lines (eBay, Stripe, bank …) — the invoiceless costs. */
+    public function costs(): HasMany
+    {
+        return $this->hasMany(OrderCost::class)->orderBy('created_at');
+    }
+
+    /**
+     * Every register row naming this order — revenue invoice, supplier
+     * invoices and plain reconciliation entries alike. Keyed by ref string
+     * like invoice(), because the register stores refs, not FKs.
+     */
+    public function financeInvoices(): HasMany
+    {
+        return $this->hasMany(FinanceInvoice::class, 'order_ref', 'ref');
+    }
+
     /**
      * The tax invoice for this order. Invoices link to orders by ref string
      * (order_ref), not a numeric FK, so the relation is keyed accordingly.

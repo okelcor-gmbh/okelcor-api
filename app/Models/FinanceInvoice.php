@@ -34,6 +34,19 @@ class FinanceInvoice extends Model
     public const MANUAL_SYSTEMS = ['sevdesk', 'upload', 'other'];
     public const CHANNELS = ['normal', 'ebay'];
 
+    /**
+     * Which side of an order's profit a row sits on.
+     *
+     *   register — a reconciliation entry, the table's original job
+     *   revenue  — the customer-agreed invoice for an order; its amount is the
+     *              order's revenue once finalized
+     *   supplier — a supplier's invoice against the order: a cost
+     */
+    public const ROLE_REGISTER = 'register';
+    public const ROLE_REVENUE  = 'revenue';
+    public const ROLE_SUPPLIER = 'supplier';
+    public const ROLES = [self::ROLE_REGISTER, self::ROLE_REVENUE, self::ROLE_SUPPLIER];
+
     protected $fillable = [
         'system',
         'external_number',
@@ -43,6 +56,10 @@ class FinanceInvoice extends Model
         'currency',
         'issued_on',
         'channel',
+        'role',
+        'supplier_name',
+        'finalized_at',
+        'finalized_by',
         'notes',
         'recorded_by',
         'file_path',
@@ -61,10 +78,11 @@ class FinanceInvoice extends Model
     ];
 
     protected $casts = [
-        'amount'      => 'decimal:2',
-        'issued_on'   => 'date',
-        'uploaded_at' => 'datetime',
-        'file_size'   => 'integer',
+        'amount'       => 'decimal:2',
+        'issued_on'    => 'date',
+        'uploaded_at'  => 'datetime',
+        'finalized_at' => 'datetime',
+        'file_size'    => 'integer',
     ];
 
     /**
@@ -87,6 +105,20 @@ class FinanceInvoice extends Model
     public static function forgetRegisterCheck(): void
     {
         self::$registerReady = null;
+        self::$rolesReady    = null;
+    }
+
+    /**
+     * Whether the role/finalization columns exist yet — same deploy-order
+     * story as the register columns: recording an invoice must keep working
+     * between this code shipping and its migration running.
+     */
+    private static ?bool $rolesReady = null;
+
+    public static function rolesAvailable(): bool
+    {
+        return self::$rolesReady ??= Schema::hasTable('finance_invoices')
+            && Schema::hasColumn('finance_invoices', 'role');
     }
 
     /** Written for the operator rather than by them. */
@@ -100,9 +132,26 @@ class FinanceInvoice extends Model
         return (bool) $this->getRawOriginal('file_path');
     }
 
+    /** Customer has agreed to it; the money fields are locked from here. */
+    public function isFinalized(): bool
+    {
+        return $this->finalized_at !== null;
+    }
+
+    /** The rows profitability counts as an order's revenue. */
+    public function scopeFinalizedRevenue($query)
+    {
+        return $query->where('role', self::ROLE_REVENUE)->whereNotNull('finalized_at');
+    }
+
     public function recordedBy(): BelongsTo
     {
         return $this->belongsTo(AdminUser::class, 'recorded_by');
+    }
+
+    public function finalizedBy(): BelongsTo
+    {
+        return $this->belongsTo(AdminUser::class, 'finalized_by');
     }
 
     /**

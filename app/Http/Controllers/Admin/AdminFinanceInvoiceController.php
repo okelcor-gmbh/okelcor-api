@@ -32,6 +32,7 @@ class AdminFinanceInvoiceController extends Controller
             'to'      => ['nullable', 'date'],
             'channel' => ['nullable', Rule::in(FinanceInvoice::CHANNELS)],
             'system'  => ['nullable', 'string', 'max:30'],
+            'role'    => ['nullable', Rule::in(FinanceInvoice::ROLES)],
             'matched'  => ['nullable', 'in:yes,no'],
             'has_file' => ['nullable', 'in:yes,no'],
             'q'       => ['nullable', 'string', 'max:100'],
@@ -47,7 +48,9 @@ class AdminFinanceInvoiceController extends Controller
             $query->whereDate('issued_on', '<=', $request->input('to'));
         }
 
-        foreach (['channel', 'system'] as $field) {
+        $filterable = FinanceInvoice::rolesAvailable() ? ['channel', 'system', 'role'] : ['channel', 'system'];
+
+        foreach ($filterable as $field) {
             if ($request->filled($field)) {
                 $query->where($field, $request->input($field));
             }
@@ -90,6 +93,7 @@ class AdminFinanceInvoiceController extends Controller
                 'systems'        => FinanceInvoice::SYSTEMS,
                 'manual_systems' => FinanceInvoice::MANUAL_SYSTEMS,
                 'channels'     => FinanceInvoice::CHANNELS,
+                'roles'        => FinanceInvoice::ROLES,
             ],
             'message' => 'success',
         ]);
@@ -108,7 +112,13 @@ class AdminFinanceInvoiceController extends Controller
             'system'          => ['nullable', Rule::in(FinanceInvoice::MANUAL_SYSTEMS)],
             'external_number' => ['required', 'string', 'max:60'],
             'file'            => ['nullable', 'file', 'max:20480', 'mimes:pdf,jpg,jpeg,png'],
-            'order_ref'       => ['nullable', 'string', 'max:30'],
+            // A revenue or supplier invoice is meaningless without the order
+            // whose profit it belongs to; a plain register row can float free.
+            'role'            => ['nullable', Rule::in(FinanceInvoice::ROLES)],
+            'order_ref'       => ['nullable', 'string', 'max:30',
+                'required_if:role,' . FinanceInvoice::ROLE_REVENUE . ',' . FinanceInvoice::ROLE_SUPPLIER],
+            'supplier_name'   => ['nullable', 'string', 'max:150',
+                'required_if:role,' . FinanceInvoice::ROLE_SUPPLIER],
             'invoice_number'  => ['nullable', 'string', 'max:50'],
             'amount'          => ['nullable', 'numeric', 'min:0', 'max:99999999'],
             'currency'        => ['nullable', 'string', 'size:3'],
@@ -118,6 +128,14 @@ class AdminFinanceInvoiceController extends Controller
         ]);
 
         $data['system'] ??= 'sevdesk';
+        $data['role']   ??= FinanceInvoice::ROLE_REGISTER;
+
+        // Between this code deploying and its migration running, recording an
+        // invoice has to keep working — the row just stays a plain register
+        // entry until the columns exist.
+        if (! FinanceInvoice::rolesAvailable()) {
+            unset($data['role'], $data['supplier_name']);
+        }
 
         $duplicate = FinanceInvoice::where('system', $data['system'])
             ->where('external_number', $data['external_number'])
@@ -175,10 +193,23 @@ class AdminFinanceInvoiceController extends Controller
             ], 409);
         }
 
+        if ($invoice->isFinalized()) {
+            // The customer agreed to this figure and profit reports count it.
+            // Editing it in place would change history nobody re-approved —
+            // withdraw the finalization first, on purpose and attributably.
+            return response()->json([
+                'message' => 'This invoice is finalized — the customer-agreed revenue figure is locked. '
+                    . 'Unfinalize it first if it genuinely has to change.',
+                'code'    => 'finalized_locked',
+            ], 409);
+        }
+
         $data = $request->validate([
             'external_number' => ['sometimes', 'string', 'max:60',
                 Rule::unique('finance_invoices')->where('system', $invoice->system)->ignore($invoice->id)],
             'order_ref'      => ['sometimes', 'nullable', 'string', 'max:30'],
+            'role'           => ['sometimes', Rule::in(FinanceInvoice::ROLES)],
+            'supplier_name'  => ['sometimes', 'nullable', 'string', 'max:150'],
             'invoice_number' => ['sometimes', 'nullable', 'string', 'max:50'],
             'amount'         => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:99999999'],
             'currency'       => ['sometimes', 'string', 'size:3'],
@@ -218,6 +249,14 @@ class AdminFinanceInvoiceController extends Controller
             ], 409);
         }
 
+        if ($invoice->isFinalized()) {
+            return response()->json([
+                'message' => 'This invoice is finalized — deleting it would silently remove the revenue an '
+                    . 'order reports. Unfinalize it first if it genuinely has to go.',
+                'code'    => 'finalized_locked',
+            ], 409);
+        }
+
         if ($path = $invoice->getRawOriginal('file_path')) {
             Storage::disk('local')->delete($path);
         }
@@ -225,6 +264,107 @@ class AdminFinanceInvoiceController extends Controller
         $invoice->delete();
 
         return response()->json(['message' => 'Finance invoice removed.']);
+    }
+
+    // -------------------------------------------------------------------------
+    // POST /api/v1/admin/finance-invoices/{id}/finalize — finance.manage
+    //
+    // "The invoice that has been finalized, that the customer has agreed to —
+    // that's our revenue invoice." This is that moment: from here the row IS
+    // the order's revenue, its money fields lock, and profitability starts
+    // reporting a figure instead of `awaiting_revenue_invoice`.
+    // -------------------------------------------------------------------------
+    public function finalize(Request $request, int $id): JsonResponse
+    {
+        $invoice = FinanceInvoice::findOrFail($id);
+
+        if ($invoice->isFinalized()) {
+            return response()->json([
+                'message' => 'This invoice is already finalized.',
+                'code'    => 'already_finalized',
+                'data'    => $this->format($invoice),
+            ], 409);
+        }
+
+        if ($invoice->role === FinanceInvoice::ROLE_SUPPLIER) {
+            return response()->json([
+                'message' => 'A supplier invoice is a cost, not revenue — it cannot be finalized as the '
+                    . 'revenue invoice.',
+                'code'    => 'not_revenue',
+            ], 409);
+        }
+
+        // Revenue with no amount, or no order to belong to, is not a revenue
+        // figure anything can report on.
+        if ($invoice->amount === null) {
+            return response()->json([
+                'message' => 'Enter the invoice amount before finalizing — the finalized amount becomes the '
+                    . "order's revenue.",
+                'code'    => 'amount_missing',
+            ], 409);
+        }
+
+        $order = $invoice->order_ref ? Order::where('ref', $invoice->order_ref)->first() : null;
+
+        if ($order === null) {
+            return response()->json([
+                'message' => 'This invoice does not name an order this system knows, so there is no order '
+                    . 'for its revenue to belong to. Set its order ref first.',
+                'code'    => 'order_unknown',
+            ], 409);
+        }
+
+        // One revenue figure per order — two finalized revenue invoices would
+        // double the order's revenue in every report at once.
+        $standing = FinanceInvoice::query()->finalizedRevenue()
+            ->where('order_ref', $invoice->order_ref)
+            ->where('id', '!=', $invoice->id)
+            ->first();
+
+        if ($standing !== null) {
+            return response()->json([
+                'message' => "Order {$invoice->order_ref} already has a finalized revenue invoice "
+                    . "({$standing->external_number}). Unfinalize that one first if this replaces it.",
+                'code'    => 'revenue_invoice_exists',
+                'data'    => $this->format($standing),
+            ], 409);
+        }
+
+        $invoice->update([
+            'role'         => FinanceInvoice::ROLE_REVENUE,
+            'finalized_at' => now(),
+            'finalized_by' => $request->user()->id,
+        ]);
+
+        return response()->json([
+            'data'    => $this->format($invoice->fresh(['recordedBy', 'finalizedBy'])),
+            'message' => "Revenue invoice finalized for order {$invoice->order_ref}.",
+        ]);
+    }
+
+    // -------------------------------------------------------------------------
+    // POST /api/v1/admin/finance-invoices/{id}/unfinalize — finance.manage
+    // -------------------------------------------------------------------------
+    public function unfinalize(int $id): JsonResponse
+    {
+        $invoice = FinanceInvoice::findOrFail($id);
+
+        if (! $invoice->isFinalized()) {
+            return response()->json([
+                'message' => 'This invoice is not finalized.',
+                'code'    => 'not_finalized',
+            ], 409);
+        }
+
+        // Role stays `revenue` — it is still the draft revenue invoice, just
+        // no longer the agreed one, so profit goes back to awaiting it.
+        $invoice->update(['finalized_at' => null, 'finalized_by' => null]);
+
+        return response()->json([
+            'data'    => $this->format($invoice->fresh('recordedBy')),
+            'message' => 'Finalization withdrawn — the order reports no agreed revenue until an invoice is '
+                . 'finalized again.',
+        ]);
     }
 
     // -------------------------------------------------------------------------
@@ -355,6 +495,11 @@ class AdminFinanceInvoiceController extends Controller
             'currency'        => $f->currency,
             'issued_on'       => $f->issued_on?->toDateString(),
             'channel'         => $f->channel,
+            'role'            => $f->role ?? FinanceInvoice::ROLE_REGISTER,
+            'supplier_name'   => $f->supplier_name,
+            'finalized'       => $f->isFinalized(),
+            'finalized_at'    => $f->finalized_at?->toIso8601String(),
+            'finalized_by'    => $f->finalizedBy?->name,
             'notes'           => $f->notes,
             'recorded_by'     => $f->recordedBy?->name,
             'recorded_at'     => $f->created_at?->toIso8601String(),
