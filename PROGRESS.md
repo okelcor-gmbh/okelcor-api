@@ -1,16 +1,20 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-29 | Branch: `main` | **Production is at `92b49d8` — sessions 86–102, the 2026-08-25 batch, the EC Invoice VAT fix and Session 103 (finance snapshot access) all deployed, migrations #1–57 applied, every deploy verified from outside the same day**
+Last updated: 2026-08-29 | Branch: `main` | **Production is at `e3dc4e5` — sessions 86–104 (finance snapshot access, security hardening), the 2026-08-25 batch and the EC Invoice VAT fix all deployed, migrations #1–58 applied, every deploy verified from outside the same day**
 
 ---
 
 ## 🛡️ Security hardening pass (Session 104)
 
-> **Deploy status:** built and tested, **not yet deployed**. Migration **#58**
-> (`login_histories`) pending. Routes changed (login throttle) and config
-> changed (customer token TTL), so `route:cache` AND `config:cache` must both
-> be rebuilt. The `.env.save*` server cleanup is already done — it needed no
-> deploy.
+> **Deploy status:** **deployed 2026-08-29** as `e3dc4e5`. `backup:okelcor`
+> taken first (7.34 MB), `migrate --pretend --force` reviewed (exactly one
+> CREATE TABLE, nothing else), then **#58 applied as batch 123** (53ms).
+> `config:cache` and `route:cache` rebuilt, both exit 0;
+> `sanctum:prune-expired` confirmed in `schedule:list`. Verified from
+> outside: `/api/v1/categories` 200, and six rapid login guesses at one
+> address returned **five 401s then a 429** — the per-account throttle is
+> live, which also proves the route cache is fresh. The running code reports
+> `login_histories: EXISTS` and a 7-day customer TTL.
 
 The user brought a security checklist (Fortify 2FA, password rules, login
 rate limits, session cookies, password-confirm, auditing) and asked what
