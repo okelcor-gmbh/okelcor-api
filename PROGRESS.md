@@ -1,6 +1,46 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-29 | Branch: `main` | **Production is at `0e621ef` — sessions 86–102, the 2026-08-25 batch and the EC Invoice VAT fix all deployed, migrations #1–57 applied, every deploy verified from outside the same day**
+Last updated: 2026-08-29 | Branch: `main` | **Production is at `0e621ef` — sessions 86–102, the 2026-08-25 batch and the EC Invoice VAT fix all deployed, migrations #1–57 applied, every deploy verified from outside the same day. Session 103 (finance snapshot access) is built and pending deploy — no migration, `route:cache` required.**
+
+---
+
+## 🔒 The finance snapshot board is finance's own (Session 103)
+
+> **Deploy status:** built and tested, **not yet deployed**. **No migration.**
+> No new routes — nine existing ones move to a new permission key, so
+> `route:cache` must be rebuilt. Frontend work outstanding, see below.
+
+The business's instruction, via the boss: the finance snapshot dashboard is for
+`finance` and `super_admin` only. `admin`, the order manager and everyone else
+are denied, and the page is hidden from them rather than offered and refused.
+Separately: someone tagged on a record should land **on that record**, not on
+the whole board.
+
+| Change | Status | Notes |
+|---|---|---|
+| **`finance.snapshot`** — a new key, `['super_admin', 'finance']` | 🔧 | Deliberately **not** a narrowing of `finance.view`. That key gates eight other things — invoice reconciliation, profitability, liquidity, EC Invoices, the Sales & Order board — and `admin` and `order_manager` hold it because Sessions 83 and 99 decided operations and finance should read the same numbers. Narrowing it would have taken the order manager out of her own daily work to close one page. One key covers read and write: the board has no read-only audience, and a second key would be two things to keep in step for nobody. |
+| All nine board routes moved onto it | 🔧 | `GET /admin/finance-snapshot` left the `finance.view` group and joined the write group, which is now `permission:finance.snapshot`. |
+| **Being the assignee is still authorization** | 🔧 | `PATCH /admin/my-work/finance-items/{id}` is unchanged in spirit and its fallback moved `finance.manage` → `finance.snapshot`. This is the only way into a snapshot record from outside finance and it is the point: closing the board must not stop finance tagging an order manager to chase a payment. |
+| **A tagged task opens the task** | 🔧 | `action_url` on a My Work finance task was `/admin/finance-snapshot?item=N` — the whole board, and a guaranteed 403 for most assignees now. Now `/admin/my-work?finance_item=N`. A `board_url` rides alongside, populated **only** for someone who may open the board and `null` otherwise, so finance keeps the jump and nobody else is offered a dead link. |
+| `status_options` served on the finance task | 🔧 | Finance tasks were the only editable My Work item without them — EC lines and to-dos both carry theirs. The panel had `editable: true` and a `status` and nothing to build the select from. Served rather than hardcoded, so the list cannot drift from `FinanceSnapshotItem::STATUSES`. |
+| Backend tests (3 new, 2 replaced) | ✅ | Every role walked against read and write, with `admin` and `order_manager` asserted **by name** because both would have been let in had this ridden on `finance.view` — that is the regression worth pinning. A second test asserts the wider finance permissions were left alone. A third runs it end to end: an order manager is tagged, gets the My Work link and a null `board_url`, and updates the status holding no finance permission at all. `test_order_manager_can_read_but_not_write` was **replaced, not patched** — its name had become a lie. Full suite **761 passed, 0 failed**, 207 skipped. |
+
+**The complaint that started it was probably a frontend bug.** The report was
+that the boss, a `super_admin`, could not see the dashboard. `super_admin` has
+held every finance permission on the API since the board shipped — so if the
+page was missing for him, the panel is gating on a hardcoded role list rather
+than on the `permissions` array the auth payload returns. That is the Session 84
+divergence again, and it is flagged in the frontend note as the thing to check
+first rather than assumed fixed by this change.
+
+**Outstanding, and it is the visible half:** hiding the nav entry is frontend
+work and okelcor-website is not checked out on this machine. Until they ship,
+`admin` and the order manager will see the menu item and get a 403 on click —
+denied, but not hidden. Also theirs: honouring `?finance_item=` on My Work,
+rendering the select from `status_options`, and showing the board link only when
+`board_url` is non-null.
+
+See `FRONTEND_NOTE_finance-snapshot-access.md`.
 
 ---
 

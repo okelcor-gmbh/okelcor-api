@@ -872,9 +872,6 @@ Route::prefix('v1')->group(function () {
             Route::get('finance-invoices', [AdminFinanceInvoiceController::class, 'index']);
             Route::get('finance-invoices/{id}/download', [AdminFinanceInvoiceController::class, 'download']);
 
-            // Finance snapshot board (read)
-            Route::get('finance-snapshot', [AdminFinanceSnapshotController::class, 'index']);
-
             // Profitability (Session 99). Static segments before anything
             // parameterised, same rule as the orders block.
             Route::get('finance/profitability/export', [AdminFinanceProfitabilityController::class, 'export'])
@@ -898,11 +895,18 @@ Route::prefix('v1')->group(function () {
         });
 
         // -----------------------------------------------------------------
-        // Finance snapshot board — writes (finance.manage)
+        // Finance snapshot board — read and write, both on finance.snapshot
         // The six-category pipeline + liquidity working, previously tracked
         // in a single browser's localStorage.
+        //
+        // Closed to `admin` and the order manager on the business's
+        // instruction — see the `finance.snapshot` note in AdminPermissions.
+        // An assignee updates their own tagged item from My Work instead
+        // (PATCH /admin/my-work/finance-items/{id}), which needs no
+        // permission at all, so tagging someone outside finance still works.
         // -----------------------------------------------------------------
-        Route::middleware('permission:finance.manage')->group(function () {
+        Route::middleware('permission:finance.snapshot')->group(function () {
+            Route::get('finance-snapshot', [AdminFinanceSnapshotController::class, 'index']);
             Route::post('finance-snapshot/items', [AdminFinanceSnapshotController::class, 'storeItem']);
             Route::post('finance-snapshot/items/bulk', [AdminFinanceSnapshotController::class, 'storeItemsBulk']);
             Route::put('finance-snapshot/items/{id}', [AdminFinanceSnapshotController::class, 'updateItem']);

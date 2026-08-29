@@ -12,7 +12,9 @@ namespace App\Support;
  *   super_admin     — full system access + admin management
  *   admin           — operational access, no admin user management
  *   order_manager   — orders, quotes, EU declarations, trade docs, newsletter
- *   finance         — invoice reconciliation + the finance half of order sign-off
+ *   finance         — invoice reconciliation, the finance half of order
+ *                     sign-off, and the snapshot board (which only this role
+ *                     and super_admin can open at all)
  *   sales_manager   — read-only orders + quotes (view pipeline, no mutations)
  *   content_manager — all content (products, articles, hero, promotions, media)
  *   support         — customer read-only + contacts
@@ -78,6 +80,28 @@ class AdminPermissions
         // ── Finance system reconciliation (sevDesk) ───────────────────────
         'finance.view'            => ['super_admin', 'admin', 'finance', 'order_manager'],
         'finance.manage'          => ['super_admin', 'admin', 'finance'],
+
+        // ── Finance snapshot board ────────────────────────────────────────
+        // Its own key rather than riding on finance.view/finance.manage, on
+        // the business's instruction: the snapshot board is the finance
+        // team's own working pipeline and is closed to everyone else,
+        // including `admin` and the order manager. Reconciliation,
+        // profitability, EC Invoices and the Sales & Order board keep the
+        // wider audience they were built for — the point of those is that
+        // operations and finance read the same numbers (Sessions 83, 99), so
+        // narrowing `finance.view` itself would have taken the order manager
+        // out of her own daily work to close one page.
+        //
+        // One key covers read and write. The board has no read-only
+        // audience: everyone entitled to open it is entitled to work it, and
+        // a second key would be two things to keep in step for no one.
+        //
+        // Being ASSIGNED a snapshot item is authorization on its own and does
+        // not need this permission — see
+        // AdminWorkQueueController::updateFinanceItem, where the logistics
+        // person chasing a payment updates status from My Work without ever
+        // reaching the board.
+        'finance.snapshot'        => ['super_admin', 'finance'],
 
         // ── Payments ──────────────────────────────────────────────────────
         'payments.mark_paid'      => ['super_admin', 'admin', 'order_manager'],

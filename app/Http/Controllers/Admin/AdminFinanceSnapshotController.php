@@ -18,12 +18,19 @@ use Illuminate\Validation\Rule;
  * hand (per staff member), plus the liquidity working lines. This is the
  * shared, database-backed replacement for the localStorage D13.html board.
  *
- * Read = finance.view (super_admin, admin, finance, order_manager).
- * Write = finance.manage (super_admin, admin, finance).
+ * Read and write are both `finance.snapshot` (super_admin, finance). Not
+ * finance.view/finance.manage: this board is the finance team's own working
+ * pipeline and is deliberately closed to `admin` and the order manager,
+ * while reconciliation, profitability, EC Invoices and the Sales & Order
+ * board keep their wider audience.
+ *
+ * The one way in without that permission is being tagged on an item, which
+ * is answered from My Work rather than here — see
+ * AdminWorkQueueController::updateFinanceItem.
  */
 class AdminFinanceSnapshotController extends Controller
 {
-    // ── GET /api/v1/admin/finance-snapshot — finance.view ────────────────────
+    // ── GET /api/v1/admin/finance-snapshot — finance.snapshot ────────────────
     public function index(): JsonResponse
     {
         return response()->json([
@@ -50,7 +57,7 @@ class AdminFinanceSnapshotController extends Controller
         ]);
     }
 
-    // ── Items — finance.manage ───────────────────────────────────────────────
+    // ── Items — finance.snapshot ─────────────────────────────────────────────
 
     public function storeItem(Request $request): JsonResponse
     {
@@ -121,7 +128,7 @@ class AdminFinanceSnapshotController extends Controller
         return response()->json(['message' => 'Record deleted.']);
     }
 
-    // ── Liquidity entries — finance.manage ───────────────────────────────────
+    // ── Liquidity entries — finance.snapshot ─────────────────────────────────
 
     public function storeLiquidity(Request $request): JsonResponse
     {
@@ -145,7 +152,7 @@ class AdminFinanceSnapshotController extends Controller
         return response()->json(['message' => 'Entry deleted.']);
     }
 
-    // ── POST /api/v1/admin/finance-snapshot/import — finance.manage ──────────
+    // ── POST /api/v1/admin/finance-snapshot/import — finance.snapshot ────────
     //
     // Restores a backup in the EXACT shape the original D13 board exports
     // ({ items: [...], liquidityItems: [{ id, openCurrent: [...], nextMonth:

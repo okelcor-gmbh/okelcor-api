@@ -92,6 +92,10 @@ class AdminWorkQueueController extends Controller
         // this code can reach production before the snapshot migration runs,
         // and My Work must not 500 over a table that is not there yet.
         $financeTasks = collect();
+        // Only someone who may open the board gets a link to it. For everyone
+        // else the task is worked from My Work and the board link is absent
+        // rather than offered and refused.
+        $canOpenSnapshotBoard = AdminPermissions::can($user->role, 'finance.snapshot');
         try {
             $financeTasks = FinanceSnapshotItem::where('assigned_admin_id', $userId)
                 ->whereNotIn('status', FinanceSnapshotItem::CLOSED_STATUSES)
@@ -107,14 +111,28 @@ class AdminWorkQueueController extends Controller
                         . ($i->comment ? " · {$i->comment}" : ''),
                     'priority'   => $i->date && $i->date->isPast() ? 'urgent' : ($i->status === 'Pending' ? 'high' : 'medium'),
                     'due_at'     => $i->date?->toIso8601String(),
-                    // Deep link: the board reads ?item= and opens the exact
-                    // record's drill-down rather than leaving the assignee to
-                    // find it on the whole page.
-                    'action_url' => '/admin/finance-snapshot?item=' . $i->id,
+                    // Opening a tagged task lands on the task, never on the
+                    // whole board. Most assignees are not finance and cannot
+                    // open the board at all, so a link to it would 403 — and
+                    // even for finance, the record they were tagged on is the
+                    // thing they were asked about, not the six-category
+                    // pipeline around it.
+                    'action_url' => '/admin/my-work?finance_item=' . $i->id,
                     'status'     => $i->status,
                     // Tells the panel this row can be updated in place by its
                     // assignee via PATCH /admin/my-work/finance-items/{id}.
                     'editable'   => true,
+                    // The select's options travel with the item, same contract
+                    // as the EC lines and to-dos below — the panel renders
+                    // whatever the API declares rather than holding its own
+                    // copy of the list, which is how the two drift.
+                    'status_options' => collect(FinanceSnapshotItem::STATUSES)
+                        ->map(fn (string $s) => ['value' => $s, 'label' => $s])->values(),
+                    // Present only for someone who may actually open the
+                    // board. Null is the signal to render no such link.
+                    'board_url'  => $canOpenSnapshotBoard
+                        ? '/admin/finance-snapshot?item=' . $i->id
+                        : null,
                 ])->values();
         } catch (\Throwable) {
         }
@@ -254,7 +272,10 @@ class AdminWorkQueueController extends Controller
     //
     // The assignee's half of the loop: the person a finance record was tagged
     // to updates its status and comment from My Work, without needing
-    // finance.manage — being the assignee IS the authorization. Whoever
+    // finance.snapshot — being the assignee IS the authorization. This is the
+    // only way into a snapshot record from outside finance, and it is
+    // deliberate: closing the board to `admin` and the order manager must not
+    // also stop finance from tagging them on a payment to chase. Whoever
     // created the record is notified of the change, so finance hears back
     // without chasing anyone.
     public function updateFinanceItem(Request $request, int $id): JsonResponse
@@ -263,7 +284,7 @@ class AdminWorkQueueController extends Controller
         $user = $request->user();
 
         $mayEdit = $item->assigned_admin_id === $user->id
-            || $user->hasPermission('finance.manage');
+            || $user->hasPermission('finance.snapshot');
 
         if (! $mayEdit) {
             return response()->json([
@@ -290,6 +311,11 @@ class AdminWorkQueueController extends Controller
                 type: 'finance_task_updated',
                 title: "{$user->name} set {$item->ref} to {$item->status}",
                 body: $item->comment,
+                // The board, not My Work: this goes to whoever CREATED the
+                // record, and only someone holding finance.snapshot can
+                // create one. (A creator later moved off the finance role
+                // would land on a 403 — an acceptable trade against a role
+                // lookup on every status update.)
                 actionUrl: '/admin/finance-snapshot?item=' . $item->id,
                 severity: in_array($item->status, FinanceSnapshotItem::CLOSED_STATUSES, true) ? 'success' : 'info',
                 relatedType: 'finance_snapshot_item',

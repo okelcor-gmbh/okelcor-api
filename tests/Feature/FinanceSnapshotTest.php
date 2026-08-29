@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\AdminUser;
 use App\Models\FinanceLiquidityEntry;
 use App\Models\FinanceSnapshotItem;
+use App\Support\AdminPermissions;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
@@ -169,26 +170,68 @@ class FinanceSnapshotTest extends TestCase
             ->assertJsonPath('data.meta.categories.0', 'OPEN PROPOSALS');
     }
 
-    public function test_order_manager_can_read_but_not_write(): void
+    /**
+     * The board is closed to everyone but finance and super_admin — the
+     * business's instruction, and the reason it has its own permission key
+     * instead of riding on finance.view. `admin` and `order_manager` are
+     * named individually because both DO still hold finance.view and would
+     * be in had this ridden on it; that is exactly the regression this
+     * guards. Replaces an earlier test asserting the order manager could
+     * read: its name had become a lie.
+     */
+    public function test_only_finance_and_super_admin_may_open_the_board(): void
     {
-        $om = $this->admin('order_manager');
+        foreach (['super_admin', 'finance'] as $role) {
+            $this->actingAs($this->admin($role), 'sanctum')
+                ->getJson('/api/v1/admin/finance-snapshot')
+                ->assertOk();
+        }
 
-        $this->actingAs($om, 'sanctum')
-            ->getJson('/api/v1/admin/finance-snapshot')
-            ->assertOk();
+        $shutOut = array_values(array_diff(
+            AdminPermissions::ROLES,
+            ['super_admin', 'finance'],
+        ));
 
-        $this->actingAs($om, 'sanctum')
-            ->postJson('/api/v1/admin/finance-snapshot/items', [
-                'category' => 'OPEN ORDERS', 'person' => 'X', 'ref' => 'R1', 'amount' => 1,
-            ])
-            ->assertForbidden();
+        // Nothing here should ever be empty — an accidentally empty list
+        // would make this whole assertion pass by testing nothing.
+        $this->assertNotEmpty($shutOut);
+        $this->assertContains('admin', $shutOut);
+        $this->assertContains('order_manager', $shutOut);
+
+        foreach ($shutOut as $role) {
+            $user = $this->admin($role);
+
+            $this->actingAs($user, 'sanctum')
+                ->getJson('/api/v1/admin/finance-snapshot')
+                ->assertForbidden();
+
+            $this->actingAs($user, 'sanctum')
+                ->postJson('/api/v1/admin/finance-snapshot/items', [
+                    'category' => 'OPEN ORDERS', 'person' => 'X', 'ref' => 'R1', 'amount' => 1,
+                ])
+                ->assertForbidden();
+        }
     }
 
-    public function test_roles_outside_finance_cannot_read(): void
+    /**
+     * Narrowing the board must not have narrowed the finance work the order
+     * manager and `admin` were deliberately given in Sessions 83 and 99 —
+     * they still hold finance.view, which is a different key.
+     */
+    public function test_closing_the_board_left_the_wider_finance_permissions_alone(): void
     {
-        $this->actingAs($this->admin('marketing'), 'sanctum')
-            ->getJson('/api/v1/admin/finance-snapshot')
-            ->assertForbidden();
+        foreach (['admin', 'order_manager'] as $role) {
+            $this->assertTrue(
+                AdminPermissions::can($role, 'finance.view'),
+                "{$role} should still hold finance.view",
+            );
+            $this->assertFalse(
+                AdminPermissions::can($role, 'finance.snapshot'),
+                "{$role} should not hold finance.snapshot",
+            );
+        }
+
+        $this->assertTrue(AdminPermissions::can('admin', 'finance.manage'));
     }
 
     public function test_an_unknown_category_is_refused_and_an_odd_status_is_normalized(): void
@@ -359,6 +402,59 @@ class FinanceSnapshotTest extends TestCase
             ->getJson('/api/v1/admin/my-work')
             ->assertOk()
             ->assertJsonPath('meta.counts.finance_tasks', 0);
+    }
+
+    /**
+     * Opening a tagged task lands on the task, not on the whole board.
+     *
+     * The assignee here is an order manager — someone who can no longer open
+     * the board at all — so a link to it would be a 403 dressed up as a call
+     * to action. She gets the My Work deep link, the status list she needs to
+     * answer with, and no board link. Finance, who can open it, gets one.
+     */
+    public function test_a_tagged_task_opens_the_task_and_not_the_whole_board(): void
+    {
+        $finance = $this->admin('finance');
+        $edinah  = $this->admin('order_manager');
+
+        $item = $this->actingAs($finance, 'sanctum')->postJson('/api/v1/admin/finance-snapshot/items', [
+            'category' => 'PENDING RECEIPTS', 'person' => 'Edinah', 'ref' => 'RC-77',
+            'assigned_admin_id' => $edinah->id, 'amount' => 900,
+        ])->json('data');
+
+        $task = $this->actingAs($edinah, 'sanctum')
+            ->getJson('/api/v1/admin/my-work')
+            ->assertOk()
+            ->assertJsonPath('data.finance_tasks.0.action_url', '/admin/my-work?finance_item=' . $item['id'])
+            ->assertJsonPath('data.finance_tasks.0.board_url', null)
+            ->assertJsonPath('data.finance_tasks.0.editable', true)
+            ->json('data.finance_tasks.0');
+
+        // The status select is served, not held as a second copy in the panel.
+        $this->assertSame(
+            FinanceSnapshotItem::STATUSES,
+            array_column($task['status_options'], 'value'),
+        );
+
+        // ...and she can actually answer with one of them, holding no
+        // finance permission whatsoever.
+        $this->assertFalse(AdminPermissions::can('order_manager', 'finance.snapshot'));
+        $this->actingAs($edinah, 'sanctum')
+            ->patchJson("/api/v1/admin/my-work/finance-items/{$item['id']}", ['status' => 'Under Review'])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'Under Review');
+
+        // Finance tags itself on a second record and does get the board link.
+        $mine = $this->actingAs($finance, 'sanctum')->postJson('/api/v1/admin/finance-snapshot/items', [
+            'category' => 'PENDING RECEIPTS', 'person' => 'Fin', 'ref' => 'RC-78',
+            'assigned_admin_id' => $finance->id, 'amount' => 10,
+        ])->json('data');
+
+        $this->actingAs($finance, 'sanctum')
+            ->getJson('/api/v1/admin/my-work')
+            ->assertOk()
+            ->assertJsonPath('data.finance_tasks.0.action_url', '/admin/my-work?finance_item=' . $mine['id'])
+            ->assertJsonPath('data.finance_tasks.0.board_url', '/admin/finance-snapshot?item=' . $mine['id']);
     }
 
     public function test_the_assignee_can_update_status_from_my_work_and_the_creator_hears_back(): void
