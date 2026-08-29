@@ -54,7 +54,7 @@ class CustomerAuthController extends Controller
             'first_name'    => ['required', 'string', 'max:100'],
             'last_name'     => ['required', 'string', 'max:100'],
             'email'         => ['required', 'email', 'max:255', 'unique:customers,email'],
-            'password'      => ['required', 'confirmed', Password::min(8)],
+            'password'      => ['required', 'confirmed', Password::defaults()],
             'phone'         => ['nullable', 'string', 'max:50'],
             'country'       => ['nullable', 'string', 'max:100'],
             'preferred_language' => ['nullable', 'in:en,de,fr,es'],
@@ -240,7 +240,12 @@ class CustomerAuthController extends Controller
             ]);
         } catch (\Throwable) {}
 
-        $token = $customer->createToken('customer-auth')->plainTextToken;
+        // Expiring, since Session 104. These tokens lived forever before —
+        // sanctum.expiration is null and nothing revoked them — so a stolen
+        // one outlived the password changed because of the theft. Same
+        // per-token pattern the admin TTL uses.
+        $ttlDays = (int) config('auth.customer_token_ttl_days', 7);
+        $token   = $customer->createToken('customer-auth', ['*'], now()->addDays($ttlDays))->plainTextToken;
 
         return response()->json([
             'data' => [
@@ -393,7 +398,7 @@ class CustomerAuthController extends Controller
         $data = $request->validate([
             'token'                 => ['required', 'string'],
             'email'                 => ['required', 'email'],
-            'password'              => ['required', 'confirmed', Password::min(8)],
+            'password'              => ['required', 'confirmed', Password::defaults()],
         ]);
 
         $record = DB::table('password_reset_tokens')
@@ -484,6 +489,13 @@ class CustomerAuthController extends Controller
 
         $customer->update($updates);
 
+        // A reset is what someone does when they suspect their account is
+        // compromised, so every existing session is revoked with the old
+        // password — otherwise whoever prompted the reset keeps their token
+        // and the reset changed nothing for them. The customer logs in fresh
+        // with the new password, which the response already tells them to do.
+        $customer->tokens()->delete();
+
         DB::table('password_reset_tokens')->where('email', $data['email'])->delete();
 
         SecurityEventService::log(
@@ -571,7 +583,7 @@ class CustomerAuthController extends Controller
 
         $request->validate([
             'current_password' => ['required', 'string'],
-            'password'         => ['required', 'confirmed', Password::min(8)],
+            'password'         => ['required', 'confirmed', Password::defaults()],
         ]);
 
         if (! Hash::check($request->current_password, $customer->password)) {
@@ -582,6 +594,14 @@ class CustomerAuthController extends Controller
         }
 
         $customer->update(['password' => Hash::make($request->password)]);
+
+        // Revoke every OTHER session — same reasoning as the reset path: a
+        // password change made because a device was lost or shared must end
+        // the sessions on that device. The session doing the changing keeps
+        // its token, so the customer is not logged out by their own action.
+        $customer->tokens()
+            ->where('id', '!=', $request->user()->currentAccessToken()->id)
+            ->delete();
 
         CustomerNotifier::notify(
             $customer,

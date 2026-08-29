@@ -8,6 +8,14 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
+// Customer tokens expire after 7 days (Session 104) and admin tokens after
+// 5 hours; expired rows are dead weight in personal_access_tokens until
+// pruned. 48-hour retention so a just-expired token is still inspectable if
+// an incident is being investigated.
+Schedule::command('sanctum:prune-expired --hours=48')
+    ->dailyAt('03:00')
+    ->onOneServer();
+
 Schedule::command('backup:okelcor')
     ->dailyAt('02:00')
     ->withoutOverlapping()

@@ -4,6 +4,43 @@ Last updated: 2026-08-29 | Branch: `main` | **Production is at `92b49d8` — ses
 
 ---
 
+## 🛡️ Security hardening pass (Session 104)
+
+> **Deploy status:** built and tested, **not yet deployed**. Migration **#58**
+> (`login_histories`) pending. Routes changed (login throttle) and config
+> changed (customer token TTL), so `route:cache` AND `config:cache` must both
+> be rebuilt. The `.env.save*` server cleanup is already done — it needed no
+> deploy.
+
+The user brought a security checklist (Fortify 2FA, password rules, login
+rate limits, session cookies, password-confirm, auditing) and asked what
+needs tightening. Audited against the code and the live server rather than
+the checklist: most of it already exists — 2FA is mandatory with no grace
+period on production, the admin login limiter is already keyed IP+email, and
+the session-cookie items are inapplicable to a pure token API. Five real
+gaps found, all five fixed.
+
+| Change | Status | Notes |
+|---|---|---|
+| **#58** `login_histories` finally exists | 🔧 | The table shipped code has written to since the portal launched and production never had (Known Gap since Session 70). Every write sat in a bare catch, so the **10-failures-in-an-hour auto-suspend has never once fired** — its counting query threw into the same catch. Creating the table is the whole fix; the code was right all along. A test proves the suspend now suspends and revokes tokens. |
+| Customer tokens expire (7 days) | 🔧 | They lived forever: `sanctum.expiration` null, no per-token TTL, and neither a reset nor a change revoked them — a stolen token outlived the password changed because of the theft. `CUSTOMER_TOKEN_TTL_DAYS` (default 7), same per-token pattern as the admin 5-hour TTL. `sanctum:prune-expired` scheduled daily, 48h retention. |
+| A reset revokes every token; a change revokes every OTHER token | 🔧 | The reset is what someone does when they suspect compromise, so all sessions opened with the old password end with it. A change keeps the session doing the changing — the customer is not logged out by their own action. |
+| **Found by the new tests: two latent bugs in `CustomerAuth`** | 🔧 | The middleware resolves tokens itself and (1) **never checked `expires_at`** — Sanctum's Guard does, but only admin routes go through it, so the new TTL would have been stamped on every token and enforced on none; and (2) **never called `withAccessToken()`**, so `currentAccessToken()` was null on every customer route — meaning **`POST /auth/logout` has thrown on the null the whole time**. Both fixed in the middleware; both pinned by tests (expired-token 401, logout deletes exactly its own token). |
+| One password policy — `Password::defaults()` | 🔧 | Was min(8) plain for customers and min(8)+letters+numbers for admins, drifting per call site. Now one definition in `AppServiceProvider`, used by all five call sites: production gets 12+ chars, mixed case, numbers, symbols, `uncompromised()`; elsewhere plain min(8) so the suite stays hermetic. `uncompromised()` **fails open** — verified in the vendor source, `NotPwnedVerifier` catches its own request exception — so an HIBP outage can never block a signup. Existing stored passwords are unaffected; the rule runs when a password is set. |
+| Login throttled per IP+email too | 🔧 | New `auth-login` limiter: the 10/min-per-IP kept, plus 5/min per IP+email, mirroring `admin-login`. Deliberately not keyed on email alone — that would let anyone lock a victim out. Register stays on the plain per-IP limiter. |
+| `.env.save` / `.env.save.1` / `.envc` deleted from the server | ✅ | `.env.save.1` was a full 97-line credential copy with `APP_KEY`, from a 2026-07-08 mishap. Checked from outside first: the host 403s dotfiles, so not web-reachable — hygiene, not incident response. Only `.env` and `.env.example` remain. |
+| Backend tests (11 new) | ✅ | `LoginSecurityHardeningTest` — the migration idempotent against the real file, every attempt recorded, the auto-suspend end to end, the 7-day expiry, reset revoking all / change sparing itself, the expired-token 401, logout scoped to its own token, the sixth rapid guess 429ing, and both password-policy branches (production strict with HIBP faked, non-production min(8)). Full suite **772 passed, 0 failed**, up from 761. |
+
+**Deliberately not changed:** the session-cookie block from the checklist
+(`SESSION_SECURE_COOKIE` etc.) — no route uses sessions; the `session()`
+hits in the codebase are the `LiveChatSession` model. And no
+password-confirmation middleware on admin deletes — 2FA disable already
+re-asks for the password, deletes are super_admin-only behind a 5-hour
+token, and the checklist's `password.confirm` is session middleware that
+does not exist on a token API.
+
+---
+
 ## 🔒 The finance snapshot board is finance's own (Session 103)
 
 > **Deploy status:** **deployed 2026-08-29** as `92b49d8`. **No migration**
@@ -140,9 +177,12 @@ rest — read the migration for its exact members, and have the test assert the
 **persisted** value is one of them. A round-trip assertion proves nothing on
 SQLite, which renders `enum()` as an unconstrained varchar.
 
-Also on the server: `.env.save`, `.env.save.1`, `.envc` and a dozen shell-mishap
-files (`-H`, `-d`, `ref_number,`) sit untracked in the app root. Harmless to git,
-but `.env.save*` are credential copies worth deleting.
+Also on the server: a dozen shell-mishap files (`-H`, `-d`, `ref_number,`)
+sit untracked in the app root. Harmless to git. The `.env.save`, `.env.save.1`
+and `.envc` credential copies that used to sit beside them were **deleted in
+Session 104** — `.env.save.1` was a full 97-line copy including `APP_KEY`,
+dated 2026-07-08. Verified not web-reachable first (the host 403s dotfiles),
+so this was hygiene, not incident response.
 
 ---
 
@@ -3228,7 +3268,7 @@ See `FRONTEND_NOTE_customer-login-gates.md`.
 | 5 orders where line items exceed the stored total | **High** | Orders **10075, 10076, 10077, 10079, 10080** (all `source = website`). Items sum to roughly 2× the recorded total on ratios of 0.43–0.49 — inconsistent, so not one mechanism. Surfaced by `orders:repair-totals` in Session 75 and deliberately **not** repaired: no rule can say which of the two figures is right, and one of them is what the customer was charged. Needs a person to compare each against the issued invoice. Money-facing, and unlike the double count it is not self-evident which direction the error runs |
 | Payment milestone history missing for all pre-#31 orders | Medium | `order_logs.action` never accepted the milestone values, and the writes are wrapped in a `try/catch` that only logs a warning — so no order on production has a record of who confirmed its deposit or balance. Migration #31 fixes it going forward; the lost rows cannot be reconstructed. If any order's payment confirmation is ever disputed, `storage/logs/laravel.log` warnings are the only trace, and only for as long as that file is retained |
 | ~~Audit-log writes fail silently across the codebase~~ | ~~**High**~~ **Closed (Session 91)** | **Session 83** covered `order_logs.action`; **Session 91** covers `security_events.type` the same way — `SecurityEvent::TYPES` is now the single source its ENUM is built from, with a test asserting every literal passed to `SecurityEventService::log()` in `app/` appears in it. Both audit columns are now guarded, so a fourth instance is a red test rather than a silent hole. Note the two fail differently: order-log writes sit in a try/catch and lose the row, while `SecurityEventService` does not catch, so a mismatch there throws and fails the user's action outright. Original entry: | **Session 83** — `OrderLog::ACTIONS` is now the single source the ENUM is built from, and a test asserts every action literal written in `app/` appears in it. The pattern (try/catch around every log write) is unchanged and still correct; what changed is that a schema mismatch is now a red test rather than a silent hole. `security_events.type` is NOT yet covered by an equivalent check. Original entry: | Not the ENUM itself — the pattern. Every `OrderLog` write is inside a `try/catch` that logs a warning and continues, which is right (a failed log must not fail the user's action) but means a schema mismatch is invisible until someone reads the column definition. Three separate instances found this way now (`security_events.type` Session 73, `order_logs.action` Sessions 75 and 76). Wants a test asserting every action string written in `app/` is accepted by the column, or a CI check — otherwise there will be a fourth |
-| `login_histories` table doesn't exist | **Medium → worth doing next** | **Session 91 adds context:** every read and write of it in `CustomerAuthController` sits inside a bare `catch (\Throwable) {}`, so the miss is invisible. Two consequences neither of which breaks login: the **10-failed-logins-in-an-hour auto-suspend has never once fired** (its counting query throws and is swallowed), and when a customer reports being locked out there is **no record of the attempts** to confirm it from our side. The 5-failure lockout still works — it reads `customers.failed_login_count`, not this table. Original entry: | Found in production logs (Session 70 investigation) — viewing a customer's login history in the admin panel throws `PDOException: Table 'login_histories' doesn't exist`. Distinct from the working `admin_login_histories` table (admin-side logins) — this is the customer-portal-side equivalent, apparently never migrated. Not yet fixed — flagged, not investigated further this session |
+| ~~`login_histories` table doesn't exist~~ | ~~**Medium**~~ **Closed (Session 104)** | **Fixed by migration #58** — the table now exists, the reading and writing code was correct all along, and `LoginSecurityHardeningTest` proves the 10-failures-in-an-hour auto-suspend actually suspends and revokes tokens. Original entry: | **Session 91 adds context:** every read and write of it in `CustomerAuthController` sits inside a bare `catch (\Throwable) {}`, so the miss is invisible. Two consequences neither of which breaks login: the **10-failed-logins-in-an-hour auto-suspend has never once fired** (its counting query throws and is swallowed), and when a customer reports being locked out there is **no record of the attempts** to confirm it from our side. The 5-failure lockout still works — it reads `customers.failed_login_count`, not this table. Original entry: | Found in production logs (Session 70 investigation) — viewing a customer's login history in the admin panel throws `PDOException: Table 'login_histories' doesn't exist`. Distinct from the working `admin_login_histories` table (admin-side logins) — this is the customer-portal-side equivalent, apparently never migrated. Not yet fixed — flagged, not investigated further this session |
 | Crisp webhook inactive (free plan) | Low | `POST /webhooks/crisp` is fully built and HMAC-verified but Crisp's free plan doesn't support custom webhooks at all (requires Premium) — mobile polls the conversations list in the meantime. Will "just work" the moment the plan changes, no code change needed |
 | Custom live-chat system unused | Low | Session 66's Pusher-based `live_chat_sessions` system has zero real traffic — Crisp (Session 67) is the actual live chat product. Left in place rather than removed; candidate for deletion once Crisp is confirmed as the permanent choice |
 
@@ -3520,6 +3560,8 @@ still has `QUEUE_CONNECTION=sync`, so `SendBulkEmailCampaignJob` would run
 inline during the HTTP request. Set `QUEUE_CONNECTION=database` and run a
 queue worker before the order manager sends to the full contact list — see
 Session 50 note above.
+
+58. `2026_08_29_000001_create_login_histories_table` (Session 104 — creates `login_histories`, the customer login-attempt log shipped code has written to since the portal launched and production never had. One NEW table, guarded with `Schema::hasTable`; nothing existing read, altered or backfilled. **Deploy-order safe in both directions** — the writers sit in a bare catch, which is exactly how the miss stayed invisible for months. Creating it re-arms the 10-failures-in-an-hour auto-suspend, which has never once fired on production. Proved idempotent by `LoginSecurityHardeningTest`, which runs the migration file itself and re-runs it.)
 
 57. `2026_08_28_000006_create_todos_table` (Session 102 — the shared team to-do list; creates `todos`. One NEW table, guarded with `Schema::hasTable`; nothing existing read, altered or backfilled. **Deploy-order safe** — `Todo::available()` answers "not yet" and the My Work section sits in the same try/catch as the other task sources. Proved idempotent by `TeamTodoListTest`.)
 

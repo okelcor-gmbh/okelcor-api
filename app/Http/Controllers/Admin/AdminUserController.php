@@ -87,7 +87,7 @@ class AdminUserController extends Controller
     {
         $request->validate([
             'current_password' => ['required', 'string'],
-            'password'         => ['required', 'confirmed', Password::min(8)->letters()->numbers()],
+            'password'         => ['required', 'confirmed', Password::defaults()],
         ]);
 
         $user = $request->user();
@@ -218,7 +218,7 @@ class AdminUserController extends Controller
             'email'        => ['sometimes', 'email', 'max:255', Rule::unique('admin_users', 'email')->ignore($id)],
             'role'         => ['sometimes', Rule::in(AdminPermissions::ROLES)],
             'job_title'    => ['sometimes', 'nullable', 'string', 'max:60'],
-            'password'     => ['sometimes', 'confirmed', Password::min(8)->letters()->numbers()],
+            'password'     => ['sometimes', 'confirmed', Password::defaults()],
             'is_active'    => ['sometimes', 'boolean'],
         ]);
 

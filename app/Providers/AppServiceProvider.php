@@ -6,6 +6,7 @@ use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Validation\Rules\Password;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -16,7 +17,35 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        $this->configurePasswordDefaults();
         $this->configureRateLimiting();
+    }
+
+    /**
+     * One password policy, defined once (Session 104). Every call site that
+     * validates a password — customer register/reset/change, admin
+     * create/update — uses Password::defaults() so the policy cannot drift
+     * between them, which is exactly what had happened: customers were
+     * min(8) plain while admins were min(8) letters+numbers.
+     *
+     * Production: 12+ chars, mixed case, numbers, symbols, and checked
+     * against known breaches. uncompromised() calls the HIBP range API
+     * (k-anonymity — only a 5-char hash prefix leaves the server) and FAILS
+     * OPEN: NotPwnedVerifier catches its own request exception and treats an
+     * unreachable service as "not leaked", so an HIBP outage can never block
+     * a signup or a reset. Verified in the vendor source, not assumed.
+     *
+     * Outside production the rule is a plain min(8): the suite posts
+     * hundreds of passwords and must not make an HTTP call per assertion,
+     * and existing test fixtures were written against the old policy.
+     * Existing REAL passwords are unaffected either way — validation runs
+     * when a password is set, never against what is already stored.
+     */
+    private function configurePasswordDefaults(): void
+    {
+        Password::defaults(fn () => $this->app->isProduction()
+            ? Password::min(12)->letters()->mixedCase()->numbers()->symbols()->uncompromised()
+            : Password::min(8));
     }
 
     private function configureRateLimiting(): void
@@ -67,6 +96,21 @@ class AppServiceProvider extends ServiceProvider
         // Customer register / login: 10 per IP per minute
         RateLimiter::for('auth', function (Request $request) {
             return Limit::perMinute(10)->by($request->ip());
+        });
+
+        // Customer LOGIN specifically also gets a per-IP+email dimension,
+        // same shape as admin-login (Session 104). The per-IP limit alone
+        // lets ten different addresses take one guess each at the same
+        // account per minute per IP; this narrows a single IP to five tries
+        // against one mailbox. Deliberately keyed IP+email, not email alone —
+        // an email-only key would let anyone lock a victim out of logging in
+        // at all. The account-level backstops (5-failure lock, 10-in-an-hour
+        // auto-suspend) sit behind it for the distributed case.
+        RateLimiter::for('auth-login', function (Request $request) {
+            return [
+                Limit::perMinute(10)->by($request->ip()),
+                Limit::perMinute(5)->by($request->ip() . '|' . strtolower((string) $request->input('email', ''))),
+            ];
         });
 
         // Email-sending auth endpoints (forgot-password, resend-verification):

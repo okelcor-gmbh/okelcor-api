@@ -122,9 +122,15 @@ Route::prefix('v1')->group(function () {
     // Customer auth — public (no token required)
     // -------------------------------------------------------------------------
     Route::prefix('auth')->group(function () {
-        // Standard credential endpoints — 10 per IP per minute
+        // Register — 10 per IP per minute
         Route::middleware('throttle:auth')->group(function () {
             Route::post('register', [CustomerAuthController::class, 'register']);
+        });
+
+        // Login — the same per-IP limit PLUS 5/min per IP+email, so one IP
+        // cannot spread its ten guesses across accounts unthrottled per
+        // account. See the auth-login limiter note in AppServiceProvider.
+        Route::middleware('throttle:auth-login')->group(function () {
             Route::post('login', [CustomerAuthController::class, 'login']);
         });
 

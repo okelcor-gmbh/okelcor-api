@@ -27,6 +27,15 @@ class CustomerAuth
             return response()->json(['message' => 'Unauthenticated.'], 401);
         }
 
+        // Expiry (Session 104). Sanctum's own Guard checks expires_at, but
+        // this middleware resolves the token itself and never went through
+        // the Guard — so before this check, a TTL stamped onto a customer
+        // token was recorded and never enforced. Admin routes use
+        // auth:sanctum and were always covered.
+        if ($accessToken->expires_at && $accessToken->expires_at->isPast()) {
+            return response()->json(['message' => 'Unauthenticated.'], 401);
+        }
+
         $customer = $accessToken->tokenable;
 
         if (! $customer || ! $customer->is_active) {
@@ -50,6 +59,14 @@ class CustomerAuth
                 'access_level' => 'blocked',
             ], 403);
         }
+
+        // Attach the token to the model so currentAccessToken() answers
+        // (Session 104). It never was, so `$request->user()
+        // ->currentAccessToken()` returned null on every customer route —
+        // which means POST /auth/logout has thrown on the null the whole
+        // time, and the password-change path could not tell "this session"
+        // from the others it revokes.
+        $customer->withAccessToken($accessToken);
 
         $request->setUserResolver(fn () => $customer);
 

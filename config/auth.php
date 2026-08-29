@@ -149,4 +149,18 @@ return [
     */
     'admin_session_ttl_minutes' => (int) env('ADMIN_SESSION_TTL_MINUTES', 300),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Customer Token TTL
+    |--------------------------------------------------------------------------
+    |
+    | Customer Sanctum tokens expire after this many days. Before Session 104
+    | they never expired at all — and neither a password reset nor a password
+    | change revoked them, so a leaked token outlived the password changed
+    | because of the leak. Seven days: B2B buyers log in occasionally, so a
+    | leaked token dies within the week while regular users rarely notice.
+    |
+    */
+    'customer_token_ttl_days' => (int) env('CUSTOMER_TOKEN_TTL_DAYS', 7),
+
 ];
