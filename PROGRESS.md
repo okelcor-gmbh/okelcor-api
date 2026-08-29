@@ -1,14 +1,22 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-29 | Branch: `main` | **Production is at `0e621ef` — sessions 86–102, the 2026-08-25 batch and the EC Invoice VAT fix all deployed, migrations #1–57 applied, every deploy verified from outside the same day. Session 103 (finance snapshot access) is built and pending deploy — no migration, `route:cache` required.**
+Last updated: 2026-08-29 | Branch: `main` | **Production is at `92b49d8` — sessions 86–102, the 2026-08-25 batch, the EC Invoice VAT fix and Session 103 (finance snapshot access) all deployed, migrations #1–57 applied, every deploy verified from outside the same day**
 
 ---
 
 ## 🔒 The finance snapshot board is finance's own (Session 103)
 
-> **Deploy status:** built and tested, **not yet deployed**. **No migration.**
-> No new routes — nine existing ones move to a new permission key, so
-> `route:cache` must be rebuilt. Frontend work outstanding, see below.
+> **Deploy status:** **deployed 2026-08-29** as `92b49d8`. **No migration**
+> (`Nothing to migrate`). Nine existing routes moved to a new permission key,
+> so `route:cache` was the load-bearing step — rebuilt, along with
+> `config:cache`, all four commands exit 0. Verified rather than assumed: the
+> running code reports `finance.snapshot => super_admin,finance`,
+> `can('admin','finance.snapshot')` false and `can('order_manager',
+> 'finance.view')` still **true**; from outside `/api/v1/categories` is 200 and
+> `/admin/finance-snapshot`, `/admin/ec-invoices` and `/admin/my-work` all
+> return **401, not 404**, so the new route cache is live and nothing else in
+> the finance block was collateral. Frontend deployed alongside on
+> okelcor-website `main` (`1963d3b`), which Vercel picks up automatically.
 
 The business's instruction, via the boss: the finance snapshot dashboard is for
 `finance` and `super_admin` only. `admin`, the order manager and everyone else
@@ -33,12 +41,25 @@ than on the `permissions` array the auth payload returns. That is the Session 84
 divergence again, and it is flagged in the frontend note as the thing to check
 first rather than assumed fixed by this change.
 
-**Outstanding, and it is the visible half:** hiding the nav entry is frontend
-work and okelcor-website is not checked out on this machine. Until they ship,
-`admin` and the order manager will see the menu item and get a 403 on click —
-denied, but not hidden. Also theirs: honouring `?finance_item=` on My Work,
-rendering the select from `status_options`, and showing the board link only when
-`board_url` is non-null.
+**The frontend half shipped in the same session**, on okelcor-website `main`
+as `1963d3b`. A new `finance_snapshot` section holding one page, mapped to the
+new key and granted to super_admin and finance only — which covers all four
+gate points at once, since the nav filter, the shell route guard, the
+middleware redirect and the command palette all read the same two tables. The
+`finance` section is untouched, so `admin` and the order manager keep the other
+four pages in that group.
+
+**And the second half was a real bug on that side, not just missing work.**
+`my-work.tsx` was rewriting every finance task's `action_url` to
+`/admin/finance-snapshot?item=N` **client-side**, overriding whatever the API
+served — so the backend fix alone would have changed nothing on screen and the
+assignee would still have been sent to a board she can no longer open. It now
+uses `action_url` as served, with the board link as a separate control rendered
+only when `board_url` is non-null. Worth keeping: a client that "helpfully"
+reconstructs a server-supplied URL is a second source of truth, and this is the
+same shape as the Session 78 finding where two renderers drew one set of blocks.
+
+`tsc --noEmit` clean, production build clean.
 
 See `FRONTEND_NOTE_finance-snapshot-access.md`.
 
