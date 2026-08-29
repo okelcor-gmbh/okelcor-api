@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-28 | Branch: `main` | **Production is at `97d05b6` — sessions 86–102 and the 2026-08-25 batch all deployed, migrations #1–57 applied, every deploy verified from outside the same day**
+Last updated: 2026-08-29 | Branch: `main` | **Production is at `0e621ef` — sessions 86–102, the 2026-08-25 batch and the EC Invoice VAT fix all deployed, migrations #1–57 applied, every deploy verified from outside the same day**
 
 ---
 
@@ -37,20 +37,47 @@ Deployed as `97d05b6` — no migration, no route change; `config:cache` and
 `route:cache` rebuilt, live API 200 on `/api/v1/categories` and 401 (not 500)
 on the VAT endpoint.
 
-**This needs a person:** finance must re-enter the taxpayer USt-IdNr. in the EC
-Invoice List before any period is filed. Nothing backfills it — the value was
-never stored.
+**Confirmed working in production (checked 2026-08-29).** Finance retried after
+the deploy and the save went through — `site_settings` now holds
+`company_vat_id = DE343138173`, `type = string`, `group = finance` (row 19),
+written `2026-08-28 12:46:26 UTC`, an hour after the last failure. The ELSTER
+XML and the CSV audit file now carry a real Melder `<UStIdNr>` instead of an
+empty one. No further `1265` has been logged in the 24 hours since — the log
+runs through `2026-08-29 11:45`, and the only three EC-invoice occurrences
+remain the original 11:48/11:49/11:50 on 2026-08-28. Nothing further is
+outstanding on this item.
+
+> **Reading production timestamps:** MySQL on this host runs **4 hours behind**
+> PHP. `config('app.timezone')` is UTC and `laravel.log` is stamped in UTC, but
+> `NOW()` returned `07:50` against PHP's `11:50`. `site_settings.updated_at` is
+> `DEFAULT current_timestamp() ON UPDATE current_timestamp()` and `SiteSetting`
+> sets `$timestamps = false`, so that column is written by **MySQL's** clock,
+> not the app's. A DB timestamp that looks earlier than the log entry it
+> belongs to is usually this offset, not a row that predates a fix. Add four
+> hours before comparing the two.
 
 ### Other unhandled 500s live on production (found in the same log, NOT fixed)
 
-Counted over 2026-08-25 → 28. Listed here so they are not rediscovered from
-scratch:
+Counted over 2026-08-25 → 28, re-checked 2026-08-29. Listed here so they are not
+rediscovered from scratch:
 
-| Count | Error | Where |
-|---|---|---|
-| 85 | Scheduled `system:health --snapshot` fails with exit code 1 — every run | cron |
-| 7 | `Table 'okelvaxj_okelcor.login_histories' doesn't exist` | a migration that never ran |
-| 6 | `AdminOrderController::show(): Argument #2 ($id) must be of type int, string given` | `/admin/orders/OKL-13I8OT5` and similar — looking an order up by **order number** 500s instead of 404ing. The same handler also catches `/admin/customers/undefined/communications` and `/products/NaN`, so the panel is sending bad IDs too |
+| Count | Still firing? | Error | Where |
+|---|---|---|---|
+| 85 | **yes — 12 more today** | Scheduled `system:health --snapshot` fails with exit code 1 — every run | cron |
+| 7 | not today | `Table 'okelvaxj_okelcor.login_histories' doesn't exist` | a migration that never ran |
+| 6 | not today | `AdminOrderController::show(): Argument #2 ($id) must be of type int, string given` | `/admin/orders/OKL-13I8OT5` and similar — looking an order up by **order number** 500s instead of 404ing. The same handler also catches `/admin/customers/undefined/communications` and `/products/NaN`, so the panel is sending bad IDs too |
+
+The health cron is the live one: it is the **only** unhandled exception logged on
+2026-08-29, and it has failed on every scheduled run. The other two are
+user-triggered, so "not today" means nobody hit that path — not that it is fixed.
+
+The `1265 Data truncated` shape is **not new to Session 100**: the log carries
+nine more from 2026-05-29 → 06-10 against other columns. The enum trap recurs
+here, and the SQLite test suite cannot see it. Before writing a literal into a
+column backed by an `ENUM` — `site_settings.type`, `order_logs.action`, and the
+rest — read the migration for its exact members, and have the test assert the
+**persisted** value is one of them. A round-trip assertion proves nothing on
+SQLite, which renders `enum()` as an unconstrained varchar.
 
 Also on the server: `.env.save`, `.env.save.1`, `.envc` and a dozen shell-mishap
 files (`-H`, `-d`, `ref_number,`) sit untracked in the app root. Harmless to git,
