@@ -1,58 +1,105 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Okelcor API
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Laravel backend powering the Okelcor GmbH platform — a global tyre supply company headquartered in Munich, Germany. This API serves the customer-facing storefront at [okelcor.com](https://www.okelcor.com), a full back-office admin suite, and a partner sales portal.
 
-## About Laravel
+Okelcor sells tyres wholesale across the EU and internationally, so the platform goes well beyond a typical e-commerce backend: it handles B2B quote workflows, multi-milestone payments, sea-freight container tracking, VAT/EU trade compliance documents, invoicing, marketing campaigns, and finance reporting — all from a single versioned REST API (`/api/v1`).
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## Features
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+### Commerce & customers
+- Product catalogue with brands, categories, translations, images, and promotion pricing
+- B2B quote request workflow — customers submit quote requests, admins respond with itemised quotes and attachments, customers accept online
+- Orders with per-item editing, payment milestones, shipment events, and profitability tracking
+- Customer accounts with Sanctum token auth, email verification, account activation gates, address book, saved tyre fitments, and notification preferences
+- Live chat (in-house session/message models plus Crisp webhook integration) and customer communications timeline
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+### Payments & finance
+- Stripe Checkout sessions and webhook handling (primary payment rail)
+- Adyen integration via the official PHP API library
+- Payment milestone control with state-correction tooling and milestone emails
+- Invoice generation as PDFs (dompdf) with sequential invoice registration, plus EC invoice periods/groups for intra-community trade
+- Finance modules: liquidity planning, finance snapshots, order financials, and profitability reporting
+- Currency conversion and tax/VAT services, including EU VAT number validation
 
-## Learning Laravel
+### Logistics & compliance
+- Sea-freight container tracking via ShipsGo, plus DHL and GLS carrier tracking services
+- Order shipment events surfaced to customers as tracking timelines
+- Trade documents (generation, download, and public verification endpoints) and EU declarations
+- FET (tyre) engine data endpoints
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+### Admin & operations
+- Extensive admin module (~75 controllers) behind Sanctum + admin guard + enforced TOTP two-factor auth (Google2FA with QR provisioning)
+- Operations board, work queues, sales order board, todos, staff messaging, and staff contribution ledgers
+- Admin audit logging, security events, login history, and system health endpoints
+- Customer approval/verification pipelines and data-quality tooling
+- Imports from Wix (customers, orders, products) and CSV-based customer/order/product import
+- eBay integration: listing sync, order sync, and audit tooling (queued jobs)
+- Excel exports via PhpSpreadsheet
 
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+### Marketing & messaging
+- Bulk email campaigns with a block-based campaign builder, merge tags, drafts, templates, InDesign import, and open/click tracking
+- Transactional and campaign email through Resend; inbound replies received on a dedicated subdomain by a Cloudflare Email Worker (`cloudflare-worker/`) that parses mail and posts it to a signed webhook
+- WhatsApp Business (Meta) webhook + notifier, newsletter subscribers, marketing contact management with market segmentation
+- Realtime events over Pusher channels; Expo push notifications for the admin mobile app
 
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
+### Partner portal
+- Separate partner authentication and a partner sales log with product matching and audit trail
 
-## Agentic Development
+## Tech stack
 
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+| Layer | Technology |
+|---|---|
+| Framework | Laravel 13 (PHP 8.3) |
+| Auth | Laravel Sanctum, Google2FA (TOTP) + bacon-qr-code |
+| Payments | Stripe PHP SDK, Adyen PHP API library |
+| Email | Resend (outbound), Cloudflare Email Worker (inbound) |
+| Realtime | Pusher Channels |
+| Documents | dompdf (PDF invoices/documents), PhpSpreadsheet (Excel exports) |
+| Media | Intervention Image |
+| Sanitisation | mews/purifier (HTMLPurifier) |
+| Dev tooling | Pint, Pail, PHPUnit 12, Vite + Tailwind CSS v4 |
+
+## Architecture highlights
+
+- **Service-layer design** — 60+ dedicated service classes (`app/Services`) keep controllers thin: carrier tracking, invoice registration, payment state correction, campaign rendering, VAT validation, profitability calculation, and more each live in their own service.
+- **Single versioned API** — everything is namespaced under `/api/v1`, with separate route groups for public endpoints, authenticated customers, the 2FA-enforced admin area, and partners.
+- **Webhook surface** — dedicated, individually secured webhook endpoints for Stripe, WhatsApp (Meta handshake + messages), Crisp, and inbound email (HMAC-signed by the Cloudflare Worker).
+- **Deep schema** — 178 migrations model orders, quotes, finance records, campaigns, staff activity, security events, and partner sales as first-class entities rather than JSON blobs.
+
+## Getting started
 
 ```bash
-composer require laravel/boost --dev
+git clone <repo-url> && cd okelcor-api
 
-php artisan boost:install
+composer run setup   # composer install, copy .env.example → .env, key:generate,
+                     # migrate, npm install, npm run build
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+Fill in the required credentials in `.env` (see `.env.example` for the full list — database, Stripe, Adyen, Resend, Pusher, etc.), then:
 
-## Contributing
+```bash
+composer run dev     # serves the app + queue listener + log tail + Vite concurrently
+composer run test    # run the test suite
+```
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+## Project structure
 
-## Code of Conduct
+```
+app/
+├── Http/Controllers/        # Public + customer API controllers
+│   ├── Admin/               # Back-office admin API
+│   └── Partner/             # Partner portal API
+├── Services/                # Domain services (payments, tracking, invoicing, …)
+├── Models/                  # ~80 Eloquent models
+├── Jobs/                    # Queued jobs (bulk email, eBay sync)
+└── Mail/                    # Mailables
+cloudflare-worker/           # Inbound-email Worker (wrangler deploy)
+database/migrations/         # 178 migrations
+routes/api.php               # Versioned API route map
+```
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
-
-## Security Vulnerabilities
-
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+Additional operational docs live in the repo root (deploy runbook, inbound email setup, WhatsApp setup, and per-feature frontend notes).
 
 ## License
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+Proprietary — © Okelcor GmbH. All rights reserved.
