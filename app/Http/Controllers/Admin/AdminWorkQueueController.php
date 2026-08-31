@@ -111,6 +111,14 @@ class AdminWorkQueueController extends Controller
                         . ($i->comment ? " · {$i->comment}" : ''),
                     'priority'   => $i->date && $i->date->isPast() ? 'urgent' : ($i->status === 'Pending' ? 'high' : 'medium'),
                     'due_at'     => $i->date?->toIso8601String(),
+                    // Structured, not only baked into the subtitle: the
+                    // assignee cannot open the board (finance.snapshot),
+                    // so My Work IS their whole view of the task — and the
+                    // note field is editable, which needs the raw value.
+                    'category'   => $i->category,
+                    'client'     => $i->client,
+                    'amount'     => (float) $i->amount,
+                    'comment'    => $i->comment,
                     // Opening a tagged task lands on the task, never on the
                     // whole board. Most assignees are not finance and cannot
                     // open the board at all, so a link to it would 403 — and

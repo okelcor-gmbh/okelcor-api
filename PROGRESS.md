@@ -4,6 +4,34 @@ Last updated: 2026-08-29 | Branch: `main` | **Production is at `ad27717` — ses
 
 ---
 
+## 🔎 The tagged-but-locked-out report (Session 107)
+
+Finance tagged the team on snapshot tasks; the tagged admins reported seeing
+the tag but having "no access to the task details or to update it". The logs
+settled what actually happened: **the permission system did exactly what
+Session 103 was told to do** — `victor@` (role `admin`) was 403'd on
+`GET /admin/finance-snapshot` at 12:24, one minute before being tagged. The
+tagged people are the admins who used the board daily until the lockdown;
+stale tabs, bookmarks and muscle memory still take them there, and what they
+got was a dead end that never said where their task now lives. Every coded
+path (notification URLs, the digest, the My Work PATCH) was verified correct
+before anything was changed — all point at `/admin/my-work`.
+
+Two experience fixes, no permission change:
+
+| Change | Status | Notes |
+|---|---|---|
+| The board's restricted state names the way out | 🔧 | A non-finance visitor now sees "restricted to Finance — if you were tagged, everything you need is in My Work" with the button, instead of a bare error that reads as a broken page. |
+| My Work carries the whole task, including a note back | 🔧 | The finance-task payload gains structured `category`/`client`/`amount`/`comment` (they were baked into the subtitle string, so the panel could show but not edit them), and the row gains a note field — the assignee writes "client says Thursday" in place, PATCHed alongside the status, and finance hears it through the existing creator notification. My Work is the assignee's WHOLE view of the task, by design; it now behaves like it. |
+| Backend tests | ✅ | The tagged-task test asserts the structured fields. Full suite **780 passed, 0 failed**. |
+
+**Not changed, deliberately:** the permissions. `finance.snapshot` stays
+`super_admin` + `finance` only — reconfirmed by the boss's wording in the
+same report. The tagged admins work from My Work; that is the design, and
+now the product says so at every dead end.
+
+---
+
 ## 🗓️ Closed weeks, records that move, and CSV downloads (Session 106)
 
 > **Deploy status:** **deployed 2026-08-31** as `ad27717` (backend) and

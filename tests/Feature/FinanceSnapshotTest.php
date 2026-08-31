@@ -684,7 +684,14 @@ class FinanceSnapshotTest extends TestCase
             ->assertJsonPath('data.finance_tasks.0.action_url', '/admin/my-work?finance_item=' . $item['id'])
             ->assertJsonPath('data.finance_tasks.0.board_url', null)
             ->assertJsonPath('data.finance_tasks.0.editable', true)
+            // Structured fields, not only a baked subtitle — My Work is the
+            // assignee's WHOLE view of the task (they cannot open the
+            // board), and the note field needs the raw comment to edit.
+            ->assertJsonPath('data.finance_tasks.0.category', 'PENDING RECEIPTS')
+            ->assertJsonPath('data.finance_tasks.0.amount', 900)
             ->json('data.finance_tasks.0');
+        $this->assertArrayHasKey('comment', $task);
+        $this->assertArrayHasKey('client', $task);
 
         // The status select is served, not held as a second copy in the panel.
         $this->assertSame(
