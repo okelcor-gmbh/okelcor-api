@@ -912,6 +912,10 @@ Route::prefix('v1')->group(function () {
         // permission at all, so tagging someone outside finance still works.
         // -----------------------------------------------------------------
         Route::middleware('permission:finance.snapshot')->group(function () {
+            // Static segments before anything parameterised — the standing
+            // rule since trade-documents/upload-options (Session 76).
+            Route::get('finance-snapshot/export', [AdminFinanceSnapshotController::class, 'exportItems']);
+            Route::get('finance-snapshot/liquidity/export', [AdminFinanceSnapshotController::class, 'exportLiquidity']);
             Route::get('finance-snapshot', [AdminFinanceSnapshotController::class, 'index']);
             Route::post('finance-snapshot/items', [AdminFinanceSnapshotController::class, 'storeItem']);
             Route::post('finance-snapshot/items/bulk', [AdminFinanceSnapshotController::class, 'storeItemsBulk']);

@@ -4,6 +4,28 @@ Last updated: 2026-08-29 | Branch: `main` | **Production is at `f25efc2` — ses
 
 ---
 
+## 🗓️ Closed weeks, records that move, and CSV downloads (Session 106)
+
+> **Deploy status:** built and tested, **not yet deployed**. **No migration.**
+> **2 new routes** (the CSV exports), so `route:cache` must be rebuilt.
+
+Finance's follow-up on the weekly liquidity board: moving a record to another
+week meant deleting it and retyping it in the destination; a week that has
+ended should be closed; and both the snapshot and the liquidity data should
+be downloadable.
+
+| Change | Status | Notes |
+|---|---|---|
+| **One rule: a write must land in an open week** | 🔧 | Closed (past) weeks refuse new entries, in-place edits and deletes — but moving a record FORWARD is a write landing in an open week, so it is naturally allowed. That interaction is the design: the main reason finance moves records is rolling an unpaid item out of the week that just ended, and a fully-sealed past week would have broken the exact workflow the move exists for. Weeks compare as zero-padded strings, correct across year ends. |
+| Deletes in closed weeks refused with the way out named | 🔧 | "Closed weeks keep their records. Move it to an open week first if it needs correcting" — the Session 90 rule that a wrong figure nobody can change is the worst end state, satisfied without letting history be erased. |
+| `meta.current_week` served | 🔧 | The panel closes columns off the SERVER's clock — the same clock the write refusals use, so a browser in another timezone cannot disagree about which week is open. |
+| The move control (frontend) | 🔧 | Every modal row carries a Week selector — open weeks only, including a few beyond the grid so rolling forward never requires creating the destination column first. In a closed week it is the only control on the row; in an open week it saves the delete-and-retype round trip either way. |
+| Closed weeks in the UI | 🔧 | Column headers badge "Closed", cells stay readable, the modal banners the state, fields go read-only, the add form and delete disappear. "+ Week" extends from the open horizon, never restarting a past week. |
+| `GET /admin/finance-snapshot/export` + `/liquidity/export` | 🔧 | Both `finance.snapshot`, BOM-prefixed for Excel. The liquidity file is written in `liquidity:import`'s OWN column layout — a download is also a restorable backup, proved by a test that feeds the export straight back through the import. Registered before parameterised segments, the Session 76 rule. |
+| Backend tests (2 new, 1 rebuilt) | ✅ | The closed-week walk (create/edit/delete refused, the forward move allowed with a correction riding on it, then ordinary once open, `current_week` served) and the export round-trip incl. the permission gate. The Session 105 round-trip test also switched from a hardcoded `'2026-W36'` to the computed current week — a static key would have CLOSED under the test the moment the calendar moved. Full suite **780 passed, 0 failed**, up from 778. |
+
+---
+
 ## 📊 The liquidity page becomes finance's weekly file + EC exports (Session 105)
 
 > **Deploy status:** **deployed 2026-08-31** as `f25efc2` (backend) and

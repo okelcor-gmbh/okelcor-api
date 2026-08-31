@@ -45,6 +45,22 @@ class FinanceLiquidityEntry extends Model
     /** Legacy two-period buckets — kept so the D13 restore path still works. */
     public const PERIODS = ['open_current', 'next_month'];
 
+    /** Today's ISO week, in the grid's key format — e.g. '2026-W36'. */
+    public static function currentWeekKey(): string
+    {
+        return now()->format('o-\WW');
+    }
+
+    /**
+     * A week that has ended is CLOSED (Session 106): its figures are what
+     * happened, not a plan. Zero-padded 'YYYY-Wnn' keys compare correctly
+     * as strings, across year ends included ('2026-W53' < '2027-W01').
+     */
+    public static function isClosedWeek(string $weekKey): bool
+    {
+        return $weekKey < self::currentWeekKey();
+    }
+
     protected $fillable = [
         'line',
         'period',

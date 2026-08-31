@@ -295,11 +295,15 @@ class FinanceSnapshotTest extends TestCase
     public function test_weekly_liquidity_entries_round_trip(): void
     {
         $finance = $this->admin('finance');
+        // The current week — a static key here would CLOSE the moment the
+        // calendar moved past it, and this test would start failing for a
+        // reason that has nothing to do with what it asserts.
+        $week = FinanceLiquidityEntry::currentWeekKey();
 
         $created = $this->actingAs($finance, 'sanctum')
             ->postJson('/api/v1/admin/finance-snapshot/liquidity', [
                 'line'     => 'cost_of_sales',
-                'week_key' => '2026-W36',
+                'week_key' => $week,
                 'supplier' => 'ELTE International B.V',
                 'description' => 'ANTWERP - TEMA — KKFU7958920',
                 'amount'   => -7787.50,
@@ -307,7 +311,7 @@ class FinanceSnapshotTest extends TestCase
                 'comment'  => 'To Get Invoice',
             ])
             ->assertCreated()
-            ->assertJsonPath('data.week_key', '2026-W36')
+            ->assertJsonPath('data.week_key', $week)
             ->assertJsonPath('data.supplier', 'ELTE International B.V')
             ->assertJsonPath('data.currency', 'EUR')
             ->assertJsonPath('data.comment', 'To Get Invoice')
@@ -331,7 +335,7 @@ class FinanceSnapshotTest extends TestCase
         $meta = $this->actingAs($finance, 'sanctum')
             ->getJson('/api/v1/admin/finance-snapshot')
             ->assertOk()
-            ->assertJsonPath('data.liquidity.0.week_key', '2026-W36')
+            ->assertJsonPath('data.liquidity.0.week_key', $week)
             ->json('data.meta');
 
         $lineKeys = array_column($meta['liquidity_lines'], 'key');
@@ -344,6 +348,124 @@ class FinanceSnapshotTest extends TestCase
         $this->actingAs($finance, 'sanctum')
             ->deleteJson("/api/v1/admin/finance-snapshot/liquidity/{$created['id']}")
             ->assertOk();
+    }
+
+    /**
+     * A week that has ended is CLOSED (Session 106): no new entries, no
+     * in-place edits, no deletes. The one thing that still works is moving
+     * a record FORWARD into an open week — rolling an unpaid item into the
+     * week ahead is exactly what finance does when a week ends, and the
+     * delete-and-retype workaround was the complaint.
+     */
+    public function test_closed_weeks_refuse_writes_but_a_record_moves_forward(): void
+    {
+        $finance  = $this->admin('finance');
+        $lastWeek = now()->subWeek()->format('o-\WW');
+        $thisWeek = FinanceLiquidityEntry::currentWeekKey();
+
+        // History: a record that landed while its week was still open.
+        $old = FinanceLiquidityEntry::create([
+            'line' => 'revenue_payment', 'period' => '', 'week_key' => $lastWeek,
+            'supplier' => 'TyreFlexx', 'description' => 'AB-1182 2nd 50%',
+            'amount' => 13000, 'currency' => 'EUR',
+        ]);
+
+        // No new entries into a closed week.
+        $this->actingAs($finance, 'sanctum')
+            ->postJson('/api/v1/admin/finance-snapshot/liquidity', [
+                'line' => 'rent', 'week_key' => $lastWeek, 'amount' => -100,
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('errors.week_key.0', 'This week is closed.');
+
+        // No editing in place — the write would land in the closed week.
+        $this->actingAs($finance, 'sanctum')
+            ->putJson("/api/v1/admin/finance-snapshot/liquidity/{$old->id}", [
+                'line' => 'revenue_payment', 'week_key' => $lastWeek, 'amount' => 14000,
+            ])
+            ->assertStatus(422);
+
+        // No deleting — a closed week keeps its records.
+        $this->actingAs($finance, 'sanctum')
+            ->deleteJson("/api/v1/admin/finance-snapshot/liquidity/{$old->id}")
+            ->assertStatus(422);
+
+        // But the unpaid item rolls forward, and can be corrected as it
+        // moves — the write lands in an open week.
+        $this->actingAs($finance, 'sanctum')
+            ->putJson("/api/v1/admin/finance-snapshot/liquidity/{$old->id}", [
+                'line' => 'revenue_payment', 'week_key' => $thisWeek,
+                'supplier' => 'TyreFlexx', 'description' => 'AB-1182 2nd 50% — rolled from last week',
+                'amount' => 13000, 'currency' => 'EUR',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.week_key', $thisWeek);
+
+        // Once in an open week, it is an ordinary record again.
+        $this->actingAs($finance, 'sanctum')
+            ->deleteJson("/api/v1/admin/finance-snapshot/liquidity/{$old->id}")
+            ->assertOk();
+
+        // The panel closes columns off the server's clock, which is served.
+        $this->actingAs($finance, 'sanctum')
+            ->getJson('/api/v1/admin/finance-snapshot')
+            ->assertOk()
+            ->assertJsonPath('data.meta.current_week', $thisWeek);
+    }
+
+    public function test_the_csv_exports_carry_the_data_and_the_liquidity_one_round_trips(): void
+    {
+        $finance  = $this->admin('finance');
+        $thisWeek = FinanceLiquidityEntry::currentWeekKey();
+
+        $this->actingAs($finance, 'sanctum')->postJson('/api/v1/admin/finance-snapshot/items', [
+            'category' => 'OPEN PROPOSALS', 'person' => 'Edinah', 'ref' => 'AN-1298',
+            'client' => 'Müller Reifen GmbH', 'amount' => 20712,
+        ])->assertCreated();
+
+        $this->actingAs($finance, 'sanctum')->postJson('/api/v1/admin/finance-snapshot/liquidity', [
+            'line' => 'cost_of_sales', 'week_key' => $thisWeek,
+            'supplier' => 'ELTE International B.V', 'amount' => -7787.50, 'comment' => 'To Get Invoice',
+        ])->assertCreated();
+
+        // The pipeline export: BOM (Excel), header, the row with its umlaut.
+        $items = $this->actingAs($finance, 'sanctum')
+            ->get('/api/v1/admin/finance-snapshot/export')
+            ->assertOk()
+            ->streamedContent();
+        $this->assertStringStartsWith("\xEF\xBB\xBF", $items);
+        $this->assertStringContainsString('Category,Person,Assignee,Ref', $items);
+        $this->assertStringContainsString('Müller Reifen GmbH', $items);
+        $this->assertStringContainsString('20712.00', $items);
+
+        // The liquidity export is written in the import's OWN column layout,
+        // so a downloaded file is also a restorable one. Proved by feeding
+        // it straight back through liquidity:import.
+        $csv = $this->actingAs($finance, 'sanctum')
+            ->get('/api/v1/admin/finance-snapshot/liquidity/export')
+            ->assertOk()
+            ->streamedContent();
+        $this->assertStringStartsWith("\xEF\xBB\xBF", $csv);
+        $this->assertStringContainsString('Item,Supplier,Description,Week,Currency,Amount,Comment', $csv);
+        $this->assertStringContainsString('"Cost of sales","ELTE International B.V"', $csv);
+
+        $path = tempnam(sys_get_temp_dir(), 'liqx') . '.csv';
+        file_put_contents($path, $csv);
+        $this->artisan('liquidity:import', [
+            'file' => $path, '--fix' => true, '--replace' => true,
+            '--year' => (int) substr($thisWeek, 0, 4),
+        ])->assertExitCode(0);
+        unlink($path);
+
+        $this->assertSame(1, FinanceLiquidityEntry::count());
+        $this->assertDatabaseHas('finance_liquidity_entries', [
+            'line' => 'cost_of_sales', 'week_key' => $thisWeek, 'supplier' => 'ELTE International B.V',
+        ]);
+
+        // Both downloads are board-permission territory, like the board.
+        $this->actingAs($this->admin('order_manager'), 'sanctum')
+            ->get('/api/v1/admin/finance-snapshot/liquidity/export')
+            ->assertForbidden();
     }
 
     public function test_the_weekly_columns_migration_applies_against_real_sql_and_is_idempotent(): void

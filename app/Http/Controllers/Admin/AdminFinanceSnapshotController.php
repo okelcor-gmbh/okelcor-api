@@ -49,6 +49,12 @@ class AdminFinanceSnapshotController extends Controller
                     // the panel: Cash Position = bank_balance + these;
                     // Forecasted = Cash Position + revenue_payment.
                     'liquidity_expense_lines' => FinanceLiquidityEntry::EXPENSE_LINES,
+                    // Weeks before this one are CLOSED. Served so the panel
+                    // marks columns off the server's clock, which is also
+                    // the clock the write refusals use — a browser in
+                    // another timezone must not disagree about which week
+                    // is still open.
+                    'current_week'            => FinanceLiquidityEntry::currentWeekKey(),
                     // For the "assign to staff" picker: tagging someone is how
                     // a record reaches their My Work queue and notifies them.
                     'staff'           => AdminUser::where('is_active', true)
@@ -59,6 +65,73 @@ class AdminFinanceSnapshotController extends Controller
                 ],
             ],
         ]);
+    }
+
+    // ── GET /api/v1/admin/finance-snapshot/export — finance.snapshot ─────────
+    //
+    // The six-category pipeline as a spreadsheet. BOM-prefixed because this
+    // goes to finance, who opens it in Excel — without one, Excel reads
+    // UTF-8 as Latin-1 and mangles every umlaut in a client name.
+    public function exportItems(): \Symfony\Component\HttpFoundation\StreamedResponse
+    {
+        $items = FinanceSnapshotItem::with('assignee:id,name,display_name')
+            ->orderBy('category')->orderBy('person')->orderBy('date')
+            ->get();
+
+        $filename = 'okelcor-finance-snapshot-' . now()->toDateString() . '.csv';
+
+        return response()->streamDownload(function () use ($items) {
+            $out = fopen('php://output', 'w');
+            fwrite($out, "\xEF\xBB\xBF");
+            fputcsv($out, ['Category', 'Person', 'Assignee', 'Ref', 'Date', 'Client', 'Status', 'Comment', 'Amount']);
+
+            foreach ($items as $i) {
+                $assignee = $i->assignee ? trim($i->assignee->display_name ?: $i->assignee->name) : '';
+                fputcsv($out, [
+                    $i->category, $i->person, $assignee, $i->ref,
+                    $i->date?->toDateString() ?? '', $i->client ?? '',
+                    $i->status, $i->comment ?? '',
+                    number_format((float) $i->amount, 2, '.', ''),
+                ]);
+            }
+
+            fclose($out);
+        }, $filename, ['Content-Type' => 'text/csv; charset=UTF-8']);
+    }
+
+    // ── GET /api/v1/admin/finance-snapshot/liquidity/export ──────────────────
+    //
+    // The Details ledger, in EXACTLY the column layout `liquidity:import`
+    // reads — so a downloaded file is also a restorable one, and finance can
+    // round-trip it through Excel. Legacy period-keyed rows (if any ever
+    // reappear) ride along with their period in the Week column rather than
+    // being silently dropped; the importer would name them, not guess.
+    public function exportLiquidity(): \Symfony\Component\HttpFoundation\StreamedResponse
+    {
+        $entries = FinanceLiquidityEntry::orderBy('line')->orderBy('week_key')->orderBy('id')->get();
+        $labels  = FinanceLiquidityEntry::LINES;
+
+        $filename = 'okelcor-liquidity-' . now()->toDateString() . '.csv';
+
+        return response()->streamDownload(function () use ($entries, $labels) {
+            $out = fopen('php://output', 'w');
+            fwrite($out, "\xEF\xBB\xBF");
+            fputcsv($out, ['Item', 'Supplier', 'Description', 'Week', 'Currency', 'Amount', 'Comment']);
+
+            foreach ($entries as $e) {
+                fputcsv($out, [
+                    $labels[$e->line] ?? $e->line,
+                    $e->supplier ?? '',
+                    $e->description,
+                    $e->week_key ? 'Week ' . ltrim(substr($e->week_key, 6), '0') : $e->period,
+                    $e->currency ?: 'EUR',
+                    number_format((float) $e->amount, 2, '.', ''),
+                    $e->comment ?? '',
+                ]);
+            }
+
+            fclose($out);
+        }, $filename, ['Content-Type' => 'text/csv; charset=UTF-8']);
     }
 
     // ── Items — finance.snapshot ─────────────────────────────────────────────
@@ -136,7 +209,13 @@ class AdminFinanceSnapshotController extends Controller
 
     public function storeLiquidity(Request $request): JsonResponse
     {
-        $entry = FinanceLiquidityEntry::create($this->validateEntry($request));
+        $data = $this->validateEntry($request);
+
+        if ($refusal = $this->closedWeekRefusal($data['week_key'] ?? null)) {
+            return $refusal;
+        }
+
+        $entry = FinanceLiquidityEntry::create($data);
 
         return response()->json(['data' => $this->formatEntry($entry)], 201);
     }
@@ -144,16 +223,56 @@ class AdminFinanceSnapshotController extends Controller
     public function updateLiquidity(Request $request, int $id): JsonResponse
     {
         $entry = FinanceLiquidityEntry::findOrFail($id);
-        $entry->update($this->validateEntry($request));
+        $data  = $this->validateEntry($request);
+
+        // The one rule (Session 106): a write must LAND in an open week.
+        // Editing in place inside a closed week lands in that closed week —
+        // refused. Moving a record forward out of a closed week lands in an
+        // open one — allowed, because rolling an unpaid item into the week
+        // ahead is exactly what finance does when a week ends, and making
+        // them delete-and-retype it was the complaint.
+        if ($refusal = $this->closedWeekRefusal($data['week_key'] ?? $entry->week_key)) {
+            return $refusal;
+        }
+
+        $entry->update($data);
 
         return response()->json(['data' => $this->formatEntry($entry->fresh())]);
     }
 
     public function destroyLiquidity(int $id): JsonResponse
     {
-        FinanceLiquidityEntry::findOrFail($id)->delete();
+        $entry = FinanceLiquidityEntry::findOrFail($id);
+
+        // A closed week's rows are what happened. If one is genuinely wrong
+        // it can be moved into the current week and corrected there — an
+        // act that leaves the record in view rather than erasing history.
+        if ($entry->week_key && FinanceLiquidityEntry::isClosedWeek($entry->week_key)) {
+            return response()->json([
+                'message' => 'Week ' . ltrim(substr($entry->week_key, 6), '0') . ' (' . $entry->week_key . ')'
+                    . ' has ended — closed weeks keep their records. Move it to an open week first if it needs correcting.',
+            ], 422);
+        }
+
+        $entry->delete();
 
         return response()->json(['message' => 'Entry deleted.']);
+    }
+
+    /**
+     * 422 when a write would land in a week that has already ended, null
+     * when the target week is open (or the entry is legacy period-keyed).
+     */
+    private function closedWeekRefusal(?string $weekKey): ?JsonResponse
+    {
+        if ($weekKey === null || ! FinanceLiquidityEntry::isClosedWeek($weekKey)) {
+            return null;
+        }
+
+        return response()->json([
+            'message' => 'Week ' . ltrim(substr($weekKey, 6), '0') . ' (' . $weekKey . ') has ended — closed weeks cannot take new or edited entries. Move the record to the current week or a later one.',
+            'errors'  => ['week_key' => ['This week is closed.']],
+        ], 422);
     }
 
     // ── POST /api/v1/admin/finance-snapshot/import — finance.snapshot ────────
