@@ -1,13 +1,17 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-29 | Branch: `main` | **Production is at `f25efc2` — sessions 86–105 (finance snapshot access, security hardening, weekly liquidity + EC exports), migrations #1–59 applied, every deploy verified from outside the same day**
+Last updated: 2026-08-29 | Branch: `main` | **Production is at `ad27717` — sessions 86–106 (weekly liquidity with closed weeks + moves + CSV downloads, EC exports), migrations #1–59 applied, every deploy verified from outside the same day**
 
 ---
 
 ## 🗓️ Closed weeks, records that move, and CSV downloads (Session 106)
 
-> **Deploy status:** built and tested, **not yet deployed**. **No migration.**
-> **2 new routes** (the CSV exports), so `route:cache` must be rebuilt.
+> **Deploy status:** **deployed 2026-08-31** as `ad27717` (backend) and
+> `ea0f352` (frontend, Vercel). No migration; `route:cache` rebuilt for the
+> two export routes, `config:cache` alongside, both exit 0. Verified on the
+> server's own clock: current week 2026-W36, W35 closed, W36 open — the
+> exact split finance's live data straddles. From outside: categories 200,
+> both export routes 401-not-404.
 
 Finance's follow-up on the weekly liquidity board: moving a record to another
 week meant deleting it and retyping it in the destination; a week that has
