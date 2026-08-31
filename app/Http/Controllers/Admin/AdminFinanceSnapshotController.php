@@ -38,13 +38,17 @@ class AdminFinanceSnapshotController extends Controller
                 'items'     => FinanceSnapshotItem::with('assignee:id,name,display_name')
                     ->orderBy('category')->orderBy('person')->orderBy('date')
                     ->get()->map(fn ($i) => $this->formatItem($i))->values(),
-                'liquidity' => FinanceLiquidityEntry::orderBy('line')->orderBy('period')->orderBy('id')
+                'liquidity' => FinanceLiquidityEntry::orderBy('line')->orderBy('week_key')->orderBy('period')->orderBy('id')
                     ->get()->map(fn ($e) => $this->formatEntry($e))->values(),
                 'meta'      => [
                     'categories'      => FinanceSnapshotItem::CATEGORIES,
                     'statuses'        => FinanceSnapshotItem::STATUSES,
                     'liquidity_lines' => collect(FinanceLiquidityEntry::LINES)
                         ->map(fn ($label, $key) => ['key' => $key, 'label' => $label])->values(),
+                    // The grid's arithmetic, served rather than hardcoded in
+                    // the panel: Cash Position = bank_balance + these;
+                    // Forecasted = Cash Position + revenue_payment.
+                    'liquidity_expense_lines' => FinanceLiquidityEntry::EXPENSE_LINES,
                     // For the "assign to staff" picker: tagging someone is how
                     // a record reaches their My Work queue and notifies them.
                     'staff'           => AdminUser::where('is_active', true)
@@ -352,13 +356,32 @@ class AdminFinanceSnapshotController extends Controller
 
     private function validateEntry(Request $request): array
     {
-        return $request->validate([
+        $data = $request->validate([
             'line'        => ['required', Rule::in(array_keys(FinanceLiquidityEntry::LINES))],
-            'period'      => ['required', Rule::in(FinanceLiquidityEntry::PERIODS)],
-            'description' => ['required', 'string', 'max:255'],
+            // Week-keyed is the live model (finance's Liquidity File);
+            // period-keyed remains only for the D13 restore path. One of
+            // the two must place the entry somewhere.
+            'week_key'    => ['required_without:period', 'nullable', 'regex:/^\d{4}-W\d{2}$/'],
+            'period'      => ['required_without:week_key', 'nullable', Rule::in(FinanceLiquidityEntry::PERIODS)],
+            'supplier'    => ['nullable', 'string', 'max:150'],
+            // Optional now — in the file most rows carry a supplier and no
+            // description at all. The column is NOT NULL, so null lands ''.
+            'description' => ['nullable', 'string', 'max:255'],
             'reference'   => ['nullable', 'string', 'max:100'],
             'amount'      => ['required', 'numeric'],
+            'currency'    => ['nullable', 'string', 'size:3', 'alpha:ascii'],
+            'comment'     => ['nullable', 'string', 'max:255'],
         ]);
+
+        $data['description'] = $data['description'] ?? '';
+        // Old rows predate the column; a week-keyed entry stores no period.
+        $data['period']      = $data['period'] ?? '';
+
+        if (array_key_exists('currency', $data) && $data['currency'] !== null) {
+            $data['currency'] = strtoupper($data['currency']);
+        }
+
+        return $data;
     }
 
     private function formatItem(FinanceSnapshotItem $i): array
@@ -384,9 +407,13 @@ class AdminFinanceSnapshotController extends Controller
             'id'          => $e->id,
             'line'        => $e->line,
             'period'      => $e->period,
+            'week_key'    => $e->week_key,
+            'supplier'    => $e->supplier,
             'description' => $e->description,
             'reference'   => $e->reference,
             'amount'      => (float) $e->amount,
+            'currency'    => $e->currency ?: 'EUR',
+            'comment'     => $e->comment,
         ];
     }
 }

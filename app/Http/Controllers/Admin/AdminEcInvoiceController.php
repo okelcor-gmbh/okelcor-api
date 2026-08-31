@@ -20,10 +20,17 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * EC Invoice List — the Zusammenfassende Meldung (ZM) portal, from finance's
- * mockup. Per reporting period: ZM groups (EU country × customer VAT ID ×
+ * mockup. Per reporting period: customer groups (country × customer VAT ID ×
  * transaction type), each itemizing the invoices behind its aggregate with
  * the invoice PDF and delivery proof attached, an assignee chasing what is
  * missing, a CSV audit export, and the § 18a ELSTER XML payload.
+ *
+ * Since Session 105 a group can also be a third-country EXPORT (finance's
+ * ask: "not just EU countries"). Exports share the whole apparatus — lines,
+ * documents, chasing, CSV — because the invoice + delivery proof pair is
+ * exactly the Ausfuhr evidence too. They differ in one place only: the
+ * ELSTER XML excludes them, since § 18a covers intra-EU supplies and an
+ * export line would make the filing wrong.
  *
  * Reads are finance.view; writes are finance.manage. The assignee updates
  * their own line's status through the My Work endpoint on the work-queue
@@ -79,8 +86,10 @@ class AdminEcInvoiceController extends Controller
                 'ec_invoices_available' => true,
                 'company_vat_id' => SiteSetting::where('key', self::COMPANY_VAT_KEY)->value('value') ?? '',
                 'countries'      => EcInvoiceGroup::COUNTRIES,
+                // `art` is null for `export`: no § 18a code, and its absence
+                // from TYPE_ART is what keeps exports out of the ELSTER XML.
                 'types'          => collect(EcInvoiceGroup::TYPE_LABELS)
-                    ->map(fn ($label, $key) => ['key' => $key, 'label' => $label, 'art' => EcInvoiceGroup::TYPE_ART[$key]])
+                    ->map(fn ($label, $key) => ['key' => $key, 'label' => $label, 'art' => EcInvoiceGroup::TYPE_ART[$key] ?? null])
                     ->values(),
                 'statuses'       => collect(EcInvoiceLine::STATUS_LABELS)
                     ->map(fn ($label, $key) => ['key' => $key, 'label' => $label])->values(),
@@ -165,10 +174,16 @@ class AdminEcInvoiceController extends Controller
     {
         $data = $request->validate([
             'period'           => ['required', 'string', 'max:8'],
-            'country_code'     => ['required', Rule::in(EcInvoiceGroup::COUNTRIES)],
+            'country_code'     => ['required', 'string', 'size:2', 'alpha:ascii'],
             'customer_vat_id'  => ['required', 'string', 'max:20'],
             'transaction_type' => ['required', Rule::in(EcInvoiceGroup::TYPES)],
         ]);
+
+        $data['country_code'] = strtoupper($data['country_code']);
+
+        if ($error = $this->countryTypeMismatch($data['country_code'], $data['transaction_type'])) {
+            return $error;
+        }
 
         if (! EcInvoicePeriod::isValidPeriod($data['period'])) {
             return response()->json([
@@ -207,13 +222,27 @@ class AdminEcInvoiceController extends Controller
         $group = EcInvoiceGroup::findOrFail($id);
 
         $data = $request->validate([
-            'country_code'     => ['sometimes', Rule::in(EcInvoiceGroup::COUNTRIES)],
+            'country_code'     => ['sometimes', 'string', 'size:2', 'alpha:ascii'],
             'customer_vat_id'  => ['sometimes', 'string', 'max:20'],
             'transaction_type' => ['sometimes', Rule::in(EcInvoiceGroup::TYPES)],
         ]);
 
+        if (isset($data['country_code'])) {
+            $data['country_code'] = strtoupper($data['country_code']);
+        }
+
         if (isset($data['customer_vat_id'])) {
             $data['customer_vat_id'] = strtoupper(preg_replace('/\s+/', '', $data['customer_vat_id']));
+        }
+
+        // The edited row must be coherent as a WHOLE — a country edit can
+        // break the standing type and vice versa, so check the merged pair.
+        $mismatch = $this->countryTypeMismatch(
+            $data['country_code'] ?? $group->country_code,
+            $data['transaction_type'] ?? $group->transaction_type,
+        );
+        if ($mismatch) {
+            return $mismatch;
         }
 
         $candidate = array_merge([
@@ -507,8 +536,12 @@ class AdminEcInvoiceController extends Controller
             return response()->json(['message' => "'{$period}' is not a reporting period."], 422);
         }
 
+        // Intra-EU groups only. A third-country export has no § 18a line —
+        // TYPE_ART's keys are exactly the types that do, so filtering on
+        // them cannot drift from the Art codes the XML writes below.
         $groups = EcInvoiceGroup::with('lines')
             ->where('period', $period)
+            ->whereIn('transaction_type', array_keys(EcInvoiceGroup::TYPE_ART))
             ->orderBy('country_code')->orderBy('customer_vat_id')
             ->get();
 
@@ -672,6 +705,34 @@ class AdminEcInvoiceController extends Controller
     /**
      * @return array<string, mixed>
      */
+    /**
+     * An intra-EU type must name an EU member state; an export must NOT —
+     * a supply to another member state is a ZM line, not an Ausfuhr, and
+     * letting finance file it under the wrong regime is exactly the mistake
+     * the two vocabularies exist to prevent. Returns the 422 to send, or
+     * null when the pair is coherent.
+     */
+    private function countryTypeMismatch(string $country, string $type): ?JsonResponse
+    {
+        $inEu = in_array($country, EcInvoiceGroup::COUNTRIES, true);
+
+        if ($type === EcInvoiceGroup::TYPE_EXPORT && $inEu) {
+            return response()->json([
+                'message' => "{$country} is an EU member state — a supply there is an intra-Community transaction (goods/services/triangular), not an export.",
+                'errors'  => ['country_code' => ['EU countries take an intra-EU transaction type, not Export.']],
+            ], 422);
+        }
+
+        if ($type !== EcInvoiceGroup::TYPE_EXPORT && ! $inEu) {
+            return response()->json([
+                'message' => "{$country} is not an EU member state — a supply there is an export, not a ZM line.",
+                'errors'  => ['country_code' => ['Non-EU countries take the Export transaction type.']],
+            ], 422);
+        }
+
+        return null;
+    }
+
     private function formatGroup(EcInvoiceGroup $group): array
     {
         return [
@@ -681,6 +742,9 @@ class AdminEcInvoiceController extends Controller
             'customer_vat_id'  => $group->customer_vat_id,
             'transaction_type' => $group->transaction_type,
             'type_label'       => EcInvoiceGroup::TYPE_LABELS[$group->transaction_type] ?? $group->transaction_type,
+            // Exports are listed and audited here but have no ZM line — the
+            // panel badges them and the ELSTER modal explains the exclusion.
+            'is_export'        => $group->isExport(),
             // Never stored — the sum of the lines, here and nowhere else.
             'total'            => round((float) $group->lines->sum('amount'), 2),
             'lines'            => $group->lines->map(fn ($l) => $this->formatLine($l))->values(),

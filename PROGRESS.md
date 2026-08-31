@@ -4,6 +4,49 @@ Last updated: 2026-08-29 | Branch: `main` | **Production is at `e3dc4e5` — ses
 
 ---
 
+## 📊 The liquidity page becomes finance's weekly file + EC exports (Session 105)
+
+> **Deploy status:** built and tested, **not yet deployed**. Migration **#59**
+> (additive columns on `finance_liquidity_entries`) pending. No new routes;
+> `route:cache` unaffected but `config:cache` habitually rebuilt. After the
+> deploy, finance's data ships via `liquidity:import` — see below.
+
+Two asks from finance, delivered together:
+
+### 1. The liquidity page is now "Liquidity File V1.xlsx"
+
+Finance sent the file (a Summary grid of categories × ISO weeks 35–44 over a
+Details ledger: Item / Supplier / Description / Week / CUR / Amount / Comment)
+and asked for the page to match it exactly. The old two-bucket model
+(open current month / next month) could not express any of that.
+
+| Change | Status | Notes |
+|---|---|---|
+| **#59** weekly columns on `finance_liquidity_entries` | 🔧 | `week_key` ('2026-W35'), `supplier`, `currency`, `comment` — additive, guarded, nullable. `period` stays, so the D13 restore path and old rows are untouched; week-keyed rows are the live model. |
+| Lines follow the file | 🔧 | `it_expenses` added (the file's "Other Expenses"), the tax label is plain "Tax Obligations" now, and a served `EXPENSE_LINES` constant pins the grid's arithmetic: Cash Position = Bank Balance + every expense line, Forecasted = + Revenue Payment. Served in meta so the panel cannot drift. |
+| `liquidity:import` command | 🔧 | Reads the Details ledger as CSV. Survey by default, `--fix` to write, `--replace` because the file IS the working and merging generations would double every figure. Rejects-not-guesses (unknown item, unreadable week, non-numeric amount name their line and abort). |
+| The board's liquidity section rebuilt (frontend) | 🔧 | The file's Summary grid: ISO-week columns with date-range subtitles, Total column, the two computed rows, a "+ Week" control, and cells opening the Details behind them (supplier/description/amount/CUR/comment, inline-editable). The old two-column table AND the 4-week LiquidityLadder are gone from the page — both superseded by the weekly grid; the ladder's backend endpoints stay (dormant, zero rows). Old-format entries are counted in a note rather than silently hidden. |
+| Production data | ⬜ pending deploy | 47 old-format entries on production are finance's own earlier working; the import runs `--fix --replace` after the deploy, superseding them with the file's 64 detail rows (backup first). |
+
+**Known divergence from the file, deliberate:** the file's own Summary
+formulas omit IT Expenses and Internet & Phone from Cash Position (its
+details carry them; its grid does not sum them). Ours includes every
+expense category, so our Cash Position is self-consistent with the details
+and will differ from the sheet's total by exactly those rows.
+
+### 2. EC Invoice List takes exports, not just EU countries
+
+| Change | Status | Notes |
+|---|---|---|
+| `transaction_type: export` | 🔧 | New member beside goods/services/triangular — a plain-string column, so **no migration**. Label "Export (Drittland / non-EU)". |
+| Country and type must agree | 🔧 | An EU state under `export` is an intra-Community supply filed under the wrong regime; a third country under an intra-EU type has no ZM line to be. Both 422 with the reason, on create AND on edit (the merged pair is checked, so an edit cannot smuggle the mismatch in). |
+| **ELSTER XML excludes exports** | 🔧 | § 18a covers intra-EU supplies only — an export line would make the filing wrong. The exclusion is structural: the XML query filters on `TYPE_ART`'s keys, and `export` deliberately has no Art code, so the filter cannot drift from the codes. |
+| CSV keeps them | 🔧 | The invoice + delivery-proof pair on every line is exactly the Ausfuhr evidence (§ 6 UStG), so exports share the whole apparatus — lines, documents, assignee chase, audit file — and differ only where § 18a differs. |
+| Frontend | 🔧 | The add-group form leads with the type; picking Export swaps the EU dropdown for a free 2-letter country input and relabels the VAT field "Customer / tax reference". Export rows carry a badge, and the ELSTER modal says exports are not in the file and why. |
+| Backend tests (3 new EC + 3 new liquidity) | ✅ | Export group round-trip with the badge flag and null Art; both mismatch directions + the edit path; ELSTER excluding / CSV keeping (the first assertion caught its own bug — `UStIdNr` contains "US", so the not-contains had to target `<Landescode>US</Landescode>`). Liquidity: weekly entry round-trip + served arithmetic, migration #59 idempotent against the real file, and the import command's survey/fix/replace/reject paths. Full suite **778 passed, 0 failed**, up from 772. |
+
+---
+
 ## 🛡️ Security hardening pass (Session 104)
 
 > **Deploy status:** **deployed 2026-08-29** as `e3dc4e5`. `backup:okelcor`
@@ -3564,6 +3607,8 @@ still has `QUEUE_CONNECTION=sync`, so `SendBulkEmailCampaignJob` would run
 inline during the HTTP request. Set `QUEUE_CONNECTION=database` and run a
 queue worker before the order manager sends to the full contact list — see
 Session 50 note above.
+
+59. `2026_08_31_000001_add_weekly_fields_to_finance_liquidity_entries` (Session 105 — adds `week_key`, `supplier`, `currency`, `comment` to `finance_liquidity_entries` so the liquidity working can hold finance's weekly file. Every column guarded with `Schema::hasColumn`, all nullable; nothing existing read, altered or backfilled. **Deploy-order safe in both directions** — old rows keep working through the legacy `period` path and new fields are simply absent until it runs. Proved idempotent by `FinanceSnapshotTest`, which runs the migration file itself from the pre-migration state and re-runs it.)
 
 58. `2026_08_29_000001_create_login_histories_table` (Session 104 — creates `login_histories`, the customer login-attempt log shipped code has written to since the portal launched and production never had. One NEW table, guarded with `Schema::hasTable`; nothing existing read, altered or backfilled. **Deploy-order safe in both directions** — the writers sit in a bare catch, which is exactly how the miss stayed invisible for months. Creating it re-arms the 10-failures-in-an-hour auto-suspend, which has never once fired on production. Proved idempotent by `LoginSecurityHardeningTest`, which runs the migration file itself and re-runs it.)
 

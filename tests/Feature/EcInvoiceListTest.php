@@ -431,6 +431,100 @@ class EcInvoiceListTest extends TestCase
         $this->assertStringContainsString('<Zeitraum>2026-Q3</Zeitraum>', $xml);
     }
 
+    // ── exports: not just EU countries (Session 105) ──────────────────────
+
+    public function test_an_export_group_names_a_third_country_and_is_badged(): void
+    {
+        $finance = $this->admin();
+
+        $id = $this->group($finance, [
+            'country_code'     => 'us',
+            'customer_vat_id'  => 'MLK-TIRES-LLC',
+            'transaction_type' => 'export',
+        ]);
+
+        $groups = $this->actingAs($finance, 'sanctum')
+            ->getJson('/api/v1/admin/ec-invoices?period=2026-Q3')
+            ->assertOk()
+            ->json('data.groups');
+
+        $export = collect($groups)->firstWhere('id', $id);
+        $this->assertSame('US', $export['country_code']);
+        $this->assertTrue($export['is_export']);
+        $this->assertSame('Export (Drittland / non-EU)', $export['type_label']);
+
+        // The served type list carries export with a null Art code.
+        $types = $this->actingAs($finance, 'sanctum')
+            ->getJson('/api/v1/admin/ec-invoices?period=2026-Q3')
+            ->json('meta.types');
+        $exportType = collect($types)->firstWhere('key', 'export');
+        $this->assertNull($exportType['art']);
+    }
+
+    public function test_country_and_type_must_agree(): void
+    {
+        $finance = $this->admin();
+
+        // An EU country under `export` is an intra-Community supply filed
+        // under the wrong regime — refused.
+        $this->actingAs($finance, 'sanctum')
+            ->postJson('/api/v1/admin/ec-invoices/groups', [
+                'period' => '2026-Q3', 'country_code' => 'FR',
+                'customer_vat_id' => 'FR123', 'transaction_type' => 'export',
+            ])->assertStatus(422);
+
+        // A third country under an intra-EU type has no ZM line to be.
+        $this->actingAs($finance, 'sanctum')
+            ->postJson('/api/v1/admin/ec-invoices/groups', [
+                'period' => '2026-Q3', 'country_code' => 'GH',
+                'customer_vat_id' => 'CARGO-CENTER', 'transaction_type' => 'goods',
+            ])->assertStatus(422);
+
+        // And an edit cannot smuggle the mismatch in either direction.
+        $export = $this->group($finance, [
+            'country_code' => 'US', 'customer_vat_id' => 'X1', 'transaction_type' => 'export',
+        ]);
+        $this->actingAs($finance, 'sanctum')
+            ->patchJson("/api/v1/admin/ec-invoices/groups/{$export}", ['country_code' => 'DE'])
+            ->assertStatus(422);
+    }
+
+    public function test_the_elster_payload_excludes_exports_but_the_csv_keeps_them(): void
+    {
+        $finance = $this->admin();
+
+        $eu = $this->group($finance);   // FR, goods
+        $us = $this->group($finance, [
+            'country_code' => 'US', 'customer_vat_id' => 'MLK-TIRES-LLC', 'transaction_type' => 'export',
+        ]);
+
+        foreach ([$eu => 'INV-EU-1', $us => 'INV-US-1'] as $gid => $inv) {
+            $this->actingAs($finance, 'sanctum')
+                ->postJson("/api/v1/admin/ec-invoices/groups/{$gid}/lines", [
+                    'invoice_number' => $inv, 'amount' => 1000,
+                ])->assertCreated();
+        }
+
+        // § 18a covers intra-EU supplies only — a US line in the ZM would
+        // make the filing wrong.
+        $xml = $this->actingAs($finance, 'sanctum')
+            ->get('/api/v1/admin/ec-invoices/elster?period=2026-Q3')
+            ->assertStatus(200)
+            ->streamedContent();
+        $this->assertStringContainsString('<Landescode>FR</Landescode>', $xml);
+        $this->assertStringNotContainsString('<Landescode>US</Landescode>', $xml);
+        $this->assertStringNotContainsString('MLK-TIRES-LLC', $xml);
+
+        // The CSV is the audit file, and export evidence belongs in it.
+        $csv = $this->actingAs($finance, 'sanctum')
+            ->get('/api/v1/admin/ec-invoices/export?period=2026-Q3')
+            ->assertStatus(200)
+            ->streamedContent();
+        $this->assertStringContainsString('MLK-TIRES-LLC', $csv);
+        $this->assertStringContainsString('Export (Drittland / non-EU)', $csv);
+        $this->assertStringContainsString('INV-US-1', $csv);
+    }
+
     // ── the chase: assignment, My Work, the assignee's half ───────────────
 
     public function test_tagging_an_assignee_notifies_them_and_lands_in_their_my_work(): void

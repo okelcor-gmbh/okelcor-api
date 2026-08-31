@@ -20,33 +20,53 @@ class EcInvoiceGroup extends Model
     public const TYPE_GOODS      = 'goods';
     public const TYPE_SERVICES   = 'services';
     public const TYPE_TRIANGULAR = 'triangular';
+    public const TYPE_EXPORT     = 'export';
 
     public const TYPES = [
         self::TYPE_GOODS,
         self::TYPE_SERVICES,
         self::TYPE_TRIANGULAR,
+        self::TYPE_EXPORT,
     ];
 
-    /** Rendered labels and the ELSTER Art code, keyed by type. */
+    /** Rendered labels, keyed by type. */
     public const TYPE_LABELS = [
         self::TYPE_GOODS      => 'Goods (Warenlieferung)',
         self::TYPE_SERVICES   => 'Services (Reverse-Charge)',
         self::TYPE_TRIANGULAR => 'Triangular Trade (Dreiecksgeschäft)',
+        self::TYPE_EXPORT     => 'Export (Drittland / non-EU)',
     ];
 
-    /** § 18a Art: L = Lieferung, S = sonstige Leistung, D = Dreiecksgeschäft. */
+    /**
+     * § 18a Art: L = Lieferung, S = sonstige Leistung, D = Dreiecksgeschäft.
+     *
+     * `export` is deliberately ABSENT — a third-country export (§ 4 Nr. 1a /
+     * § 6 UStG) is not an intra-Community supply and has no ZM line. Export
+     * groups live in the list and the CSV audit file (the invoice + delivery
+     * proof columns are exactly the Ausfuhr evidence), but the ELSTER XML
+     * must exclude them or the filing is wrong. This constant's keys are
+     * what the XML builder iterates, so absence IS the exclusion.
+     */
     public const TYPE_ART = [
         self::TYPE_GOODS      => 'L',
         self::TYPE_SERVICES   => 'S',
         self::TYPE_TRIANGULAR => 'D',
     ];
 
-    /** The 27 EU member states a ZM line can name. */
+    /**
+     * The 27 EU member states a ZM line can name. Only intra-EU types are
+     * held to this list — an export group names any third country.
+     */
     public const COUNTRIES = [
         'AT', 'BE', 'BG', 'CY', 'CZ', 'DE', 'DK', 'EE', 'ES', 'FI', 'FR',
         'GR', 'HR', 'HU', 'IE', 'IT', 'LT', 'LU', 'LV', 'MT', 'NL', 'PL',
         'PT', 'RO', 'SE', 'SI', 'SK',
     ];
+
+    public function isExport(): bool
+    {
+        return $this->transaction_type === self::TYPE_EXPORT;
+    }
 
     protected $fillable = [
         'period',

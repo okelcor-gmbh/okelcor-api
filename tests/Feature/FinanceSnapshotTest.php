@@ -112,9 +112,13 @@ class FinanceSnapshotTest extends TestCase
             $table->id();
             $table->string('line', 40);
             $table->string('period', 20);
+            $table->string('week_key', 10)->nullable();
+            $table->string('supplier', 150)->nullable();
             $table->string('description', 255);
             $table->string('reference', 100)->nullable();
             $table->decimal('amount', 12, 2)->default(0);
+            $table->string('currency', 3)->nullable();
+            $table->string('comment', 255)->nullable();
             $table->timestamps();
         });
 
@@ -281,6 +285,136 @@ class FinanceSnapshotTest extends TestCase
             ->assertOk();
 
         $this->assertSame(0, FinanceLiquidityEntry::count());
+    }
+
+    /**
+     * The weekly model from finance's "Liquidity File V1" (Session 105):
+     * an entry lives in an ISO week and carries supplier / currency /
+     * comment, and the grid's category list + arithmetic are SERVED.
+     */
+    public function test_weekly_liquidity_entries_round_trip(): void
+    {
+        $finance = $this->admin('finance');
+
+        $created = $this->actingAs($finance, 'sanctum')
+            ->postJson('/api/v1/admin/finance-snapshot/liquidity', [
+                'line'     => 'cost_of_sales',
+                'week_key' => '2026-W36',
+                'supplier' => 'ELTE International B.V',
+                'description' => 'ANTWERP - TEMA — KKFU7958920',
+                'amount'   => -7787.50,
+                'currency' => 'eur',
+                'comment'  => 'To Get Invoice',
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.week_key', '2026-W36')
+            ->assertJsonPath('data.supplier', 'ELTE International B.V')
+            ->assertJsonPath('data.currency', 'EUR')
+            ->assertJsonPath('data.comment', 'To Get Invoice')
+            ->json('data');
+
+        // No week AND no period is nowhere — refused.
+        $this->actingAs($finance, 'sanctum')
+            ->postJson('/api/v1/admin/finance-snapshot/liquidity', [
+                'line' => 'rent', 'amount' => -100,
+            ])
+            ->assertStatus(422);
+
+        // A malformed week key is refused, not stored as a stray bucket.
+        $this->actingAs($finance, 'sanctum')
+            ->postJson('/api/v1/admin/finance-snapshot/liquidity', [
+                'line' => 'rent', 'week_key' => 'Week 36', 'amount' => -100,
+            ])
+            ->assertStatus(422);
+
+        // The board serves the file's category list and the grid arithmetic.
+        $meta = $this->actingAs($finance, 'sanctum')
+            ->getJson('/api/v1/admin/finance-snapshot')
+            ->assertOk()
+            ->assertJsonPath('data.liquidity.0.week_key', '2026-W36')
+            ->json('data.meta');
+
+        $lineKeys = array_column($meta['liquidity_lines'], 'key');
+        $this->assertContains('it_expenses', $lineKeys);
+        $this->assertContains('internet_phone', $lineKeys);
+        $this->assertContains('cost_of_sales', $meta['liquidity_expense_lines']);
+        $this->assertNotContains('bank_balance', $meta['liquidity_expense_lines']);
+        $this->assertNotContains('revenue_payment', $meta['liquidity_expense_lines']);
+
+        $this->actingAs($finance, 'sanctum')
+            ->deleteJson("/api/v1/admin/finance-snapshot/liquidity/{$created['id']}")
+            ->assertOk();
+    }
+
+    public function test_the_weekly_columns_migration_applies_against_real_sql_and_is_idempotent(): void
+    {
+        // From the pre-migration state: the base table without the columns.
+        Schema::dropIfExists('finance_liquidity_entries');
+        Schema::create('finance_liquidity_entries', function (Blueprint $table) {
+            $table->id();
+            $table->string('line', 40);
+            $table->string('period', 20);
+            $table->string('description', 255);
+            $table->string('reference', 100)->nullable();
+            $table->decimal('amount', 12, 2)->default(0);
+            $table->timestamps();
+        });
+
+        $migration = require base_path('database/migrations/2026_08_31_000001_add_weekly_fields_to_finance_liquidity_entries.php');
+        $migration->up();
+        // Idempotent — every column guarded.
+        $migration->up();
+
+        foreach (['week_key', 'supplier', 'currency', 'comment'] as $column) {
+            $this->assertTrue(
+                Schema::hasColumn('finance_liquidity_entries', $column),
+                "finance_liquidity_entries.{$column} is missing",
+            );
+        }
+    }
+
+    public function test_the_liquidity_file_import_surveys_then_writes_then_replaces(): void
+    {
+        $csv = implode("\n", [
+            'Item,Supplier,Description,Week,Currency,Amount,Comment',
+            'Bank Balance,Wise EUR,Bank Balance,Week 35,EUR,9380.38,',
+            'Salaries,Solomon,,Week 35,EUR,-6000,',
+            'IT Expenses,Google Ireland Limited,,Week 37,EUR,-500,',
+            'Revenue Payment,TyreFlexx,Order AB-1182 Paid 2nd 50%,Week 40,Euro,13000,To Pay on 30-Sep-2026',
+        ]);
+        $path = tempnam(sys_get_temp_dir(), 'liq') . '.csv';
+        file_put_contents($path, $csv);
+
+        // Survey writes nothing.
+        $this->artisan('liquidity:import', ['file' => $path, '--year' => 2026])
+            ->assertExitCode(0);
+        $this->assertSame(0, FinanceLiquidityEntry::count());
+
+        // --fix writes, mapping labels to keys and weeks to ISO keys.
+        $this->artisan('liquidity:import', ['file' => $path, '--fix' => true, '--year' => 2026])
+            ->assertExitCode(0);
+        $this->assertSame(4, FinanceLiquidityEntry::count());
+        $this->assertDatabaseHas('finance_liquidity_entries', [
+            'line' => 'it_expenses', 'week_key' => '2026-W37', 'supplier' => 'Google Ireland Limited',
+        ]);
+        $this->assertDatabaseHas('finance_liquidity_entries', [
+            'line' => 'revenue_payment', 'week_key' => '2026-W40', 'currency' => 'EUR',
+            'comment' => 'To Pay on 30-Sep-2026',
+        ]);
+
+        // --replace supersedes rather than doubles.
+        $this->artisan('liquidity:import', ['file' => $path, '--fix' => true, '--replace' => true, '--year' => 2026])
+            ->assertExitCode(0);
+        $this->assertSame(4, FinanceLiquidityEntry::count());
+
+        // An unknown item refuses the whole import — a figure filed under
+        // the wrong category is worse than one that is absent.
+        file_put_contents($path, $csv . "\nPetty Cash,Someone,,Week 35,EUR,-50,");
+        $this->artisan('liquidity:import', ['file' => $path, '--fix' => true, '--replace' => true, '--year' => 2026])
+            ->assertExitCode(1);
+        $this->assertSame(4, FinanceLiquidityEntry::count());
+
+        unlink($path);
     }
 
     public function test_restoring_a_d13_backup_replaces_the_board(): void
