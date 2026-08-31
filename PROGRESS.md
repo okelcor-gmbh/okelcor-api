@@ -1,15 +1,19 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-29 | Branch: `main` | **Production is at `e3dc4e5` — sessions 86–104 (finance snapshot access, security hardening), the 2026-08-25 batch and the EC Invoice VAT fix all deployed, migrations #1–58 applied, every deploy verified from outside the same day**
+Last updated: 2026-08-29 | Branch: `main` | **Production is at `f25efc2` — sessions 86–105 (finance snapshot access, security hardening, weekly liquidity + EC exports), migrations #1–59 applied, every deploy verified from outside the same day**
 
 ---
 
 ## 📊 The liquidity page becomes finance's weekly file + EC exports (Session 105)
 
-> **Deploy status:** built and tested, **not yet deployed**. Migration **#59**
-> (additive columns on `finance_liquidity_entries`) pending. No new routes;
-> `route:cache` unaffected but `config:cache` habitually rebuilt. After the
-> deploy, finance's data ships via `liquidity:import` — see below.
+> **Deploy status:** **deployed 2026-08-31** as `f25efc2` (backend) and
+> `d09e83d` (frontend, Vercel). `backup:okelcor` taken first, **#59 applied**
+> (37ms), both caches rebuilt exit 0. **Finance's data is live:** the file's
+> Details ledger went through `liquidity:import --fix --replace` — survey
+> totals matched the sheet category for category (Bank 10,440.54 / CoS
+> −66,121.17 / Revenue 142,491.87 …), then 64 rows written across weeks
+> 2026-W35–40 + W44, the 47 old-format rows superseded, zero legacy rows
+> left. Verified from outside: categories 200, snapshot + EC endpoints 401.
 
 Two asks from finance, delivered together:
 
@@ -26,7 +30,7 @@ and asked for the page to match it exactly. The old two-bucket model
 | Lines follow the file | 🔧 | `it_expenses` added (the file's "Other Expenses"), the tax label is plain "Tax Obligations" now, and a served `EXPENSE_LINES` constant pins the grid's arithmetic: Cash Position = Bank Balance + every expense line, Forecasted = + Revenue Payment. Served in meta so the panel cannot drift. |
 | `liquidity:import` command | 🔧 | Reads the Details ledger as CSV. Survey by default, `--fix` to write, `--replace` because the file IS the working and merging generations would double every figure. Rejects-not-guesses (unknown item, unreadable week, non-numeric amount name their line and abort). |
 | The board's liquidity section rebuilt (frontend) | 🔧 | The file's Summary grid: ISO-week columns with date-range subtitles, Total column, the two computed rows, a "+ Week" control, and cells opening the Details behind them (supplier/description/amount/CUR/comment, inline-editable). The old two-column table AND the 4-week LiquidityLadder are gone from the page — both superseded by the weekly grid; the ladder's backend endpoints stay (dormant, zero rows). Old-format entries are counted in a note rather than silently hidden. |
-| Production data | ⬜ pending deploy | 47 old-format entries on production are finance's own earlier working; the import runs `--fix --replace` after the deploy, superseding them with the file's 64 detail rows (backup first). |
+| Production data | ✅ imported 2026-08-31 | The 47 old-format entries (finance's earlier working) superseded by the file's 64 detail rows via `--fix --replace`, after a backup and a survey whose totals matched the sheet. |
 
 **Known divergence from the file, deliberate:** the file's own Summary
 formulas omit IT Expenses and Internet & Phone from Cash Position (its
