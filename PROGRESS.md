@@ -1,10 +1,17 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-29 | Branch: `main` | **Production is at `ad27717` — sessions 86–106 (weekly liquidity with closed weeks + moves + CSV downloads, EC exports), migrations #1–59 applied, every deploy verified from outside the same day**
+Last updated: 2026-08-31 | Branch: `main` | **Production is at `d75d972` — sessions 86–107 (weekly liquidity with closed weeks + moves + CSV downloads, EC exports, the tagged-task experience fix), migrations #1–59 applied, every deploy verified from outside the same day**
 
 ---
 
 ## 🔎 The tagged-but-locked-out report (Session 107)
+
+> **Deploy status:** **deployed 2026-08-31** as `d75d972` (backend) and
+> `22c0dc4` (frontend, Vercel). No migration, no new routes; caches rebuilt.
+> Verified against the real case, not a fixture: Victor's (admin 9) actual
+> My Work payload on production now carries his tagged item 293 in full —
+> `PENDING RECEIPTS`, −147.42, finance's note "Victor to share Invoice
+> copy", the `?finance_item=` deep link, and `board_url: null`.
 
 Finance tagged the team on snapshot tasks; the tagged admins reported seeing
 the tag but having "no access to the task details or to update it". The logs
@@ -21,8 +28,8 @@ Two experience fixes, no permission change:
 
 | Change | Status | Notes |
 |---|---|---|
-| The board's restricted state names the way out | 🔧 | A non-finance visitor now sees "restricted to Finance — if you were tagged, everything you need is in My Work" with the button, instead of a bare error that reads as a broken page. |
-| My Work carries the whole task, including a note back | 🔧 | The finance-task payload gains structured `category`/`client`/`amount`/`comment` (they were baked into the subtitle string, so the panel could show but not edit them), and the row gains a note field — the assignee writes "client says Thursday" in place, PATCHed alongside the status, and finance hears it through the existing creator notification. My Work is the assignee's WHOLE view of the task, by design; it now behaves like it. |
+| The board's restricted state names the way out | ✅ | A non-finance visitor now sees "restricted to Finance — if you were tagged, everything you need is in My Work" with the button, instead of a bare error that reads as a broken page. |
+| My Work carries the whole task, including a note back | ✅ | The finance-task payload gains structured `category`/`client`/`amount`/`comment` (they were baked into the subtitle string, so the panel could show but not edit them), and the row gains a note field — the assignee writes "client says Thursday" in place, PATCHed alongside the status, and finance hears it through the existing creator notification. My Work is the assignee's WHOLE view of the task, by design; it now behaves like it. |
 | Backend tests | ✅ | The tagged-task test asserts the structured fields. Full suite **780 passed, 0 failed**. |
 
 **Not changed, deliberately:** the permissions. `finance.snapshot` stays
