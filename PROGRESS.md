@@ -1,13 +1,22 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-09-01 | Branch: `main` | **Production is at `18bad79` — sessions 86–109 (weekly liquidity with closed weeks + moves + CSV downloads, EC exports, the tagged-task fix, and the to-do list that could finally be opened), migrations #1–61 applied, every deploy verified from outside the same day**
+Last updated: 2026-09-01 | Branch: `main` | **Production is at `92681cd` — sessions 86–110 (weekly liquidity with closed weeks + moves + CSV downloads, EC exports, the tagged-task fix, and the to-do list that could finally be opened, stamped with the department that raised it, and moved by that department), migrations #1–61 applied, every deploy verified from outside the same day**
 
 ---
 
 ## 👥 A department covers for itself (Session 110)
 
-> **Deploy status:** ✅ **deployed 2026-09-01** — see the deploy note at the
-> end of this section.
+> **Deploy status:** ✅ **deployed 2026-09-01** as `92681cd` (backend) and
+> `c16da05` (frontend, Vercel `success` for that exact SHA at 13:54 UTC).
+> **No migration** (`Nothing to migrate`) — this is a rule change in code, on
+> top of #61's stamp. All five cache commands exit 0. Verified against the
+> running code on the real row rather than a fixture: on to-do #89
+> (`dept=Finance`, raised by 25, tagged to 8), **Daniel Tuke now reads
+> `MAY EDIT true / MAY DELETE true`** where he read false/false before, while
+> Victor (`admin`) and Fabi (`marketing`) remain false on both — so the
+> widening reached the person who reported it without leaking to anyone else.
+> From outside: `/api/v1/categories` 200, `/admin/todos` and `/admin/my-work`
+> 401-not-404.
 
 Reported straight after Session 109 shipped: "finance still cannot edit, and
 yet it says only Joseph and Solomon can edit it". **Nothing was broken.**
