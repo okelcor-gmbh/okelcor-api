@@ -1,14 +1,21 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-09-01 | Branch: `main` | **Production is at `d75d972` — sessions 86–107 (weekly liquidity with closed weeks + moves + CSV downloads, EC exports, the tagged-task experience fix), migrations #1–59 applied, every deploy verified from outside the same day. Sessions 108–109 are 🔧 built, pending deploy (migrations #60, #61).**
+Last updated: 2026-09-01 | Branch: `main` | **Production is at `18bad79` — sessions 86–109 (weekly liquidity with closed weeks + moves + CSV downloads, EC exports, the tagged-task fix, and the to-do list that could finally be opened), migrations #1–61 applied, every deploy verified from outside the same day**
 
 ---
 
 ## 🏷️ Where a to-do came from (Session 109)
 
-> **Deploy status:** 🔧 **built, not yet deployed**, alongside Session 108.
-> Needs `migrate --force` (**#61**) and `config:cache`. **No new routes** —
-> the department filter is a query param on the existing `GET /admin/todos`.
+> **Deploy status:** ✅ **deployed 2026-09-01** as `18bad79` (backend) and
+> `56d73cf` (frontend, Vercel deployment reported `success` for that exact
+> SHA — checked, not assumed). `backup:okelcor` taken first (7.36 MB archive,
+> 20.06 MB dump), `migrate --pretend --force` reviewed — **exactly two
+> migrations pending, nothing else, no destructive statement** — then **#61
+> applied (64.80ms)**. All five cache commands exit 0. **The backfill landed
+> on every row**: 76 to-dos, `unstamped: 0`, all `finance` → **Finance**.
+> From outside: `/api/v1/categories` 200, `/admin/todos` and
+> `/admin/todos?department=Finance` both **401, not 404**, so the route cache
+> is fresh.
 
 The shared list mixes every department's requests together, so a row reads as
 one more line from a name the assignee may not place. Asked for: say where a
@@ -32,11 +39,17 @@ becomes **Finance** and no row is left unstamped.
 
 ## ✅ The to-do nobody could open (Session 108)
 
-> **Deploy status:** 🔧 **built, not yet deployed.** Needs `migrate --force`
-> (**#60**, additive/nullable/guarded) and `config:cache`. **No new routes**,
-> so `route:cache` is not load-bearing this time — the changes are payload
-> and panel only. Production confirms `todos EXISTS`, `assignee_note MISSING`,
-> 32 rows.
+> **Deploy status:** ✅ **deployed 2026-09-01** as `18bad79` (backend) and
+> `56d73cf` (frontend, Vercel). **#60 applied (12.76ms)**; the running code
+> reports `note col: EXISTS` and `supportsSource(): true`. No new routes, but
+> `route:cache` was rebuilt anyway and the 401s prove it is fresh.
+>
+> **`composer install` was deliberately skipped** and that is not a shortcut:
+> `git diff 29cf9a4..18bad79 --name-only` shows no `composer.json` or
+> `composer.lock` change and no new class files — only edits to existing ones
+> plus two migrations, which load by path, not by classmap. (`composer` is
+> also not on this host's PATH, which is worth knowing before a release that
+> genuinely does change dependencies.)
 
 ### Confirmed against production, not inferred
 
