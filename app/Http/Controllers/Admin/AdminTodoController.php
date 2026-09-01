@@ -184,7 +184,9 @@ class AdminTodoController extends Controller
 
         if (! $todo->isParticipant($user)) {
             return response()->json([
-                'message' => 'Only the person this to-do is tagged to, or whoever created it, can change it.',
+                'message' => $todo->department()
+                    ? "Only {$todo->department()}, the person this to-do is tagged to, or whoever created it, can change it."
+                    : 'Only the person this to-do is tagged to, or whoever created it, can change it.',
             ], 403);
         }
 
@@ -275,11 +277,15 @@ class AdminTodoController extends Controller
         $todo = Todo::findOrFail($id);
         $user = $request->user();
 
-        // Deleting is narrower than editing: the assignee marks an item done,
-        // they do not erase that it was asked.
-        if ($todo->created_by !== $user->id && $user->role !== 'super_admin') {
+        // Narrower than editing by exactly one person: the assignee marks an
+        // item done, they do not erase that it was asked. The department the
+        // to-do came from may, because tidying up after a colleague is the
+        // same job as doing their work.
+        if (! $todo->mayBeDeletedBy($user)) {
             return response()->json([
-                'message' => 'Only whoever created a to-do can delete it — mark it done instead.',
+                'message' => $todo->department()
+                    ? "Only {$todo->department()}, or whoever created this to-do, can delete it — mark it done instead."
+                    : 'Only whoever created a to-do can delete it — mark it done instead.',
             ], 403);
         }
 
@@ -349,8 +355,7 @@ class AdminTodoController extends Controller
             // rules live here, and super_admin's reach is not visible from
             // the ids alone.
             'you_may_edit'      => $viewer !== null && $todo->isParticipant($viewer),
-            'you_may_delete'    => $viewer !== null
-                && ($todo->created_by === $viewer->id || $viewer->role === 'super_admin'),
+            'you_may_delete'    => $viewer !== null && $todo->mayBeDeletedBy($viewer),
         ];
     }
 }

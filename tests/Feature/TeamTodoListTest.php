@@ -572,6 +572,137 @@ class TeamTodoListTest extends TestCase
             ->assertJsonPath('meta.departments', []);
     }
 
+    // ── a department covers for itself (Session 110) ──────────────────────
+
+    public function test_a_colleague_in_the_same_department_can_edit_and_delete(): void
+    {
+        // The real case: finance is two people. Joseph raised every to-do,
+        // Daniel could not touch one of them and was shown a message naming
+        // two colleagues who were not him.
+        $joseph   = $this->admin('finance');
+        $daniel   = $this->admin('finance');
+        $assignee = $this->admin('support');
+
+        $todoId = $this->actingAs($joseph, 'sanctum')
+            ->postJson('/api/v1/admin/todos', [
+                'title' => 'Share Invoice copy', 'assigned_admin_id' => $assignee->id,
+            ])->json('data.id');
+
+        // Served flags first — the panel hides its controls on these, so a
+        // false here is the lockout regardless of what the endpoints allow.
+        $row = $this->actingAs($daniel, 'sanctum')
+            ->getJson('/api/v1/admin/todos')
+            ->assertOk()
+            ->json('data.0');
+
+        $this->assertTrue($row['you_may_edit']);
+        $this->assertTrue($row['you_may_delete']);
+
+        $this->actingAs($daniel, 'sanctum')
+            ->patchJson("/api/v1/admin/todos/{$todoId}", ['status' => 'in_progress'])
+            ->assertOk();
+
+        $this->actingAs($daniel, 'sanctum')
+            ->deleteJson("/api/v1/admin/todos/{$todoId}")
+            ->assertOk();
+    }
+
+    public function test_another_department_still_cannot_touch_it(): void
+    {
+        $joseph = $this->admin('finance');
+        $fabi   = $this->admin('marketing');
+        $victor = $this->admin('admin');
+
+        $todoId = $this->actingAs($joseph, 'sanctum')
+            ->postJson('/api/v1/admin/todos', ['title' => 'Share Invoice copy'])
+            ->json('data.id');
+
+        foreach ([$fabi, $victor] as $outsider) {
+            $this->actingAs($outsider, 'sanctum')
+                ->patchJson("/api/v1/admin/todos/{$todoId}", ['status' => 'done'])
+                ->assertStatus(403);
+
+            $this->actingAs($outsider, 'sanctum')
+                ->deleteJson("/api/v1/admin/todos/{$todoId}")
+                ->assertStatus(403);
+        }
+
+        // And the refusal names the department that may, rather than two
+        // colleagues the reader is not.
+        $this->actingAs($fabi, 'sanctum')
+            ->patchJson("/api/v1/admin/todos/{$todoId}", ['status' => 'done'])
+            ->assertJsonPath('message', 'Only Finance, the person this to-do is tagged to, or whoever created it, can change it.');
+    }
+
+    public function test_the_assignee_still_cannot_delete(): void
+    {
+        // Deleting stays narrower than editing by exactly one person. Widening
+        // to the department must not have swept the assignee in with it.
+        $joseph   = $this->admin('finance');
+        $assignee = $this->admin('support');
+
+        $todoId = $this->actingAs($joseph, 'sanctum')
+            ->postJson('/api/v1/admin/todos', [
+                'title' => 'Share Bank statement', 'assigned_admin_id' => $assignee->id,
+            ])->json('data.id');
+
+        $this->actingAs($assignee, 'sanctum')
+            ->patchJson("/api/v1/admin/todos/{$todoId}", ['status' => 'done'])
+            ->assertOk();
+
+        $this->actingAs($assignee, 'sanctum')
+            ->deleteJson("/api/v1/admin/todos/{$todoId}")
+            ->assertStatus(403);
+    }
+
+    public function test_an_unstamped_todo_does_not_become_everybodys(): void
+    {
+        // The trap in comparing departments: an unstamped row resolves to
+        // null, and a viewer whose role has no department resolves to null
+        // too. If null matched null, every legacy row would open to anyone.
+        $joseph   = $this->admin('finance');
+        $outsider = $this->admin('support');
+
+        $todoId = $this->actingAs($joseph, 'sanctum')
+            ->postJson('/api/v1/admin/todos', ['title' => 'Share Invoice copy'])
+            ->json('data.id');
+
+        Todo::where('id', $todoId)->update(['created_by_role' => null]);
+
+        $this->assertFalse(Todo::find($todoId)->sharesDepartmentWith($outsider));
+
+        $this->actingAs($outsider, 'sanctum')
+            ->patchJson("/api/v1/admin/todos/{$todoId}", ['status' => 'done'])
+            ->assertStatus(403);
+
+        // The creator is unaffected — being who raised it never depended on
+        // the stamp.
+        $this->actingAs($joseph, 'sanctum')
+            ->patchJson("/api/v1/admin/todos/{$todoId}", ['status' => 'done'])
+            ->assertOk();
+    }
+
+    public function test_the_creator_keeps_access_after_changing_department(): void
+    {
+        // The to-do's department is frozen; the viewer's is current. Someone
+        // who moves team loses the DEPARTMENT route into their own old
+        // to-dos — and must keep the CREATOR one, or they are locked out of
+        // their own history.
+        $joseph = $this->admin('finance');
+
+        $todoId = $this->actingAs($joseph, 'sanctum')
+            ->postJson('/api/v1/admin/todos', ['title' => 'Share Invoice copy'])
+            ->json('data.id');
+
+        $joseph->update(['role' => 'marketing']);
+
+        $this->assertFalse(Todo::find($todoId)->fresh()->sharesDepartmentWith($joseph->fresh()));
+
+        $this->actingAs($joseph->fresh(), 'sanctum')
+            ->patchJson("/api/v1/admin/todos/{$todoId}", ['status' => 'done'])
+            ->assertOk();
+    }
+
     // ── retagging and the filters ─────────────────────────────────────────
 
     public function test_retagging_notifies_the_new_assignee_and_scopes_filter_the_list(): void

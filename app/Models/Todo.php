@@ -110,11 +110,48 @@ class Todo extends Model
         return $this->belongsTo(AdminUser::class, 'completed_by');
     }
 
-    /** The people an item concerns are the people who may move it. */
+    /**
+     * The people an item concerns are the people who may move it — and that
+     * includes the rest of the department that raised it (Session 110).
+     *
+     * Finance is two people. Only the creator and the assignee could edit, so
+     * the second finance user was locked out of his own team's requests and
+     * shown a message naming two colleagues. Departments cover for each other;
+     * the rule now says so.
+     */
     public function isParticipant(AdminUser $user): bool
     {
         return $this->created_by === $user->id
             || $this->assigned_admin_id === $user->id
+            || $this->sharesDepartmentWith($user)
             || $user->role === 'super_admin';
+    }
+
+    /**
+     * Deleting stays narrower than editing by one person: the ASSIGNEE is
+     * deliberately absent. They mark an item done; they do not erase that it
+     * was asked. The department is included because clearing up after a
+     * colleague is the same job as doing their work.
+     */
+    public function mayBeDeletedBy(AdminUser $user): bool
+    {
+        return $this->created_by === $user->id
+            || $this->sharesDepartmentWith($user)
+            || $user->role === 'super_admin';
+    }
+
+    /**
+     * Compares the department STAMPED on the to-do against the viewer's
+     * CURRENT one. Both must resolve: an unstamped row (the column not yet
+     * migrated, or a creator that cannot be resolved) has no department, and
+     * two nulls must never read as a match — that would open every such row
+     * to everybody.
+     */
+    public function sharesDepartmentWith(AdminUser $user): bool
+    {
+        $raised = $this->department();
+        $viewer = AdminPermissions::departmentFor($user->role);
+
+        return $raised !== null && $viewer !== null && $raised === $viewer;
     }
 }

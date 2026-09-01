@@ -4,6 +4,31 @@ Last updated: 2026-09-01 | Branch: `main` | **Production is at `18bad79` — ses
 
 ---
 
+## 👥 A department covers for itself (Session 110)
+
+> **Deploy status:** ✅ **deployed 2026-09-01** — see the deploy note at the
+> end of this section.
+
+Reported straight after Session 109 shipped: "finance still cannot edit, and
+yet it says only Joseph and Solomon can edit it". **Nothing was broken.**
+Production has **two** finance accounts — 25 Joseph Rwabu, who raised all 89
+to-dos, and **29 Daniel Tuke**, who raised none of them and was tagged on none
+of them. The rule was creator-or-assignee-or-super_admin, so Daniel was
+correctly refused, and correctly shown a message naming the two people who
+qualified. Both halves were working exactly as written; the rule was simply
+narrower than how a two-person finance team actually operates.
+
+| Change | Status | Notes |
+|---|---|---|
+| A department may move its own to-dos | ✅ | `isParticipant()` gains "shares the raising department". Chosen over granting `finance` blanket rights, which would have let finance edit Marketing's work, and over dropping the restriction, which leaves no record of who may act. It generalises — Yelzaveta and Edinah cover each other, Marketing covers Marketing — and it runs on the department stamp shipped hours earlier in #61. |
+| Deleting widens the same way, minus one | ✅ | New `mayBeDeletedBy()`: creator, department, or super_admin — **the assignee is still deliberately absent.** They mark an item done; they do not erase that it was asked. Practical payoff: Daniel can now help clear the ~89 duplicate "Share Invoice copy" rows instead of leaving one person to do it alone. |
+| **Two nulls must never match** | ✅ | The trap in comparing departments. An unstamped row resolves to null and a viewer with no department resolves to null, so a naive `===` would have opened every legacy row to everybody — the exact opposite of the bug being fixed. Both sides must resolve *and* agree. Pinned by `test_an_unstamped_todo_does_not_become_everybodys`. |
+| The creator keeps their own history | ✅ | The to-do's department is frozen, the viewer's is current, so somebody who changes team loses the *department* route into their own old to-dos. They keep the *creator* one. Tested, because losing access to your own history would have been a quiet consequence of #61's freezing decision. |
+| The refusal names the department | ✅ | "Only Finance, the person this to-do is tagged to, or whoever created it, can change it." Naming two colleagues was accurate and still unhelpful: the reader was finance himself and could not tell a design decision from a bug. |
+| Backend tests (5 new) | ✅ | The colleague editing and deleting (asserting the **served flags** first — the panel hides its controls on those, so a false there is the lockout regardless of what the endpoints permit); another department still refused on both verbs plus the message text; the assignee still unable to delete; the null-department trap; and the creator surviving a team change. Full suite **794 passed**, up from 789. |
+
+---
+
 ## 🏷️ Where a to-do came from (Session 109)
 
 > **Deploy status:** ✅ **deployed 2026-09-01** as `18bad79` (backend) and
