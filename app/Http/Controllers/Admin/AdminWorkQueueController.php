@@ -203,11 +203,35 @@ class AdminWorkQueueController extends Controller
                         . ($t->details ? ' · ' . \Illuminate\Support\Str::limit($t->details, 80) : '')),
                     'priority'   => $t->due_on?->isPast() ? 'urgent' : ($t->priority === 'high' ? 'high' : ($t->priority === 'low' ? 'low' : 'medium')),
                     'due_at'     => $t->due_on?->toIso8601String(),
-                    'action_url' => '/admin/todos?todo=' . $t->id,
+                    // The task is worked HERE. It used to link to
+                    // `/admin/todos?todo=N` — the whole list page — so the
+                    // assignee clicked their task and arrived at a list to
+                    // search, with no way to open the thing they came for.
+                    // Same fault Session 107 fixed for finance tasks, and
+                    // the same fix: My Work is the assignee's whole view.
+                    'action_url' => '/admin/my-work?todo=' . $t->id,
+                    // The shared list, kept as a secondary way out. Unlike
+                    // the finance board this is never a 403 — every role
+                    // holds `staff.self` — so it is always populated.
+                    'list_url'   => '/admin/todos?todo=' . $t->id,
                     'status'     => $t->status,
                     'editable'   => true,
                     'status_options' => collect(Todo::STATUS_LABELS)
                         ->map(fn ($label, $key) => ['value' => $key, 'label' => $label])->values(),
+                    // The task's raw fields, so the row can show and edit
+                    // them rather than only render the subtitle it baked
+                    // them into. `details` is the brief and is read-only
+                    // here; `assignee_note` is this person's reply.
+                    'details'       => $t->details,
+                    'assignee_note' => Todo::supportsAssigneeNote() ? $t->assignee_note : null,
+                    'creator'       => $t->creator
+                        ? trim($t->creator->display_name ?: $t->creator->name)
+                        : null,
+                    // Which part of the business is asking. On a list mixing
+                    // every department's requests, "from Finance" places a
+                    // task faster than a name the assignee may not know.
+                    'department'    => $t->department(),
+                    'due_on'        => $t->due_on?->toDateString(),
                 ])->values();
         } catch (\Throwable) {
         }

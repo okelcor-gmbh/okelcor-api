@@ -241,6 +241,53 @@ class AdminPermissions
     ];
 
     /**
+     * Which part of the business a role speaks for (Session 109).
+     *
+     * Not a permission — nothing is granted or denied by this. It answers
+     * "where did this come from?" on a shared to-do, so a request reads as
+     * "from Finance" rather than as one more line from a name you may not
+     * place. Deliberately coarser than ROLES: `admin` and `super_admin` are
+     * both Management and `editor` and `content_manager` are both Content,
+     * because the reader wants the department, not the seniority.
+     *
+     * NOT `job_title` — that is free text set per person ("Head of Finance",
+     * "Logistics"), so grouping by it puts almost everyone in a group of one.
+     * Roles are a controlled vocabulary of ten, which is what makes them
+     * groupable and filterable.
+     *
+     * Every role must appear here. `TeamTodoListTest::
+     * test_every_role_has_a_department` asserts it, so a role added without a
+     * department is a red test rather than a to-do that quietly renders a
+     * tidied role name.
+     */
+    public const DEPARTMENTS = [
+        'super_admin'     => 'Management',
+        'admin'           => 'Management',
+        'finance'         => 'Finance',
+        'order_manager'   => 'Operations',
+        'sales_manager'   => 'Sales',
+        'marketing'       => 'Marketing',
+        'content_manager' => 'Content',
+        'editor'          => 'Content',
+        'support'         => 'Support',
+        'viewer'          => 'General',
+    ];
+
+    /**
+     * The department a role speaks for. Falls back to a tidied role so an
+     * unknown or legacy value renders as something rather than blank — the
+     * same contract as AdminUser::jobTitle().
+     */
+    public static function departmentFor(?string $role): ?string
+    {
+        if ($role === null || trim($role) === '') {
+            return null;
+        }
+
+        return self::DEPARTMENTS[$role] ?? ucwords(str_replace('_', ' ', $role));
+    }
+
+    /**
      * Return all permission keys granted to a given role.
      */
     public static function for(string $role): array

@@ -1,6 +1,113 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-08-31 | Branch: `main` | **Production is at `d75d972` — sessions 86–107 (weekly liquidity with closed weeks + moves + CSV downloads, EC exports, the tagged-task experience fix), migrations #1–59 applied, every deploy verified from outside the same day**
+Last updated: 2026-09-01 | Branch: `main` | **Production is at `d75d972` — sessions 86–107 (weekly liquidity with closed weeks + moves + CSV downloads, EC exports, the tagged-task experience fix), migrations #1–59 applied, every deploy verified from outside the same day. Sessions 108–109 are 🔧 built, pending deploy (migrations #60, #61).**
+
+---
+
+## 🏷️ Where a to-do came from (Session 109)
+
+> **Deploy status:** 🔧 **built, not yet deployed**, alongside Session 108.
+> Needs `migrate --force` (**#61**) and `config:cache`. **No new routes** —
+> the department filter is a query param on the existing `GET /admin/todos`.
+
+The shared list mixes every department's requests together, so a row reads as
+one more line from a name the assignee may not place. Asked for: say where a
+to-do came from — "To-dos from Finance" — off the role of whoever raised it.
+
+| Change | Status | Notes |
+|---|---|---|
+| `AdminPermissions::DEPARTMENTS` | 🔧 | Ten roles → eight departments, kept beside `ROLES` so the two are read together. Coarser than roles on purpose: `admin` + `super_admin` are both **Management**, `editor` + `content_manager` both **Content** — the reader wants the department, not the seniority. **Not `job_title`**: that is free text set per person ("Head of Finance", "Logistics"), so grouping by it puts almost everyone in a group of one. Roles are a controlled vocabulary, which is what makes them groupable. |
+| A role with no department is a red test | 🔧 | `test_every_role_has_a_department` walks `ROLES` against the map. Same contract `OrderLog::ACTIONS` has with its ENUM — the eleventh role cannot ship quietly rendering a tidied role name. |
+| **#61** `todos.created_by_role` | 🔧 | **Stamped, not derived**, and that is the whole design decision. Deriving the label from the creator's CURRENT role loses information twice: `created_by` is `nullOnDelete`, so deleting an admin account erases the origin of every to-do they ever raised; and people change role — there is an outstanding task in this very file to move the marketer `editor` → `marketing`, which would have silently relabelled all his history from Content to Marketing. The **role** is frozen; the **department label** is still derived from it at read time, so the wording can be corrected later without a data migration. |
+| The filter takes the department, not the role | 🔧 | Several roles share one department, so filtering on the role would have returned half of "from Management" — pinned by its own test. An unrecognised department matches nothing rather than everything: a filter that silently stops filtering is the worse failure, because the reader believes they are looking at one department's work. |
+| `meta.departments` with counts | 🔧 | Only departments that actually have to-dos are offered. A filter listing eight choices where six return nothing is a worse list than one offering the two that exist. Counted off the whole table, not the filtered query, so the numbers do not move as you filter. |
+| Badge + "From:" filter (frontend) | 🔧 | A stable colour per department on both the board and My Work, so the same team reads the same on both screens. The opened My Work panel names it too — "Asked by Joseph Rwabu · Finance". The empty state owns the filter rather than blaming the list. |
+| Backend tests (7 new) | ✅ | Every role has a department; the stamp reaching both the board and My Work; the filter and its counts; two roles sharing one department; the stamp surviving a role change **and the creator's account being deleted**; the backfill stamping existing rows and being re-runnable without overwriting a correct stamp; and the column arriving after the code. Full suite **789 passed**, up from 782. |
+
+**The backfill is a clean single-department stamp on production**: all live
+to-dos were raised by one person, user 25 (`finance`), so every existing row
+becomes **Finance** and no row is left unstamped.
+
+---
+
+## ✅ The to-do nobody could open (Session 108)
+
+> **Deploy status:** 🔧 **built, not yet deployed.** Needs `migrate --force`
+> (**#60**, additive/nullable/guarded) and `config:cache`. **No new routes**,
+> so `route:cache` is not load-bearing this time — the changes are payload
+> and panel only. Production confirms `todos EXISTS`, `assignee_note MISSING`,
+> 32 rows.
+
+### Confirmed against production, not inferred
+
+The diagnosis was checked against the live rows before the fix was believed:
+
+```
+creator Joseph may edit  : true
+creator Joseph may delete: true
+assignee Solomon may edit: true
+types: created_by=integer userid=integer
+```
+
+**The API would have permitted every single action they reported being unable
+to do.** No to-do row has a null `created_by` or `assigned_admin_id` (0 of 32),
+`grep -i todo laravel.log` is empty — no 403s, no exceptions — and the strict
+`===` in `isParticipant()` is safe because Laravel's base `Connector` sets
+`PDO::ATTR_EMULATE_PREPARES => false`, so MySQL returns native integers on both
+sides. That last one was worth checking rather than assuming: a string/int
+mismatch there would have produced these exact symptoms while passing every
+SQLite test, which is the trap this project keeps paying for.
+
+**The live data corroborates the UX reading on its own.** All 32 to-dos were
+created on 2026-09-01 between 07:12 and 09:26 by **one person** — user 25,
+Joseph Rwabu (`finance`) — at roughly one every two minutes, almost all of them
+titled some variant of "Share Invoice copy", retagged in turn to users 8, 28, 1
+and 9. **Every one of them is still `open`; not a single to-do on production
+has ever been moved to `in_progress` or `done`.** That is the signature of
+someone creating a task, failing to find any way to open it, concluding it had
+not saved, and making another one — and of assignees who never found the status
+control either. Nothing was denied; nothing was findable.
+
+**Left for a person, not fixed here:** to-dos **1–31** are near-duplicates of
+one real request. They are live rows created by a real user and no rule can say
+which one he means to keep, so they are not deleted. Once this deploys he can
+delete them himself in seconds — which he could not do before, and which is the
+whole point.
+
+Two reports, one root cause. Someone created a to-do and found they could not
+click it to edit or delete it. Someone else, tagged on a to-do, clicked it in
+My Work and **landed on the To-Do list page** instead of on their task.
+
+**The API was never the problem, and that was worth establishing before
+changing anything.** `/admin/todos` has had full CRUD since Session 102,
+`staff.self` is held by *every* role, `isParticipant()` correctly admits the
+creator and the assignee, and the list already served per-row `you_may_edit` /
+`you_may_delete`. All eight existing tests passed untouched. Nothing was being
+denied — the panel simply never offered the controls, and the link pointed at
+a list.
+
+| Change | Status | Notes |
+|---|---|---|
+| **A to-do opens where it is worked** | 🔧 | `action_url` was `/admin/todos?todo=N` — the whole list page. It is now `/admin/my-work?todo=N`, with the shared list riding alongside as `list_url`. **This is the Session 107 fault in the sibling feature**: finance tasks were fixed then, to-dos were not, and the assignee's report is almost word for word the one that prompted 107. |
+| My Work carries the whole to-do | 🔧 | `details`, `due_on`, `creator` and `assignee_note` are served as fields. They were baked into the `subtitle` string, so the row could *show* the brief but never edit it, and the assignee had to leave My Work to read what was asked. The row now expands in place — brief, who asked, when it is due — and opens already expanded when arrived at from a tagged-task link. |
+| **#60** `todos.assignee_note` | 🔧 | The reply travels back. Deliberately **not** `details`: that column is whoever asked saying what they want, and a note that overwrote it would destroy the question while answering it. Two people talking, two fields. Whoever created the to-do is notified, so "the client asked for Thursday" reaches them without a message being written — the same contract as the finance note in Session 107. |
+| The row is the affordance | 🔧 | The only way to edit was a **13px unlabelled grey pencil** at the end of a row that wraps on a narrow screen; delete was the trash beside it. The whole row is now clickable, and both controls are labelled buttons. |
+| The editor scrolled into view | 🔧 | The add/edit form renders *above* the list, so opening it from a row halfway down the page put it off-screen — the click genuinely did nothing visible. This is most of what "you can't click a to-do to edit it" actually was. |
+| A refusal now says who may | 🔧 | A row with no controls and no explanation is indistinguishable from a broken one, which is how this was reported. Non-participants see "Only {creator} or {assignee} can change this" instead of a bare row. |
+| Backend tests (3 new, 1 rebuilt) | ✅ | The whole-task payload plus the note round-tripping back to the creator's notification; the note column arriving *after* the code (the status still lands — a to-do nobody can close is worse than one that cannot carry a reason); migration idempotency against the real file. The Session 102 test that asserted `action_url === '/admin/todos?todo=N'` was **rebuilt, not patched** — it pinned the exact behaviour being reported as broken. Full suite **782 passed**, up from 780. |
+
+**Deliberately not changed:** the permissions. Creator-or-assignee to edit,
+creator-only to delete, every role holding `staff.self` — all of it was right,
+and all of it stays. The bug was that the product never said so.
+
+**Found on the way, NOT fixed:** `PartnerSalesLogTest ::
+test_summary_totals_are_grouped_by_currency_and_never_combined` fails on a
+clean checkout (`Undefined array key "GHS"`). It is **pre-existing** — verified
+by stashing this session's work and re-running — and it was passing at Session
+107's 780, so something time-dependent broke it between then and 2026-09-01.
+The date is the first of the month and the endpoint under test is
+`?period=month`, which makes a month-boundary bug in the partner summary the
+first place to look. Money-facing for partners; not investigated further.
 
 ---
 
@@ -3651,6 +3758,10 @@ touching order 10112 or the two lump-sum orders.
 34. `2026_08_13_000002_create_order_signoffs_table` (Session 83 — one new table, nothing existing read or altered. `unique(order_id, slot, active)` with `active` as 1-or-NULL is what enforces "one standing signature per slot" in the database rather than in code. Exercised against real SQL by `OrderSignoffAndBoardTest`, which runs the migration file itself.)
 35. `2026_08_13_000003_create_finance_invoices_table` (Session 83 — one new table for sevDesk invoice entries. Nothing existing read or altered. Same real-SQL exercise as #34.)
 36. `2026_08_13_000004_add_signoff_actions_to_order_logs_enum` (Session 83 — adds `signoff_given`, `signoff_revoked`, `signoff_bypassed`, `document_gate_overridden`. **The first widening that does not restate the list by hand**: the ENUM is built from `OrderLog::ACTIONS`, so the schema and the code that writes to it cannot drift. `down()` throws if any row uses an added value. MySQL-only.)
+
+60. `2026_09_01_000001_add_assignee_note_to_todos_table` (Session 108 — adds `todos.assignee_note`, nullable TEXT. Additive and guarded on both `Schema::hasTable` and `Schema::hasColumn`, so a re-run is a no-op; nothing existing is read, altered or backfilled. **Deploy-order safe in both directions, proved rather than assumed**: `Todo::supportsAssigneeNote()` gates every read and write, readers get null and `AdminTodoController::update()` drops the field rather than failing the whole update — the status is the load-bearing half and must still land. Exercised against real SQL by `TeamTodoListTest`, which runs the migration file itself, re-runs it, and separately drops the column to prove the code survives without it.)
+61. `2026_09_01_000002_add_created_by_role_to_todos_table` (Session 109 — adds `todos.created_by_role` VARCHAR(30) + an index, and backfills it from each creator's current role. Additive, nullable, guarded on `hasTable`/`hasColumn`. **The backfill is re-runnable and cannot overwrite an existing stamp**: it writes only where the column is still null and a creator resolves, so a second run after somebody has changed role leaves the frozen value alone — asserted by `test_the_backfill_stamps_existing_rows_and_is_re_runnable`. Written in PHP with `chunkById` rather than a JOIN UPDATE so it runs identically on MySQL and on the sqlite harness. `down()` drops the index before the column, which sqlite requires. Deploy-order safe via `Todo::supportsSource()`: creating a to-do still works without the column, it just carries no badge.)
+
 
 **#33–36 are pushed but NOT applied to production.** All four are additive or
 widening; none rewrites an existing row. The code is **deploy-order safe in both

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AdminUser;
 use App\Models\Todo;
 use App\Services\AdminNotificationService;
+use App\Support\AdminPermissions;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -34,9 +35,13 @@ class AdminTodoController extends Controller
     public function index(Request $request): JsonResponse
     {
         $filters = $request->validate([
-            'scope'  => ['nullable', 'in:all,mine,created'],
-            'status' => ['nullable', 'in:active,open,in_progress,done,all'],
-            'q'      => ['nullable', 'string', 'max:100'],
+            'scope'      => ['nullable', 'in:all,mine,created'],
+            'status'     => ['nullable', 'in:active,open,in_progress,done,all'],
+            'q'          => ['nullable', 'string', 'max:100'],
+            // The department NAME, not the role — it is what the chip shows,
+            // and several roles share one, so filtering on the role would
+            // silently drop half of "from Management".
+            'department' => ['nullable', 'string', 'max:40'],
         ]);
 
         if (! Todo::available()) {
@@ -66,6 +71,18 @@ class AdminTodoController extends Controller
             default  => $query->where('status', $filters['status']),
         };
 
+        if (! empty($filters['department']) && Todo::supportsSource()) {
+            $roles = array_keys(array_filter(
+                AdminPermissions::DEPARTMENTS,
+                fn ($d) => $d === $filters['department'],
+            ));
+
+            // An unrecognised department matches nothing rather than
+            // everything — a filter that silently stops filtering is worse
+            // than one that visibly returns nothing.
+            $query->whereIn('created_by_role', $roles ?: ['__none__']);
+        }
+
         if (! empty($filters['q'])) {
             $q = $filters['q'];
             $query->where(fn ($sub) => $sub->where('title', 'like', "%{$q}%")
@@ -89,6 +106,22 @@ class AdminTodoController extends Controller
                 'statuses'   => collect(Todo::STATUS_LABELS)
                     ->map(fn ($label, $key) => ['key' => $key, 'label' => $label])->values(),
                 'open_count' => Todo::whereIn('status', ['open', 'in_progress'])->count(),
+                // Only departments that actually have to-dos: a filter
+                // offering eight choices where six return nothing is a
+                // worse list than one offering the two that exist.
+                'departments' => Todo::supportsSource()
+                    ? Todo::query()
+                        ->selectRaw('created_by_role, COUNT(*) as aggregate')
+                        ->whereNotNull('created_by_role')
+                        ->groupBy('created_by_role')
+                        ->pluck('aggregate', 'created_by_role')
+                        ->reduce(function (array $carry, $count, $role) {
+                            $name = AdminPermissions::departmentFor($role);
+                            $carry[$name] = ($carry[$name] ?? 0) + (int) $count;
+
+                            return $carry;
+                        }, [])
+                    : [],
                 // The tag picker — tagging is how an item reaches someone's
                 // My Work and notifies them.
                 'staff'      => AdminUser::where('is_active', true)
@@ -127,6 +160,10 @@ class AdminTodoController extends Controller
             'priority'          => $data['priority'] ?? 'normal',
             'assigned_admin_id' => $data['assigned_admin_id'] ?? null,
             'created_by'        => $request->user()?->id,
+            // Stamped now, not derived later: `created_by` is nullOnDelete
+            // and people change role, so a label computed at read time would
+            // lose or rewrite the origin. See the migration.
+            ...(Todo::supportsSource() ? ['created_by_role' => $request->user()?->role] : []),
         ]);
 
         $this->notifyAssignee($todo, $request->user());
@@ -154,14 +191,23 @@ class AdminTodoController extends Controller
         $data = $request->validate([
             'title'             => ['sometimes', 'string', 'max:200'],
             'details'           => ['sometimes', 'nullable', 'string', 'max:2000'],
+            'assignee_note'     => ['sometimes', 'nullable', 'string', 'max:2000'],
             'due_on'            => ['sometimes', 'nullable', 'date'],
             'priority'          => ['sometimes', Rule::in(Todo::PRIORITIES)],
             'status'            => ['sometimes', Rule::in(Todo::STATUSES)],
             'assigned_admin_id' => ['sometimes', 'nullable', 'integer', 'exists:admin_users,id'],
         ]);
 
+        // Deploy-order safety: the note column can arrive after this code
+        // does. Drop the field rather than failing the update — the status
+        // is the load-bearing half and must still travel.
+        if (array_key_exists('assignee_note', $data) && ! Todo::supportsAssigneeNote()) {
+            unset($data['assignee_note']);
+        }
+
         $previousAssignee = $todo->assigned_admin_id;
         $previousStatus   = $todo->status;
+        $previousNote     = Todo::supportsAssigneeNote() ? $todo->assignee_note : null;
 
         $todo->fill($data);
 
@@ -181,23 +227,35 @@ class AdminTodoController extends Controller
             $this->notifyAssignee($todo, $user);
         }
 
-        // "Done" travels back to whoever asked, without a message written.
-        if ($todo->status === 'done' && $previousStatus !== 'done'
-            && $todo->created_by && $todo->created_by !== $user->id) {
+        $noteChanged = Todo::supportsAssigneeNote() && $todo->assignee_note !== $previousNote;
+        $completed   = $todo->status === 'done' && $previousStatus !== 'done';
+
+        // "Done" travels back to whoever asked, without a message written —
+        // and so does the note, which is the half that carries the reason.
+        // Both ride the same notification: whoever asked wants one nudge
+        // saying what happened, not two saying half of it each.
+        if (($completed || $noteChanged) && $todo->created_by && $todo->created_by !== $user->id) {
             try {
                 AdminNotificationService::notifyUser(
                     adminUserId: $todo->created_by,
-                    type: 'todo_completed',
-                    title: "{$user->name} completed: {$todo->title}",
-                    body: null,
+                    type: $completed ? 'todo_completed' : 'todo_note_added',
+                    title: $completed
+                        ? "{$user->name} completed: {$todo->title}"
+                        : "{$user->name} left a note on: {$todo->title}",
+                    body: $noteChanged ? $todo->assignee_note : null,
                     actionUrl: '/admin/todos?todo=' . $todo->id,
-                    severity: 'success',
+                    severity: $completed ? 'success' : 'info',
                     relatedType: 'todo',
                     relatedId: $todo->id,
-                    dedupeKey: "todo_completed:{$todo->id}",
+                    // The completion is once per item; a note can be revised,
+                    // and each revision is worth hearing, so it dedupes on
+                    // the day rather than on the item alone.
+                    dedupeKey: $completed
+                        ? "todo_completed:{$todo->id}"
+                        : "todo_note:{$todo->id}:" . now()->toDateString(),
                 );
             } catch (\Throwable $e) {
-                Log::warning('To-do completion notification failed', ['todo' => $todo->id, 'error' => $e->getMessage()]);
+                Log::warning('To-do update notification failed', ['todo' => $todo->id, 'error' => $e->getMessage()]);
             }
         }
 
@@ -268,6 +326,9 @@ class AdminTodoController extends Controller
             'id'                => $todo->id,
             'title'             => $todo->title,
             'details'           => $todo->details,
+            // The brief and the reply are two different people talking, so
+            // they travel as two fields rather than one edited in place.
+            'assignee_note'     => Todo::supportsAssigneeNote() ? $todo->assignee_note : null,
             'due_on'            => $todo->due_on?->toDateString(),
             'overdue'           => $todo->due_on !== null && $todo->status !== 'done' && $todo->due_on->isPast(),
             'priority'          => $todo->priority,
@@ -276,6 +337,11 @@ class AdminTodoController extends Controller
             'assignee'          => $name($todo->assignee),
             'created_by'        => $todo->created_by,
             'creator'           => $name($todo->creator),
+            // Where it came from. The role is the stored fact; the department
+            // is derived from it, so the wording can change without a data
+            // migration.
+            'created_by_role'   => Todo::supportsSource() ? $todo->created_by_role : null,
+            'department'        => $todo->department(),
             'completed_at'      => $todo->completed_at?->toIso8601String(),
             'completed_by_name' => $name($todo->completedBy),
             'created_at'        => $todo->created_at?->toIso8601String(),
