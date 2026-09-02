@@ -215,6 +215,15 @@ class AdminFinanceSnapshotController extends Controller
             return $refusal;
         }
 
+        // Who wrote the line. The table carried no person until Session 111,
+        // which is why finance's weekly file credited nobody for the one
+        // thing they touch every week. Guarded: the column can lag the code,
+        // and a liquidity line must save either way.
+        if (FinanceLiquidityEntry::supportsAttribution()) {
+            $data['created_by'] = $request->user()?->id;
+            $data['updated_by'] = $request->user()?->id;
+        }
+
         $entry = FinanceLiquidityEntry::create($data);
 
         return response()->json(['data' => $this->formatEntry($entry)], 201);
@@ -233,6 +242,14 @@ class AdminFinanceSnapshotController extends Controller
         // them delete-and-retype it was the complaint.
         if ($refusal = $this->closedWeekRefusal($data['week_key'] ?? $entry->week_key)) {
             return $refusal;
+        }
+
+        if (FinanceLiquidityEntry::supportsAttribution()) {
+            $data['updated_by'] = $request->user()?->id;
+            // A line edited by someone whose predecessor never signed it can
+            // at least name its current author, rather than staying anonymous
+            // for the rest of its life.
+            $data['created_by'] = $entry->created_by ?? $request->user()?->id;
         }
 
         $entry->update($data);

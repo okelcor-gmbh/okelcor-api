@@ -4,6 +4,8 @@ namespace App\Models;
 
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
+use App\Models\Concerns\RecordsStaffActivity;
+use App\Services\StaffActivityRecorder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Schema;
@@ -20,6 +22,8 @@ use Illuminate\Support\Facades\Schema;
  */
 class LiquidityWeek extends Model
 {
+    use RecordsStaffActivity;
+
     private static ?bool $available = null;
 
     protected $fillable = [
@@ -99,5 +103,10 @@ class LiquidityWeek extends Model
             'start' => $start,
             'end'   => $start->endOfWeek(),
         ];
+    }
+
+    public function recordStaffActivity(StaffActivityRecorder $recorder): void
+    {
+        $recorder->fromLiquidityWeek($this);
     }
 }

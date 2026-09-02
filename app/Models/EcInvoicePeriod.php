@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\RecordsStaffActivity;
+use App\Services\StaffActivityRecorder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -12,6 +14,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class EcInvoicePeriod extends Model
 {
+    use RecordsStaffActivity;
+
     public const STATUSES = ['draft', 'ready', 'submitted'];
 
     protected $fillable = [
@@ -34,5 +38,10 @@ class EcInvoicePeriod extends Model
     public function updatedBy(): BelongsTo
     {
         return $this->belongsTo(AdminUser::class, 'updated_by');
+    }
+
+    public function recordStaffActivity(StaffActivityRecorder $recorder): void
+    {
+        $recorder->fromEcInvoicePeriod($this);
     }
 }

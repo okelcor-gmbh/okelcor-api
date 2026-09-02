@@ -3,6 +3,8 @@
 namespace App\Models;
 
 use App\Support\AdminPermissions;
+use App\Models\Concerns\RecordsStaffActivity;
+use App\Services\StaffActivityRecorder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Schema;
@@ -13,6 +15,8 @@ use Illuminate\Support\Facades\Schema;
  */
 class Todo extends Model
 {
+    use RecordsStaffActivity;
+
     private static ?bool $available = null;
 
     private static ?bool $supportsAssigneeNote = null;
@@ -153,5 +157,10 @@ class Todo extends Model
         $viewer = AdminPermissions::departmentFor($user->role);
 
         return $raised !== null && $viewer !== null && $raised === $viewer;
+    }
+
+    public function recordStaffActivity(StaffActivityRecorder $recorder): void
+    {
+        $recorder->fromTodo($this);
     }
 }

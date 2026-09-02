@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\RecordsStaffActivity;
+use App\Services\StaffActivityRecorder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Schema;
@@ -15,6 +17,8 @@ use Illuminate\Support\Facades\Schema;
  */
 class EcInvoiceGroup extends Model
 {
+    use RecordsStaffActivity;
+
     private static ?bool $available = null;
 
     public const TYPE_GOODS      = 'goods';
@@ -91,5 +95,10 @@ class EcInvoiceGroup extends Model
     public function lines(): HasMany
     {
         return $this->hasMany(EcInvoiceLine::class, 'group_id')->orderBy('invoice_date')->orderBy('id');
+    }
+
+    public function recordStaffActivity(StaffActivityRecorder $recorder): void
+    {
+        $recorder->fromEcInvoiceGroup($this);
     }
 }

@@ -6,7 +6,16 @@ use App\Models\AdminSecurityEvent;
 use App\Models\BulkEmailCampaign;
 use App\Models\EbayListingLog;
 use App\Models\CustomerCommunication;
+use App\Models\EcInvoiceGroup;
+use App\Models\EcInvoiceLine;
+use App\Models\EcInvoicePeriod;
 use App\Models\FinanceInvoice;
+use App\Models\FinanceLiquidityEntry;
+use App\Models\FinanceSnapshotItem;
+use App\Models\LiquidityWeek;
+use App\Models\OrderCostLine;
+use App\Models\SalesOrderEntry;
+use App\Models\Todo;
 use App\Models\OrderLog;
 use App\Models\Media;
 use App\Models\OrderSignoff;
@@ -61,6 +70,23 @@ class BackfillStaffLedger extends Command
             'Email campaigns'    => ['model' => BulkEmailCampaign::class,    'method' => 'fromCampaign'],
             'Finance invoices'   => ['model' => FinanceInvoice::class,       'method' => 'fromFinanceInvoice'],
             'Partner sale audit' => ['model' => PartnerSaleAudit::class,     'method' => 'fromPartnerSaleAudit'],
+
+            // Finance's own working (Session 111). The list above is built
+            // from the ORDER trail, and finance does most of its work beside
+            // it — which is why both finance accounts read as an empty month
+            // while 293 snapshot items sat in their table.
+            'Finance snapshot'   => ['model' => FinanceSnapshotItem::class,  'method' => 'fromFinanceSnapshotItem'],
+            'EC invoice groups'  => ['model' => EcInvoiceGroup::class,       'method' => 'fromEcInvoiceGroup'],
+            'EC invoice lines'   => ['model' => EcInvoiceLine::class,        'method' => 'fromEcInvoiceLine'],
+            'EC periods'         => ['model' => EcInvoicePeriod::class,      'method' => 'fromEcInvoicePeriod'],
+            'Liquidity weeks'    => ['model' => LiquidityWeek::class,        'method' => 'fromLiquidityWeek'],
+            'Liquidity entries'  => ['model' => FinanceLiquidityEntry::class,'method' => 'fromLiquidityEntry'],
+            'Order cost lines'   => ['model' => OrderCostLine::class,        'method' => 'fromOrderCostLine'],
+            'Sales order board'  => ['model' => SalesOrderEntry::class,      'method' => 'fromSalesOrderEntry'],
+
+            // Completed to-dos only — see fromTodo(). Raising one asks for
+            // work; finishing it is the work.
+            'Completed to-dos'   => ['model' => Todo::class,                 'method' => 'fromTodo'],
 
             // Technical work. Added once it was clear the list above is all
             // business operations — somebody who builds the system rather than

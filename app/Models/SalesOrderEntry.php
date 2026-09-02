@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\RecordsStaffActivity;
+use App\Services\StaffActivityRecorder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Schema;
@@ -13,6 +15,8 @@ use Illuminate\Support\Facades\Schema;
  */
 class SalesOrderEntry extends Model
 {
+    use RecordsStaffActivity;
+
     private static ?bool $available = null;
 
     public const SEGMENTS = ['B2B', 'B2C'];
@@ -48,5 +52,10 @@ class SalesOrderEntry extends Model
     public function lines(): HasMany
     {
         return $this->hasMany(SalesOrderLine::class, 'entry_id')->orderBy('id');
+    }
+
+    public function recordStaffActivity(StaffActivityRecorder $recorder): void
+    {
+        $recorder->fromSalesOrderEntry($this);
     }
 }

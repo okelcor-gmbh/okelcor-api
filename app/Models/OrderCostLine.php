@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\RecordsStaffActivity;
+use App\Services\StaffActivityRecorder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -12,6 +14,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class OrderCostLine extends Model
 {
+    use RecordsStaffActivity;
+
     public const KIND_SUPPLIER_INVOICE = 'supplier_invoice';
     public const KIND_FEE              = 'fee';
 
@@ -69,5 +73,10 @@ class OrderCostLine extends Model
     public function hasFile(): bool
     {
         return $this->getRawOriginal('file_path') !== null;
+    }
+
+    public function recordStaffActivity(StaffActivityRecorder $recorder): void
+    {
+        $recorder->fromOrderCostLine($this);
     }
 }

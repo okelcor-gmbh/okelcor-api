@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\RecordsStaffActivity;
+use App\Services\StaffActivityRecorder;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -11,6 +13,8 @@ use Illuminate\Database\Eloquent\Model;
  */
 class FinanceSnapshotItem extends Model
 {
+    use RecordsStaffActivity;
+
     /** The six pipeline boxes, exactly as finance named them. */
     public const CATEGORIES = [
         'OPEN PROPOSALS',
@@ -55,5 +59,10 @@ class FinanceSnapshotItem extends Model
     public function assignee()
     {
         return $this->belongsTo(AdminUser::class, 'assigned_admin_id');
+    }
+
+    public function recordStaffActivity(StaffActivityRecorder $recorder): void
+    {
+        $recorder->fromFinanceSnapshotItem($this);
     }
 }

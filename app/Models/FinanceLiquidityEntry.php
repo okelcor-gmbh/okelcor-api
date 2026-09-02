@@ -2,7 +2,10 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\RecordsStaffActivity;
+use App\Services\StaffActivityRecorder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * One breakdown line inside the "Finance Liquidity Working" table — a rent
@@ -11,6 +14,8 @@ use Illuminate\Database\Eloquent\Model;
  */
 class FinanceLiquidityEntry extends Model
 {
+    use RecordsStaffActivity;
+
     /**
      * The fixed liquidity lines, in the row order of finance's "Liquidity
      * File V1" summary grid. Keys are stable (his JSON backups and the
@@ -71,9 +76,37 @@ class FinanceLiquidityEntry extends Model
         'amount',
         'currency',
         'comment',
+        'created_by',
+        'updated_by',
     ];
 
     protected $casts = [
         'amount' => 'float',
     ];
+
+    public function recordStaffActivity(StaffActivityRecorder $recorder): void
+    {
+        $recorder->fromLiquidityEntry($this);
+    }
+
+    private static ?bool $attribution = null;
+
+    /**
+     * Whether this table can name a person yet.
+     *
+     * The column arrives one migration after the code that writes it, and a
+     * liquidity line must still save without it — the file is finance's live
+     * working, and a reporting column must never be able to block it.
+     */
+    public static function supportsAttribution(): bool
+    {
+        return self::$attribution ??= Schema::hasTable('finance_liquidity_entries')
+            && Schema::hasColumn('finance_liquidity_entries', 'created_by');
+    }
+
+    /** Test seam. */
+    public static function forgetAttributionCheck(): void
+    {
+        self::$attribution = null;
+    }
 }

@@ -7,13 +7,22 @@ use App\Models\AdminUser;
 use App\Models\BulkEmailCampaign;
 use App\Models\CustomerCommunication;
 use App\Models\EbayListingLog;
+use App\Models\EcInvoiceGroup;
+use App\Models\EcInvoiceLine;
+use App\Models\EcInvoicePeriod;
 use App\Models\FinanceInvoice;
+use App\Models\FinanceLiquidityEntry;
+use App\Models\FinanceSnapshotItem;
+use App\Models\LiquidityWeek;
 use App\Models\Media;
 use App\Models\Order;
+use App\Models\OrderCostLine;
 use App\Models\OrderLog;
 use App\Models\OrderSignoff;
 use App\Models\PartnerSaleAudit;
+use App\Models\SalesOrderEntry;
 use App\Models\StaffActivity;
+use App\Models\Todo;
 use App\Models\TradeDocument;
 use Illuminate\Support\Facades\Log;
 
@@ -271,6 +280,237 @@ class StaffActivityRecorder
         ], $audit->actor_id, $audit->actor_label);
     }
 
+
+    // -------------------------------------------------------------------------
+    // Finance's own working (Session 111)
+    //
+    // The ledger was built from the ORDER trail, and finance does most of its
+    // work beside it — the snapshot board, the EC/ZM portal, the weekly
+    // liquidity file, per-order cost lines. The result was a finance team with
+    // a literally empty record: 0 rows each for both finance accounts while
+    // 293 snapshot items and a whole ZM filing sat in their tables.
+    // -------------------------------------------------------------------------
+
+    /**
+     * A record on the finance snapshot board — a payment to chase, a receipt
+     * to collect. This is finance's daily working surface and the single
+     * largest body of uncredited work found.
+     */
+    public function fromFinanceSnapshotItem(FinanceSnapshotItem $item): ?StaffActivity
+    {
+        return $this->write([
+            'category'      => 'finance',
+            'action'        => 'finance_snapshot_item_raised',
+            'subject_type'  => 'finance_snapshot_item',
+            'subject_id'    => $item->id,
+            'subject_label' => trim((string) ($item->client ?: $item->ref ?: $item->category))
+                ?: ('Snapshot item #' . $item->id),
+            'source_type'   => 'finance_snapshot_item',
+            'source_id'     => $item->id,
+            'occurred_at'   => $item->created_at ?? now(),
+            'metadata'      => array_filter([
+                'category' => $item->category,
+                'status'   => $item->status,
+                'amount'   => $item->amount === null ? null : (string) $item->amount,
+            ], fn ($v) => $v !== null && $v !== ''),
+        ], $item->created_by);
+    }
+
+    /** A country/VAT group opened on the EC Invoice List. */
+    public function fromEcInvoiceGroup(EcInvoiceGroup $group): ?StaffActivity
+    {
+        return $this->write([
+            'category'      => 'finance',
+            'action'        => 'ec_invoice_group_opened',
+            'subject_type'  => 'ec_invoice_group',
+            'subject_id'    => $group->id,
+            'subject_label' => trim(($group->country_code ?? '') . ' ' . ($group->customer_vat_id ?? ''))
+                ?: ('EC group #' . $group->id),
+            'source_type'   => 'ec_invoice_group',
+            'source_id'     => $group->id,
+            'occurred_at'   => $group->created_at ?? now(),
+            'metadata'      => array_filter([
+                'period'           => $group->period,
+                'transaction_type' => $group->transaction_type,
+            ]),
+        ], $group->created_by);
+    }
+
+    /** One invoice logged onto a ZM group. */
+    public function fromEcInvoiceLine(EcInvoiceLine $line): ?StaffActivity
+    {
+        return $this->write([
+            'category'      => 'finance',
+            'action'        => 'ec_invoice_line_logged',
+            'subject_type'  => 'ec_invoice_line',
+            'subject_id'    => $line->id,
+            'subject_label' => $line->invoice_number ?: ('EC line #' . $line->id),
+            'source_type'   => 'ec_invoice_line',
+            'source_id'     => $line->id,
+            'occurred_at'   => $line->created_at ?? now(),
+            'metadata'      => array_filter([
+                'amount' => $line->amount === null ? null : (string) $line->amount,
+            ]),
+        ], $line->created_by);
+    }
+
+    /**
+     * A ZM period moved on — the § 18a filing itself.
+     *
+     * Attributed to `updated_by` and stamped at `updated_at`, because the work
+     * being recorded is the submission, not the row first appearing.
+     */
+    public function fromEcInvoicePeriod(EcInvoicePeriod $period): ?StaffActivity
+    {
+        return $this->write([
+            'category'      => 'finance',
+            'action'        => 'ec_period_' . ($period->status ?: 'updated'),
+            'subject_type'  => 'ec_invoice_period',
+            'subject_id'    => $period->id,
+            'subject_label' => 'ZM ' . ($period->period ?: ('#' . $period->id)),
+            'source_type'   => 'ec_invoice_period',
+            'source_id'     => $period->id,
+            'occurred_at'   => $period->submitted_at ?? $period->updated_at ?? now(),
+            'metadata'      => array_filter(['status' => $period->status]),
+        ], $period->updated_by);
+    }
+
+    /** A week opened or closed on the liquidity board. */
+    public function fromLiquidityWeek(LiquidityWeek $week): ?StaffActivity
+    {
+        return $this->write([
+            'category'      => 'finance',
+            'action'        => 'liquidity_week_updated',
+            'subject_type'  => 'liquidity_week',
+            'subject_id'    => $week->id,
+            'subject_label' => (string) ($week->week_key ?? ('Week #' . $week->id)),
+            'source_type'   => 'liquidity_week',
+            'source_id'     => $week->id,
+            'occurred_at'   => $week->updated_at ?? now(),
+            'metadata'      => [],
+        ], $week->updated_by);
+    }
+
+    /**
+     * A line on the weekly liquidity file.
+     *
+     * `created_by` arrives in the same session that wires this up — the table
+     * shipped without any attribution at all, so its 66 existing rows can
+     * never be credited to anyone. Guarded so the column can lag the code.
+     */
+    public function fromLiquidityEntry(FinanceLiquidityEntry $entry): ?StaffActivity
+    {
+        if (! FinanceLiquidityEntry::supportsAttribution()) {
+            return null;
+        }
+
+        return $this->write([
+            'category'      => 'finance',
+            'action'        => 'liquidity_entry_recorded',
+            'subject_type'  => 'finance_liquidity_entry',
+            'subject_id'    => $entry->id,
+            'subject_label' => trim((string) ($entry->description ?: $entry->supplier ?: $entry->line))
+                ?: ('Liquidity entry #' . $entry->id),
+            'source_type'   => 'finance_liquidity_entry',
+            'source_id'     => $entry->id,
+            'occurred_at'   => $entry->created_at ?? now(),
+            'metadata'      => array_filter([
+                'line'     => $entry->line,
+                'week_key' => $entry->week_key,
+            ]),
+        ], $entry->created_by);
+    }
+
+    /** A cost booked against an order, for the profitability figure. */
+    public function fromOrderCostLine(OrderCostLine $line): ?StaffActivity
+    {
+        return $this->write([
+            'category'      => 'finance',
+            'action'        => 'order_cost_recorded',
+            'subject_type'  => 'order_cost_line',
+            'subject_id'    => $line->id,
+            'subject_label' => trim((string) ($line->order_ref ?: $line->supplier ?: $line->category))
+                ?: ('Cost line #' . $line->id),
+            'source_type'   => 'order_cost_line',
+            'source_id'     => $line->id,
+            'occurred_at'   => $line->created_at ?? now(),
+            'metadata'      => array_filter([
+                'kind'     => $line->kind,
+                'category' => $line->category,
+            ]),
+        ], $line->entered_by);
+    }
+
+    /** A deal logged on the Sales & Order Management board. */
+    public function fromSalesOrderEntry(SalesOrderEntry $entry): ?StaffActivity
+    {
+        return $this->write([
+            'category'      => 'sales',
+            'action'        => 'sales_order_logged',
+            'subject_type'  => 'sales_order_entry',
+            'subject_id'    => $entry->id,
+            'subject_label' => trim((string) ($entry->order_no ?: $entry->customer_name))
+                ?: ('Sales entry #' . $entry->id),
+            'source_type'   => 'sales_order_entry',
+            'source_id'     => $entry->id,
+            'occurred_at'   => $entry->created_at ?? now(),
+            'metadata'      => array_filter([
+                'segment' => $entry->segment,
+                'period'  => $entry->period,
+            ]),
+        ], $entry->created_by);
+    }
+
+    /**
+     * A shared to-do that somebody FINISHED.
+     *
+     * Completion, not creation, and this is the whole point. Raising a to-do
+     * asks for work; finishing one is the work. Crediting creation would also
+     * have made the report actively wrong: one finance user raised 91 to-dos
+     * in two hours, nearly all of them accidental duplicates of a single
+     * request, and every one would have counted as a contribution.
+     *
+     * Categorised by the department that RAISED it, so finishing finance's
+     * errand reads as finance work wherever the assignee happens to sit.
+     */
+    public function fromTodo(Todo $todo): ?StaffActivity
+    {
+        if ($todo->status !== 'done' || $todo->completed_by === null) {
+            return null;
+        }
+
+        return $this->write([
+            'category'      => self::DEPARTMENT_CATEGORIES[$todo->department()] ?? 'orders',
+            'action'        => 'todo_completed',
+            'subject_type'  => 'todo',
+            'subject_id'    => $todo->id,
+            'subject_label' => $todo->title,
+            'source_type'   => 'todo',
+            'source_id'     => $todo->id,
+            'occurred_at'   => $todo->completed_at ?? $todo->updated_at ?? now(),
+            'metadata'      => array_filter([
+                'raised_by_department' => $todo->department(),
+            ]),
+        ], $todo->completed_by);
+    }
+
+    /**
+     * Which ledger category a department's work belongs to.
+     *
+     * The two vocabularies were built for different jobs — departments name
+     * who people are, categories name what the work is — so the mapping is
+     * explicit rather than assumed to line up.
+     */
+    private const DEPARTMENT_CATEGORIES = [
+        'Finance'    => 'finance',
+        'Sales'      => 'sales',
+        'Marketing'  => 'marketing',
+        'Operations' => 'orders',
+        'Support'    => 'support',
+        'Content'    => 'marketing',
+        'Management' => 'orders',
+        'General'    => 'orders',
+    ];
 
     /**
      * Security-event types that are somebody doing administrative work.

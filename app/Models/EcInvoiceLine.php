@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\RecordsStaffActivity;
+use App\Services\StaffActivityRecorder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -12,6 +14,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class EcInvoiceLine extends Model
 {
+    use RecordsStaffActivity;
+
     public const STATUS_COMPLETE    = 'complete';
     public const STATUS_PENDING_DOC = 'pending_doc';
     public const STATUS_REVIEW      = 'review';
@@ -81,5 +85,10 @@ class EcInvoiceLine extends Model
     public function hasProofFile(): bool
     {
         return $this->getRawOriginal('proof_path') !== null;
+    }
+
+    public function recordStaffActivity(StaffActivityRecorder $recorder): void
+    {
+        $recorder->fromEcInvoiceLine($this);
     }
 }
