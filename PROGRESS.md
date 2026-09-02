@@ -1,6 +1,73 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-09-01 | Branch: `main` | **Production is at `92681cd` — sessions 86–110 (weekly liquidity with closed weeks + moves + CSV downloads, EC exports, the tagged-task fix, and the to-do list that could finally be opened, stamped with the department that raised it, and moved by that department), migrations #1–61 applied, every deploy verified from outside the same day**
+Last updated: 2026-09-02 | Branch: `main` | **Production is at `6206e93` — sessions 86–110 (weekly liquidity with closed weeks + moves + CSV downloads, EC exports, the tagged-task fix, and the to-do list that could finally be opened, stamped with the department that raised it, and moved by that department), migrations #1–62 applied, every deploy verified from outside the same day**
+
+---
+
+## 📒 Finance's work reaches the ledger (Session 111)
+
+> **Deploy status:** ✅ **deployed 2026-09-02** as `6206e93`.
+> `backup:okelcor` taken first (`okelcor-backup-2026-09-02-0812.zip`, 7.36 MB),
+> `migrate --pretend --force` reviewed (one migration, nothing else),
+> **#62 applied (36.32ms)**, all five cache commands exit 0.
+> `staff:backfill-ledger` surveyed, read, then `--fix` — **ledger 822 → 1122
+> rows**.
+
+Reported: "I can see finance working but nothing is recorded for them" — and
+the monthly report goes to Solomon. Production confirmed it exactly:
+**Joseph Rwabu 0 ledger rows, Daniel Tuke 0**, while 293 finance snapshot
+items, a ZM filing and 66 liquidity lines sat in their tables. The digest
+fired on 2026-09-01 at 07:00 to solomon@ and victor@ saying finance had done
+nothing.
+
+**Not a recording bug — a coverage gap.** The ledger was built from the ORDER
+trail (order logs, trade documents, sign-offs, invoices). Finance does most of
+its work beside that trail, and none of those tables were wired in.
+
+| Change | Status | Notes |
+|---|---|---|
+| Nine models joined the ledger | ✅ | Finance snapshot items, EC invoice groups/lines/periods, liquidity weeks and entries, order cost lines, the sales-order board, and completed to-dos. Each is one trait plus one method — the Session 89 design holds, there is no registration list to keep in step. |
+| **To-dos count on completion, never creation** | ✅ | Raising a to-do asks for work; finishing it is the work. This is also what keeps the report honest: one finance user raised **91 near-identical to-dos in two hours** because Session 108's panel bug made him think they had not saved. Crediting creation would have handed him 91 contributions for an accident and made the report *worse* than the silence it replaced. The backfill confirms it — `Completed to-dos read 91 → ledger rows 0`. |
+| **#62** `finance_liquidity_entries.created_by` / `updated_by` | ✅ | The table shipped in Session 99 and never recorded a person, which is why the one file finance touches weekly credited nobody. **The 66 existing rows are deliberately left null**: they arrived through `liquidity:import --fix --replace`, a command rather than a person, and crediting whoever ran it would hand one person a spreadsheet somebody else built. Rule 2 — no person, no row — applies to history as much as to new work. |
+| Backfill extended to match | ✅ | So history is credited rather than only new work. Idempotent on `(source_type, source_id, action)`, re-runnable, cannot double a month — proved by a test that saves one record three times. |
+| Backend tests (10 new) | ✅ | A new `FinanceContributionLedgerTest`: the snapshot/EC/liquidity sources crediting their author; the liquidity line still saving before its column exists; the to-do crediting the completer not the asker; **91 duplicates earning nobody anything**; and all four ledger rules re-proved on the new sources — no person no row, idempotency, and the ledger never failing the work it reports on. Full suite **805 passed**, up from 795. |
+
+### What the report says now, and what is still wrong with it
+
+`staff:digest --dry-run` over 2026-08-04 → 09-02, verified on production:
+
+| Person | Recorded | Was |
+|---|---|---|
+| Ayodele John | 369 | 565 total, mostly dev |
+| Edinah | 55 | 152 total |
+| **Joseph Rwabu** | **16** | **0** |
+| Yelzaveta | 44 | 77 total |
+| Victor | 23 | 25 total |
+| **Daniel Tuke** | **0** | 0 |
+| Solomon Okelo | 0 | 0 |
+| chama@okelcor.com | 0 | 0 |
+
+**Two findings the fix did not create and cannot fix:**
+
+1. **290 of the 293 finance snapshot records were entered under Ayodele John's
+   account** (`john@vitorra.org`, super_admin), not Joseph's — only 16 are
+   Joseph's. So the board *is* finance's work, but the system says a
+   super_admin did most of it. Either accounts are being shared or Ayodele did
+   the data entry; that is a question for a person, not a schema change.
+2. **Five of the ten accounts still show `(from role)` job titles** — Ayodele,
+   chama@, Daniel, Joseph and Fabi are absent from `config/staff.php`'s
+   `job_titles` map, so they fall back to a tidied role. **The report groups by
+   job title**, so this is a live accuracy problem — and inventing titles for
+   real people is not something to guess at. Fix per person with
+   `staff:sync-job-titles --set="joseph.rwabu@vitorra.org=Head of Finance"`,
+   or add them to the config map.
+
+Daniel Tuke's 0 is honest — he has no attributable work in any table yet.
+Solomon's 0 is expected; he receives the report.
+
+**Next digest: 2026-10-01 07:00.** The 2026-09-01 one has already gone out
+with finance at zero and was not re-sent — that is an outward-facing e-mail to
+the boss and is the user's call, not a deploy step.
 
 ---
 
@@ -3808,6 +3875,8 @@ touching order 10112 or the two lump-sum orders.
 
 60. `2026_09_01_000001_add_assignee_note_to_todos_table` (Session 108 — adds `todos.assignee_note`, nullable TEXT. Additive and guarded on both `Schema::hasTable` and `Schema::hasColumn`, so a re-run is a no-op; nothing existing is read, altered or backfilled. **Deploy-order safe in both directions, proved rather than assumed**: `Todo::supportsAssigneeNote()` gates every read and write, readers get null and `AdminTodoController::update()` drops the field rather than failing the whole update — the status is the load-bearing half and must still land. Exercised against real SQL by `TeamTodoListTest`, which runs the migration file itself, re-runs it, and separately drops the column to prove the code survives without it.)
 61. `2026_09_01_000002_add_created_by_role_to_todos_table` (Session 109 — adds `todos.created_by_role` VARCHAR(30) + an index, and backfills it from each creator's current role. Additive, nullable, guarded on `hasTable`/`hasColumn`. **The backfill is re-runnable and cannot overwrite an existing stamp**: it writes only where the column is still null and a creator resolves, so a second run after somebody has changed role leaves the frozen value alone — asserted by `test_the_backfill_stamps_existing_rows_and_is_re_runnable`. Written in PHP with `chunkById` rather than a JOIN UPDATE so it runs identically on MySQL and on the sqlite harness. `down()` drops the index before the column, which sqlite requires. Deploy-order safe via `Todo::supportsSource()`: creating a to-do still works without the column, it just carries no badge.)
+62. `2026_09_02_000001_add_created_by_to_finance_liquidity_entries` (Session 111 — adds `created_by` + an index and `updated_by` to `finance_liquidity_entries`, which shipped in Session 99 with no attribution at all. Additive, nullable, guarded on `hasTable`/`hasColumn`, **no backfill by design**: the 66 existing rows came from `liquidity:import`, a command rather than a person, and inventing an author would be worse than an honestly empty past. Deploy-order safe via `FinanceLiquidityEntry::supportsAttribution()` — a liquidity line still saves without the column, because the file is finance's live working and a reporting column must never block it.)
+
 
 
 **#33–36 are pushed but NOT applied to production.** All four are additive or
