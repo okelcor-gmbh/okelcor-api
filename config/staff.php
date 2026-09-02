@@ -26,11 +26,21 @@ return [
     |
     */
     'job_titles' => [
-        'leojohnseyi@gmail.com'  => 'System Administrator',
-        'solomon@okelcor.com'    => 'Managing Director',
-        'edinah@okelcor.com'     => 'Order Manager',
-        'yelzaveta@okelcor.com'  => 'Order Manager',
-        'victor@okelcor.com'     => 'Operations Manager',
+        'leojohnseyi@gmail.com'       => 'System Administrator',
+        'solomon@okelcor.com'         => 'Managing Director',
+        'edinah@okelcor.com'          => 'Order Manager',
+        'yelzaveta@okelcor.com'       => 'Order Manager',
+        'victor@okelcor.com'          => 'Operations Manager',
+
+        // Added 2026-09-02, given by the business. Until now these five fell
+        // back to a tidied role, and the monthly digest GROUPS BY JOB TITLE —
+        // so half the team was grouped by what they may open rather than by
+        // what they do.
+        'john@vitorra.org'            => 'Super Admin',
+        'chama@okelcor.com'           => 'Orders & Logistics',
+        'daniel@vitorra.org'          => 'Finance',
+        'joseph.rwabu@vitorra.org'    => 'Finance',
+        'fabi@okelcor.com'            => 'Marketing',
     ],
 
     /*
