@@ -1,6 +1,47 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-09-02 | Branch: `main` | **Production is at `6206e93` — sessions 86–110 (weekly liquidity with closed weeks + moves + CSV downloads, EC exports, the tagged-task fix, and the to-do list that could finally be opened, stamped with the department that raised it, and moved by that department), migrations #1–62 applied, every deploy verified from outside the same day**
+Last updated: 2026-09-02 | Branch: `main` | **Production is at `66fbeee` — sessions 86–110 (weekly liquidity with closed weeks + moves + CSV downloads, EC exports, the tagged-task fix, and the to-do list that could finally be opened, stamped with the department that raised it, and moved by that department), migrations #1–63 applied, every deploy verified from outside the same day**
+
+---
+
+## 🏷️ What an FET unit costs us (Session 112)
+
+> **Deploy status:** ✅ **backend deployed 2026-09-03** as `66fbeee`; **#63
+> applied (20.20ms)**, caches rebuilt, all exit 0. Verified from outside on the
+> live public endpoint: every row carries `fet_tier` and `price`, and the
+> strings `cost_price`, `250.00`, `450.00`, `750.00`, `1450.00` appear
+> **nowhere** in the body. Admin prices endpoint 401.
+> **⚠️ The frontend commit `27130b5` did NOT deploy** — Vercel returned
+> `failure` pointing at *why-is-my-account-deployment-blocked*, an
+> account-level block, not a build error (`npm run build` is clean locally).
+> The site is unaffected and still serves `c16da05`. Nothing is missing on
+> screen, because the price column hides itself while no tier is priced.
+
+Finance supplied a supplier price list as an image — PRO FI 250, FII 450,
+FIII 750, FIV 1,450 EUR — and asked for it to drive FET prices on the site.
+
+**Two things had to be established before writing anything.** There was no FET
+price anywhere in the system: `/fet` is a lookup that says which model fits an
+engine, it has never shown a figure, and no FET product exists in the
+catalogue — so this was an addition, not a change. And the list is what we
+**pay**; putting it on the site as the selling price would have sold every
+unit at zero margin. Finance confirmed it is cost and that **no retail price
+exists yet**, so `price` is seeded null and the site shows nothing.
+
+| Change | Status | Notes |
+|---|---|---|
+| **#63** `fet_prices` — four rows, one per tier | ✅ | **Price belongs to the tier, not the engine.** Production holds 26 engines across seven `fet_model` strings because the SAE size is baked into the string; a price per engine would store the same four numbers 26 times and make a change a 26-row edit. `insertOrIgnore` on a unique `tier`, so a re-run can never overwrite a price finance has since set. |
+| **Cost cannot reach the public endpoint** | ✅ | `GET /api/v1/fet/engines` is unauthenticated **and** returns Eloquent models wholesale — a cost column on `fet_engines` would have published our supplier prices to the open internet on the next deploy. Separate table, `$hidden` on the model, and the public path has only `publicMap()`, which returns price and currency. The test asserts `450.00` appears nowhere in the response body rather than checking a field, because the risk is a column arriving through a future `toArray()`. |
+| Tier resolver, longest match first | ✅ | Matching `I` before `III` would file every tier as PRO FI and **sell a 1,450 unit at 250** — its own test. |
+| `fet.pricing` — a new key | ✅ | `['super_admin','admin','finance']`. The FET engine routes sit under `products.edit`, which editors, content managers and marketing hold and **finance does not** — putting the price list there would have locked finance out of the one number that is theirs, the same fault reported twice this week. A test asserts an `editor` gets 403. |
+| Below-cost warns, does not refuse | ✅ | A loss-leader is finance's call; discovering it at month end is not. |
+| The price column hides itself | 🔧 | Renders only when a tier has a price. A full column of dashes on a live public page reads as broken rather than as "not priced yet". Pending the Vercel block. |
+| Backend tests (10 new) | ✅ | All seven real `fet_model` strings resolving; the longest-match trap; the public body carrying no cost; an unpriced tier showing nothing; the seed; the migration not overwriting finance's edit; finance able to set and an editor refused; the below-cost warning; and the lookup surviving the code arriving before the table. Full suite **815 passed**, up from 805. |
+
+**Outstanding, and not ours to invent:** the retail prices. Finance has
+confirmed FET has none yet. Until somebody sets one, `/fet` shows no price at
+all — correct behaviour, not a gap. There is no admin screen for this either;
+`PUT /api/v1/admin/fet/prices` is the only way in.
 
 ---
 
