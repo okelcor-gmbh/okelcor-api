@@ -95,6 +95,7 @@ use App\Http\Controllers\Admin\SecurityController;
 use App\Http\Controllers\FetEngineController;
 use App\Http\Controllers\PromotionController;
 use App\Http\Controllers\Admin\AdminFetEngineController;
+use App\Http\Controllers\Admin\AdminFetPriceController;
 use App\Http\Controllers\Admin\AdminPromotionController;
 use App\Http\Controllers\Admin\AdminDashboardController;
 use App\Http\Controllers\Admin\AdminInsightController;
@@ -505,6 +506,12 @@ Route::prefix('v1')->group(function () {
         });
 
         // Content CRUD — products.edit
+        // FET pricing — finance's number, finance's key.
+        Route::middleware('permission:fet.pricing')->group(function () {
+            Route::get('fet/prices', [AdminFetPriceController::class, 'index']);
+            Route::put('fet/prices', [AdminFetPriceController::class, 'update']);
+        });
+
         Route::middleware('permission:products.edit')->group(function () {
             // Products
             Route::post('products/bulk-stock', [AdminProductController::class, 'bulkStock']);
@@ -566,7 +573,9 @@ Route::prefix('v1')->group(function () {
             Route::get('settings', [AdminSettingController::class, 'index']);
             Route::put('settings', [AdminSettingController::class, 'update']);
 
-            // FET engine compatibility
+            // FET engine compatibility. NOTE: the PRICES are not here —
+            // they sit under permission:fet.pricing below, because finance
+            // does not hold products.edit.
             Route::get('fet/engines', [AdminFetEngineController::class, 'index']);
             Route::post('fet/engines', [AdminFetEngineController::class, 'store']);
             Route::put('fet/engines/{id}', [AdminFetEngineController::class, 'update']);

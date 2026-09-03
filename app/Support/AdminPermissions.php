@@ -120,6 +120,11 @@ class AdminPermissions
         'products.view'           => ['super_admin', 'admin', 'editor', 'content_manager', 'sales_manager', 'viewer', 'marketing'],
         'products.edit'           => ['super_admin', 'admin', 'editor', 'content_manager', 'marketing'],
         'products.import'         => ['super_admin', 'admin'],
+        // FET pricing is finance's number, and finance holds none of the
+        // products.* keys. Its own key rather than a widening of
+        // products.edit, which editors and marketing hold and which has no
+        // business setting what a unit sells for.
+        'fet.pricing'             => ['super_admin', 'admin', 'finance'],
         'products.delete_all'     => ['super_admin', 'admin'],
 
         // ── Media ─────────────────────────────────────────────────────────

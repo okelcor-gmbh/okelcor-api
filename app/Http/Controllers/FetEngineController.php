@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\FetEngine;
+use App\Models\FetPrice;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -32,8 +33,24 @@ class FetEngineController extends Controller
             ->orderBy('manufacturer')
             ->paginate($perPage);
 
+        // Retail price per tier. `publicMap()` returns price and currency
+        // ONLY — our supplier cost lives in the same table and must never
+        // reach this route, which is unauthenticated.
+        $prices = FetPrice::publicMap();
+
+        $items = array_map(function (FetEngine $engine) use ($prices) {
+            $tier = FetPrice::tierFor($engine->fet_model);
+            $row  = $engine->toArray();
+
+            $row['fet_tier'] = $tier;
+            $row['price']    = $tier === null ? null : ($prices[$tier]['price'] ?? null);
+            $row['currency'] = $tier === null ? null : ($prices[$tier]['currency'] ?? 'EUR');
+
+            return $row;
+        }, $result->items());
+
         return response()->json([
-            'data' => $result->items(),
+            'data' => $items,
             'meta' => [
                 'total'        => $result->total(),
                 'current_page' => $result->currentPage(),
