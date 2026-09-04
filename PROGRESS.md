@@ -41,6 +41,29 @@ untouched.
 
 ---
 
+## 🧭 Session 115 (frontend): the chrome — navbar, menus, footer, auth
+
+> **Deploy status:** ✅ live on okelcor.com (`50648ff` four-page restyle +
+> navbar baseline, `ee201c9` search/menus/footer/auth), both verified on the
+> live site. The Vercel account block flapped a third time between the two
+> pushes and lifted again on its own — the usage-limit conversation with
+> Vercel remains open.
+
+**The two search icons were a bug**: the icon-only trigger's `xl:hidden`
+lost the cascade to the unlayered `.tesla-icon-btn` display rule (Tailwind
+v4 layers), so the pill and its replacement both rendered. Now one bordered
+search field at every desktop width with a working keyboard hint (/ or
+Ctrl+K). Nav active state is a 2px brand baseline instead of a grey pill.
+Language menu drops emoji flags (bare letter pairs on Windows); FET menu
+loses its last green; shop menu stops counting brands it cannot count.
+Footer became the distributor's ink block with address/phone/e-mail/hours
+and the REX number. Login/register kept their split layout, took the system
+radii. The shared CTA section lost the stagger that left it half faded on
+About. About/News/Contact/Quote had already taken bordered-panel surfaces
+in the same batch, animations stripped with layout wrappers preserved.
+
+---
+
 ## 🧾 Session 114 (frontend): the product page's arithmetic, and FET rebuilt on its evidence
 
 > **Deploy status:** ✅ all live on okelcor.com (`05eeb1f` inner pages →
