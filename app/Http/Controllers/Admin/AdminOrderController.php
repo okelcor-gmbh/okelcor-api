@@ -353,6 +353,7 @@ class AdminOrderController extends Controller
         $this->logStatusChange($request, $order, $previousStatus);
         $this->logTrackingChange($request, $order);
         $this->notifyShipmentStatus($order, $previousStatus);
+        $this->sendReviewInviteOnDelivery($order, $previousStatus);
 
         return response()->json([
             'data'    => $this->formatOrderDetail($order, $request->user()),
@@ -427,6 +428,7 @@ class AdminOrderController extends Controller
         $this->logStatusChange($request, $order, $previousStatus);
         $this->logTrackingChange($request, $order);
         $this->notifyShipmentStatus($order, $previousStatus);
+        $this->sendReviewInviteOnDelivery($order, $previousStatus);
 
         return response()->json([
             'data'    => [
@@ -1048,5 +1050,48 @@ class AdminOrderController extends Controller
                 ])->values()
                 : [],
         ];
+    }
+
+    /**
+     * One review invite, on the transition into delivered, once per order
+     * ever (Session 118).
+     *
+     * Silent until the business sets REVIEW_INVITE_URL — the review profile
+     * has to exist before we point customers at it. Never fails the status
+     * change: a delivered order stays delivered whether or not the invite
+     * could be written or sent, and the column guard also covers production
+     * running ahead of migration #65.
+     */
+    private function sendReviewInviteOnDelivery(Order $order, ?string $previousStatus): void
+    {
+        try {
+            if ($order->status !== 'delivered' || $previousStatus === 'delivered') {
+                return;
+            }
+            if (! config('reviews.enabled') || ! config('reviews.url')) {
+                return;
+            }
+            if (! \Illuminate\Support\Facades\Schema::hasColumn('orders', 'review_invite_sent_at')) {
+                return;
+            }
+            if ($order->review_invite_sent_at !== null) {
+                return;
+            }
+
+            $email = $order->customer_email;
+            if (! $email) {
+                return;
+            }
+
+            \Illuminate\Support\Facades\Mail::to($email)
+                ->send(new \App\Mail\ReviewInviteEmail($order, config('reviews.url')));
+
+            $order->forceFill(['review_invite_sent_at' => now()])->save();
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Review invite failed', [
+                'order' => $order->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 }
