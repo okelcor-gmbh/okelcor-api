@@ -41,6 +41,35 @@ untouched.
 
 ---
 
+## 📮 Session 118: the review programme, and the article writer grows up
+
+> **Deploy status:** ✅ backend live as `6dba8e3` (**#65 applied**, backup
+> first; 832 passed). Frontend batches (article link styling, image
+> align/resize/remove controls) queued behind the **sixth** Vercel
+> account-block flap alongside five earlier batches.
+
+**Review invites** — when an order transitions into `delivered`, the
+customer gets one e-mail with the public review link. Blank
+`REVIEW_INVITE_URL` = off (the Gemini-key contract): the business creates
+the Trustpilot/Google profile, pastes the link into `.env`, and the machine
+starts building the review count that Blackcircles-style trust bars are
+made of. `orders.review_invite_sent_at` (#65) makes it once per order ever
+— delivered→shipped→delivered does not e-mail twice. Both admin
+status-change paths hooked; the invite can never fail the status change;
+an unhappy reply routes to a person instead of into the public review.
+
+**Article writer** — internal links orange + bold automatically
+(stylesheet, not editor discipline); the sanitizer now admits class and a
+proper visual-formatting CSS allowlist (position/background-image/script
+vectors still die — 3 new unit tests pin it, incl. purifier's colour
+normalisation and its core schema predating border-radius); and images in
+the editor gained a contextual toolbar: float left/right with wrap,
+centre, 25/50/75% widths, remove — carried as classes because the
+sanitizer passes class through whole, styled identically in the editor,
+preview and public body.
+
+---
+
 ## 🛠️ Session 117: audience at scale, and the five-day 403 storm closed
 
 > **Deploy status:** ✅ backend live as `1ccc5c8` (no migration; route:cache
