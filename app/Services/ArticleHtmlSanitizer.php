@@ -34,26 +34,31 @@ class ArticleHtmlSanitizer
 
         // ── Custom definition ID (required to use maybeGetRawHTMLDefinition) ──
         $config->set('HTML.DefinitionID',  'okelcor-tiptap');
-        $config->set('HTML.DefinitionRev', 2);
+        $config->set('HTML.DefinitionRev', 3);
 
         // ── Allowed elements ──────────────────────────────────────────────────
         // ALL config directives must be set BEFORE maybeGetRawHTMLDefinition()
         // because that call finalizes the config internally.
         // HTML5 elements (mark, figure, figcaption) are registered via addElement
         // below — they must still appear here so the filter passes them through.
+        // class|style on the content elements (Session 118): the editor asked
+        // to style inline without a developer. Everything still passes THROUGH
+        // the purifier — a class is inert text, and a style survives only if
+        // every declaration is on the CSS allowlist below, so this widens
+        // expression, not attack surface.
         $config->set('HTML.Allowed',
-            'h1,h2,h3,h4,h5,h6,' .
-            'p,br,hr,' .
-            'strong,em,u,s,code[class],mark,sub,sup,' .
+            'h1[class|style],h2[class|style],h3[class|style],h4[class|style],h5[class|style],h6[class|style],' .
+            'p[class|style],br,hr[class],' .
+            'strong[class|style],em[class|style],u,s,code[class],mark[class|style],sub,sup,' .
             'pre[class],' .
-            'blockquote,q,' .
-            'ul,ol,li,' .
-            'table[class],thead,tbody,tfoot,tr,th[colspan|rowspan|style],td[colspan|rowspan|style],' .
-            'a[href|target|rel|title],' .
-            'img[src|alt|width|height|class|loading],' .
-            'div[class|data-type|data-cta-title|data-cta-text|data-cta-url|data-cta-label],' .
+            'blockquote[class|style],q,' .
+            'ul[class|style],ol[class|style],li[class|style],' .
+            'table[class|style],thead,tbody,tfoot,tr[class],th[colspan|rowspan|style|class],td[colspan|rowspan|style|class],' .
+            'a[href|target|rel|title|class|style],' .
+            'img[src|alt|width|height|class|loading|style],' .
+            'div[class|style|data-type|data-cta-title|data-cta-text|data-cta-url|data-cta-label],' .
             'span[class|style],' .
-            'figure[class],figcaption'
+            'figure[class|style],figcaption[class]'
         );
 
         // ── Allowed URL schemes ───────────────────────────────────────────────
@@ -64,7 +69,23 @@ class ArticleHtmlSanitizer
         $config->set('HTML.TargetNoopener', true);
 
         // ── Allowed CSS in style attributes ───────────────────────────────────
-        $config->set('CSS.AllowedProperties', ['text-align', 'vertical-align', 'width', 'min-width']);
+        // Visual formatting only. Deliberately absent: position (a fixed
+        // element could overlay the site chrome), z-index, and anything that
+        // loads a URL (background-image) — img[src] stays the one image path,
+        // still pinned to the app domain below.
+        $config->set('CSS.AllowedProperties', [
+            'text-align', 'vertical-align', 'width', 'min-width', 'max-width', 'height',
+            'color', 'background-color',
+            'font-size', 'font-weight', 'font-style', 'line-height', 'letter-spacing',
+            'text-decoration', 'text-transform',
+            'margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
+            'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
+            'border', 'border-top', 'border-right', 'border-bottom', 'border-left',
+            'border-color', 'border-width', 'border-style',
+            // border-radius and display are not in HTMLPurifier's core CSS
+            // schema and raise warnings; rounded corners come via class.
+            'float',
+        ]);
 
         // ── Image safety ──────────────────────────────────────────────────────
         // Restrict img[src] to the app domain. Editors must use the body-image
