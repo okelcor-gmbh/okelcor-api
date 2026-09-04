@@ -4,6 +4,43 @@ Last updated: 2026-09-02 | Branch: `main` | **Production is at `66fbeee` — ses
 
 ---
 
+## 🎨 The website a tyre trader would build (Session 113, frontend only)
+
+> **Deploy status:** ✅ all live on okelcor.com via Vercel (`7f4b05d` homepage
+> v2 → `1db0e1d` homepage v3 → `80b6f55` title separator → `0bb2f5d` shop),
+> each verified on the live site after deploy — the shop's list view was
+> exercised by actually clicking it on production. **No backend changes.**
+
+Prompted by a visitor calling the site AI built. Researched through the
+browser rather than from memory: Heuver, Oponeo, Blackcircles, ATD (the
+largest tyre distributor in the world) and Bohnenkamp; Tire Rack and TireHub
+geo-block Europe. Every working platform converges on the same shape — the
+hero is the finder, trust is checkable numbers, and the catalogue is dense.
+
+**Homepage:** fourteen sections, a scroll-progress bar, a flag marquee,
+floating mock-UI cards, a magnetic button and a delayed popup became nine
+blocks: utility bar (real phone/e-mail), a finder hero whose dropdowns are
+the live `/products/specs` facets, a trust strip, the four ranges as a
+static grid, a live in-stock product row with real prices and EU labels,
+the brand strip, the ATD-style trade-account funnel, one calm FET band, the
+latest CMS articles, and a closing quote CTA. The title tag "The Cheapest
+Tyres on the Internet" (which contradicted "premium" in its own meta
+description) became "Okelcor | Tyre Wholesale & Export, Munich" in four
+locales, and the navbar's hardcoded "11,650+ tyres in stock" became the
+real fetched count. Em dashes removed from visible copy by rewriting the
+sentences, at the user's request.
+
+**Shop:** browse mode (an empty shop reads as a broken shop — landing now
+shows all 15,265 in-stock products), sidebar filters that apply themselves
+debounced, grid/list view toggle (the list is Heuver's dense trade view,
+remembered per browser), the car finder folding to one line when a deep
+link arrives with filters, and a bug fixed on the way: **vehicle type was
+never filterable from the page** — the state existed, no control set it.
+All data logic (fetch, campaigns, specials, segment pricing, analytics)
+untouched.
+
+---
+
 ## 🏷️ What an FET unit costs us (Session 112)
 
 > **Deploy status:** ✅ **backend deployed 2026-09-03** as `66fbeee`; **#63
