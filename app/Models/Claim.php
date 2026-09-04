@@ -19,6 +19,8 @@ class Claim extends Model
 
     private static ?bool $available = null;
 
+    private static ?bool $supportsCustomerLink = null;
+
     public const TYPES = [
         'damage', 'wrong_item', 'shortage', 'quality', 'warranty', 'delivery', 'other',
     ];
@@ -61,6 +63,8 @@ class Claim extends Model
         'ref',
         'order_id',
         'order_number',
+        'customer_id',
+        'source',
         'customer_name',
         'customer_email',
         'customer_company',
@@ -87,9 +91,21 @@ class Claim extends Model
         return self::$available ??= Schema::hasTable('claims');
     }
 
+    /**
+     * The portal columns arrived after the table did (Session 120), so the
+     * feature can be live ahead of its migration. Portal endpoints answer
+     * "not available yet" and the admin queue keeps working unchanged.
+     */
+    public static function supportsCustomerLink(): bool
+    {
+        return self::$supportsCustomerLink ??= self::available()
+            && Schema::hasColumn('claims', 'customer_id');
+    }
+
     public static function forgetAvailableCheck(): void
     {
         self::$available = null;
+        self::$supportsCustomerLink = null;
     }
 
     protected static function booted(): void
@@ -122,6 +138,11 @@ class Claim extends Model
     public function order(): BelongsTo
     {
         return $this->belongsTo(Order::class);
+    }
+
+    public function customer(): BelongsTo
+    {
+        return $this->belongsTo(Customer::class);
     }
 
     public function recordStaffActivity(StaffActivityRecorder $recorder): void

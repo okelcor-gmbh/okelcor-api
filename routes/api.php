@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\CustomerAuthController;
+use App\Http\Controllers\CustomerClaimController;
 use App\Http\Controllers\CustomerAddressController;
 use App\Http\Controllers\CustomerOrderController;
 use App\Http\Controllers\CustomerSavedFitmentController;
@@ -199,6 +200,12 @@ Route::prefix('v1')->group(function () {
         Route::post('addresses', [CustomerAddressController::class, 'store']);
         Route::put('addresses/{id}', [CustomerAddressController::class, 'update']);
         Route::delete('addresses/{id}', [CustomerAddressController::class, 'destroy']);
+
+        // After-sales claims — the customer's half of the claims loop
+        // (Session 120). Filing lands in the admin queue marked 'portal';
+        // the list shows only claims carrying this account's customer_id.
+        Route::get('claims', [CustomerClaimController::class, 'index']);
+        Route::post('claims', [CustomerClaimController::class, 'store'])->middleware('throttle:10,60');
 
         // Saved fitments ("My Garage") — reusable saved size/brand profiles
         Route::get('customer/saved-fitments', [CustomerSavedFitmentController::class, 'index']);

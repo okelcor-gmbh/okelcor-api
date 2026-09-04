@@ -39,6 +39,8 @@ class CustomerNotifier
         'payment_milestone'    => 'orders',
         'order_shipped'        => 'orders',
         'order_delivered'      => 'orders',
+        'claim_received'       => 'orders',
+        'claim_update'         => 'orders',
         'document_ready'       => 'documents',
         'quote_received'       => 'quotes',
         'quote_ready'          => 'quotes',

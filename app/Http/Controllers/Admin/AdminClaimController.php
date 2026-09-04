@@ -200,6 +200,7 @@ class AdminClaimController extends Controller
         }
 
         $this->notifyCreatorOfStatusChange($claim, $previousStatus, $user);
+        self::notifyCustomerOfStatusChange($claim, $previousStatus);
 
         return response()->json([
             'data' => $this->format($claim->fresh([
@@ -314,6 +315,59 @@ class AdminClaimController extends Controller
         }
     }
 
+    /**
+     * The other side of the loop (Session 120): a claim filed from the
+     * portal carries the account behind it, and a status change reaches
+     * that account through the same in-app inbox its order updates use —
+     * in plain words, with the outcome note where there is one. Staff-
+     * logged e-mail claims have no customer_id and are skipped: their
+     * customer is answered on the e-mail thread, by a person.
+     */
+    public static function notifyCustomerOfStatusChange(Claim $claim, string $previousStatus): void
+    {
+        if ($claim->status === $previousStatus
+            || ! Claim::supportsCustomerLink()
+            || ! $claim->customer_id) {
+            return;
+        }
+
+        try {
+            $customer = $claim->customer;
+            if (! $customer) {
+                return;
+            }
+
+            $copy = match ($claim->status) {
+                'in_review'         => 'Our team is reviewing it now.',
+                'awaiting_customer' => 'We need something from you to continue. Please check your messages.',
+                'approved'          => 'It was approved and we are arranging the resolution.',
+                'rejected'          => 'After review we cannot accept this claim.',
+                'closed'            => 'It is now closed.',
+                default             => 'Its status was updated.',
+            };
+
+            \App\Services\CustomerNotifier::notify(
+                $customer,
+                'claim_update',
+                "Your claim {$claim->ref}: " . (Claim::STATUS_LABELS[$claim->status] ?? $claim->status),
+                trim($copy . ($claim->outcome_note ? "\n\n" . $claim->outcome_note : '')),
+                [
+                    'severity'     => match ($claim->status) {
+                        'approved'          => 'success',
+                        'awaiting_customer' => 'warning',
+                        default             => 'info',
+                    },
+                    'action_url'   => '/account/claims',
+                    'related_type' => 'claim',
+                    'related_id'   => $claim->id,
+                    'dedupe_key'   => "claim_update:{$claim->id}:{$claim->status}",
+                ],
+            );
+        } catch (\Throwable $e) {
+            Log::warning('Claim customer notification failed', ['claim' => $claim->id, 'error' => $e->getMessage()]);
+        }
+    }
+
     // -------------------------------------------------------------------------
 
     /**
@@ -362,6 +416,10 @@ class AdminClaimController extends Controller
             'quantity'          => $claim->quantity,
             'status'            => $claim->status,
             'status_label'      => Claim::STATUS_LABELS[$claim->status] ?? $claim->status,
+            // 'portal' means the customer filed it themselves (Session 120)
+            // and is watching its status from their account — the panel
+            // badges these so the team knows the clock is visible.
+            'source'            => Claim::supportsCustomerLink() ? ($claim->source ?? 'admin') : 'admin',
             'outcome_note'      => $claim->outcome_note,
             'assigned_admin_id' => $claim->assigned_admin_id,
             'assignee'          => $name($claim->assignee),

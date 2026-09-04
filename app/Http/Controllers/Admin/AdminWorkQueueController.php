@@ -500,6 +500,7 @@ class AdminWorkQueueController extends Controller
         $claim->save();
 
         AdminClaimController::notifyCreatorOfStatusChange($claim, $previousStatus, $user);
+        AdminClaimController::notifyCustomerOfStatusChange($claim, $previousStatus);
 
         return response()->json([
             'data' => [
