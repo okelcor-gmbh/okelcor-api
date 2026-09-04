@@ -23,6 +23,7 @@ class StoreProductRequest extends FormRequest
             'spec'          => ['nullable', 'string', 'max:50'],
             'season'        => ['required', Rule::in(['Summer', 'Winter', 'All Season', 'All-Terrain'])],
             'type'          => ['required', Rule::in(['PCR', 'TBR', 'Used', 'OTR'])],
+            'audience'      => ['sometimes', 'in:both,b2b,b2c'],
             'price'         => ['required', 'numeric', 'min:0'],
             'price_b2b'     => ['nullable', 'numeric', 'min:0'],
             'price_b2c'     => ['nullable', 'numeric', 'min:0'],

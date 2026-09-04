@@ -46,8 +46,25 @@ class ProductController extends Controller
             $query->where('in_stock', (bool) $request->input('in_stock'));
         }
 
-        if ($request->filled('customer_type')) {
-            match ($request->customer_type) {
+        // The shop has always sent `segment`; this controller read
+        // `customer_type`, so the server-side tier filter never fired from
+        // the storefront and a client-side fallback quietly did the work.
+        // Accept both names.
+        $segment = $request->input('segment', $request->input('customer_type'));
+
+        // Listing intent is explicit now: a b2b-only lot never reaches a
+        // retail visitor, a retail-only offer never reaches the trade view.
+        // Guests browse the retail view. Guarded so the code can deploy
+        // ahead of migration #64.
+        if (Product::supportsAudience()) {
+            $query->where(function ($q) use ($segment) {
+                $q->where('audience', 'both')
+                  ->orWhere('audience', $segment === 'b2b' ? 'b2b' : 'b2c');
+            });
+        }
+
+        if ($segment) {
+            match ($segment) {
                 'b2b'   => $query->whereNotNull('price_b2b')->where('price_b2b', '>', 0),
                 'b2c'   => $query->whereNotNull('price_b2c')->where('price_b2c', '>', 0),
                 default => null,

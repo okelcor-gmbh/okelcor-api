@@ -72,21 +72,68 @@ class CustomerAuthController extends Controller
             $vatVerified = $result['valid'];
         }
 
+        // The fork the whole dual-audience platform hangs on (Session 116).
+        //
+        // A private buyer wanting four tyres was being pushed through the
+        // TRADE gate: pending_review, inactive, waiting for a human — and no
+        // verification e-mail was ever sent, so there was nothing to click
+        // either. No retail platform in this industry does that; Reifendirekt,
+        // Blackcircles and Oponeo all sell to a consumer on the spot.
+        //
+        // B2C now activates immediately with retail access (checkout yes,
+        // wholesale pricing no) and login stays gated on e-mail verification,
+        // which is the fraud control that actually fits a consumer account.
+        // B2B keeps the reviewed trade path unchanged — wholesale terms are
+        // exactly what a human should approve.
+        $isB2c = $data['customer_type'] === 'b2c';
+
         $customer = Customer::create([
             ...$data,
             'password'          => Hash::make($data['password']),
             'vat_verified'      => $vatVerified,
-            'onboarding_status' => 'pending_review',
-            'is_active'         => false,
+            'onboarding_status' => $isB2c ? 'active' : 'pending_review',
+            'is_active'         => $isB2c,
+            ...($isB2c ? [
+                'access_level'                   => 'approved_buyer',
+                'approved_for_quotes'            => true,
+                'approved_for_checkout'          => true,
+                'approved_for_documents'         => true,
+                'approved_for_wholesale_pricing' => false,
+            ] : []),
         ]);
 
         SecurityEventService::log(
-            'customer_pending_review_created', $customer->id,
+            // 'customer_created' is already in SecurityEvent::TYPES; inventing a
+            // new literal here would hit the MySQL enum this project has been
+            // burned by three times.
+            $isB2c ? 'customer_created' : 'customer_pending_review_created', $customer->id,
             $request->ip(), $request->userAgent(),
-            "New customer registration pending review: {$customer->email}", 'info'
+            $isB2c
+                ? "New retail customer registered: {$customer->email}"
+                : "New customer registration pending review: {$customer->email}",
+            'info'
         );
 
+        if ($isB2c) {
+            // The e-mail is the activation step; login is refused until the
+            // link is clicked. Failure must not roll back the account — the
+            // resend endpoint exists for exactly this.
+            try {
+                $this->sendVerificationEmail($customer);
+            } catch (\Throwable $e) {
+                Log::warning('Verification email failed on register', ['customer' => $customer->id, 'error' => $e->getMessage()]);
+            }
+
+            return response()->json([
+                'message'           => 'Account created. Check your inbox and click the verification link to sign in.',
+                'onboarding_status' => 'active',
+                'email_verification_required' => true,
+            ], 201);
+        }
+
         // CRM-3B — alert admins that a new registration needs approval.
+        // B2B only: a retail account needs no approval, so ringing the
+        // approvals bell for it would teach the team to ignore the bell.
         AdminNotificationService::notifyPermission(
             permission:  'customers.manage',
             type:        'customer_approval_needed',

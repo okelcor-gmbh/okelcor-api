@@ -51,7 +51,24 @@ class Product extends Model
     {
         static::$hasSlugColumn = null;
     }
+    /** Who a listing is for. A plain string column; see migration #64. */
+    public const AUDIENCES = ['both', 'b2b', 'b2c'];
+
+    private static ?bool $supportsAudience = null;
+
+    public static function supportsAudience(): bool
+    {
+        return self::$supportsAudience ??= \Illuminate\Support\Facades\Schema::hasColumn('products', 'audience');
+    }
+
+    /** Test seam. */
+    public static function forgetAudienceCheck(): void
+    {
+        self::$supportsAudience = null;
+    }
+
     protected $fillable = [
+        'audience',
         'sku',
         'slug',
         'ean',

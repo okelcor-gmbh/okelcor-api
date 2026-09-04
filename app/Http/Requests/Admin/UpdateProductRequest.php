@@ -25,6 +25,7 @@ class UpdateProductRequest extends FormRequest
             'spec'        => ['nullable', 'string', 'max:50'],
             'season'      => ['sometimes', Rule::in(['Summer', 'Winter', 'All Season', 'All-Terrain'])],
             'type'        => ['sometimes', Rule::in(['PCR', 'TBR', 'Used', 'OTR'])],
+            'audience'      => ['sometimes', 'in:both,b2b,b2c'],
             'price'       => ['sometimes', 'numeric', 'min:0'],
             'price_b2b'   => ['nullable', 'numeric', 'min:0'],
             'price_b2c'   => ['nullable', 'numeric', 'min:0'],
