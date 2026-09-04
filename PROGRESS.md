@@ -41,6 +41,49 @@ untouched.
 
 ---
 
+## 👥👤 Session 116: one platform, two audiences — and two empty shelves
+
+> **Deploy status:** ✅ backend live as `65e182a` — backup taken
+> (`okelcor-backup-2026-09-04-1052.zip`), **#64 applied (55.86ms)**, caches
+> ok. Verified live: `audience` EXISTS with all 15,265 rows `both`, and
+> `segment=b2b` returns **11,628** vs 15,265 — the tier filter firing
+> server-side for the first time ever. Frontend `5a807ac` (register fork UI,
+> guest Private/Trade toggle, honest OTR/Used paths) is **queued behind the
+> fourth Vercel account-block flap**; the old UI is fully compatible with the
+> new API in the meantime.
+
+Three real defects found under the feature ask:
+
+1. **Every registration — private buyers included — went `pending_review`,
+   inactive, waiting for a human**, and no verification e-mail was ever sent,
+   so there was nothing to click either. No retail platform in this industry
+   does that (Reifendirekt, Blackcircles, Oponeo sell to a consumer on the
+   spot; Tyre24 reserves the gate for the trade). Register now forks: **b2c
+   activates immediately** with retail access (checkout yes, wholesale no),
+   login gated on e-mail verification, verification mail actually sent, and
+   only b2b rings the approvals bell. The security event reuses
+   `customer_created` — a new literal would have hit the MySQL enum trap a
+   fourth time (it very nearly did; caught before commit).
+2. **The shop has sent `?segment=` since it shipped; the API read
+   `?customer_type=`** — the server-side tier filter never once fired from
+   the storefront, a client-side fallback quietly covering for it. Both
+   names accepted now, pinned by a test on the name the shop actually uses.
+3. **OTR and used tyres have NEVER had a catalogue row** — the "always
+   empty" report was data truth, not a handling bug: 15,005 PCR, 260 TBR,
+   zero OTR, zero used, ever. The homepage tiles, finder tab and mega menu
+   now mark both **On request** and route to the quote desk, where those
+   orders actually happen.
+
+**#64 `products.audience`** ('both' default / 'b2b' / 'b2c', plain string,
+not an enum) makes listing intent explicit: a container-only lot never
+reaches a retail view, a retail promotion never reaches the trade view,
+guests browse retail. Admin store/update accept it. `DualAudienceTest` (7
+tests) covers the register fork, the segment filter, both audience
+directions, the guest default and code-before-migration. Full suite **822
+passed**, up from 815.
+
+---
+
 ## 🧭 Session 115 (frontend): the chrome — navbar, menus, footer, auth
 
 > **Deploy status:** ✅ live on okelcor.com (`50648ff` four-page restyle +
