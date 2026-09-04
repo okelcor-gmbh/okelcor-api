@@ -41,6 +41,30 @@ untouched.
 
 ---
 
+## 🛠️ Session 117: audience at scale, and the five-day 403 storm closed
+
+> **Deploy status:** ✅ backend live as `1ccc5c8` (no migration; route:cache
+> rebuilt — `/admin/products/bulk-audience` answers non-404 from outside).
+> Frontend `60666f5` (admin audience filter/badges/bulk UI + the middleware
+> fix) queued behind the Vercel block with two earlier batches.
+
+**Bulk audience** — the writing half of #64 at scale: `POST
+/admin/products/bulk-audience` takes a scope (ids/brand/type/all), refuses
+an accidentally empty scope, and `dry_run` answers with the matched count so
+the panel confirms with a real number before writing exactly the surveyed
+scope. Admin list filters by audience; rows carry Trade/Retail badges.
+DualAudienceTest → 10 tests. Full suite 825.
+
+**The 403 storm root cause** — Daniel's 1,178 `products.edit` denials were a
+forgotten browser tab on `/admin/products` re-rendered by the dashboard's
+refresh interval for five days (03:21 entries = nobody at the keyboard). The
+admin middleware **failed open when the `admin_role` cookie was absent** —
+the state of every session predating that cookie. A token without a role now
+re-authenticates once (login refreshes the cookies, self-healing); an
+unauthorized section redirects as designed.
+
+---
+
 ## 👥👤 Session 116: one platform, two audiences — and two empty shelves
 
 > **Deploy status:** ✅ backend live as `65e182a` — backup taken
