@@ -4,6 +4,54 @@ Last updated: 2026-09-02 | Branch: `main` | **Production is at `66fbeee` — ses
 
 ---
 
+## 📮 Session 119: claims come out of the inbox
+
+> **Deploy status:** backend committed and pushed (`6874ff8`), **NOT yet on
+> production** — the SSH deploy needs a manual run (backup taken:
+> `okelcor-backup-2026-09-04-1255.zip`; the session's auto mode would not
+> execute `git reset`/`pull` on the server). Frontend pushed (`c5d50ac`),
+> Vercel auto-deploying. Deploy-order safe in EITHER order: the panel reads
+> `claims_available: false` until migration #66 runs, and My Work's claims
+> section sits in the same try/catch as every other task source.
+
+Started the greenlit claims queue — the last of the agreed admin-plan items
+before the list-pattern work. Also this session, verified live on
+production: the single tyre chat launcher (open, close, no duplicate) and
+the wholesale nudge now absent on Private buyer / present on Trade buyer
+with the trade banner and the 11,628-product B2B catalogue.
+
+**The claims queue.** "We handle claims" was a promise kept in e-mail
+threads — nobody could see how many were open, who was on each one, or how
+long a customer had been waiting. Now: `claims` table (migration #66),
+`CLM-00001` refs stamped from the id, six types and six statuses as plain
+strings behind `Claim::TYPES`/`STATUSES` (the enum lesson), and the exact
+machinery that runs the finance snapshot and the to-dos:
+
+| Piece | How it lands |
+|---|---|
+| **Status + assignee + My Work** | Tagging someone notifies them (deduped per day) and the claim appears in their My Work with the status select and the outcome note. Being the assignee IS the authorization — `PATCH /admin/my-work/claims/{id}` needs no claims permission, same contract as finance items. |
+| **Notify-on-change** | A status change travels back to whoever logged the claim — they hold the customer's e-mail thread, so they need to know what to tell them. |
+| **Only `closed` is terminal** | An approved claim still owes the customer a credit note, a rejected one still owes the reasons — both stay on the assignee's plate until the loop closes. Reopening clears the decision stamps; closing after approving keeps them (it is not a second decision). |
+| **The ledger** | Logging a claim credits the logger (`claim_logged`, category support); deciding it credits the decider (`claim_resolved`). Two idempotent rows — a claim edited ten times counts once per act. |
+| **The quality signal** | `meta` serves open count and average days from logged to decided (last 90 days) with every listing — the Voice-of-Customer card can read it later without a new endpoint. |
+| **Oldest first** | The queue sorts by age, not recency: the customer who has waited longest is on top, and `age_days` goes red at a week. |
+| **Permissions** | `claims.view` = super_admin, admin, order_manager, support, finance; `claims.manage` = the same minus finance (reads because approvals become credit notes, does not write); `claims.delete` = super_admin only — a wrong claim is closed with a note, not erased, because the queue is also the record of what customers told us. |
+
+**Frontend:** a Claims page under Customers & CRM (stats header from meta,
+open/closed/all tabs, type filter, search, log-a-claim modal, in-row status
+select, expandable detail with outcome + assignment), and My Work grew a
+Claims section that behaves like the to-do rows — expand in place, read the
+complaint, write the outcome, set the status. `queue_url` is served null to
+viewers who cannot open the page, so no link 403s.
+
+Tests: `ClaimsQueueTest` — 12 tests / 60 assertions covering the migration
+against real SQL, the ref stamp, both ledger credits, every permission
+edge, the assignee loop from My Work, decision-stamp reversal, the stats
+average, super_admin-only delete, and the pre-migration degraded state.
+Suite: **844 passed**.
+
+---
+
 ## 🎨 The website a tyre trader would build (Session 113, frontend only)
 
 > **Deploy status:** ✅ all live on okelcor.com via Vercel (`7f4b05d` homepage
@@ -4102,6 +4150,7 @@ touching order 10112 or the two lump-sum orders.
 
 60. `2026_09_01_000001_add_assignee_note_to_todos_table` (Session 108 — adds `todos.assignee_note`, nullable TEXT. Additive and guarded on both `Schema::hasTable` and `Schema::hasColumn`, so a re-run is a no-op; nothing existing is read, altered or backfilled. **Deploy-order safe in both directions, proved rather than assumed**: `Todo::supportsAssigneeNote()` gates every read and write, readers get null and `AdminTodoController::update()` drops the field rather than failing the whole update — the status is the load-bearing half and must still land. Exercised against real SQL by `TeamTodoListTest`, which runs the migration file itself, re-runs it, and separately drops the column to prove the code survives without it.)
 61. `2026_09_01_000002_add_created_by_role_to_todos_table` (Session 109 — adds `todos.created_by_role` VARCHAR(30) + an index, and backfills it from each creator's current role. Additive, nullable, guarded on `hasTable`/`hasColumn`. **The backfill is re-runnable and cannot overwrite an existing stamp**: it writes only where the column is still null and a creator resolves, so a second run after somebody has changed role leaves the frozen value alone — asserted by `test_the_backfill_stamps_existing_rows_and_is_re_runnable`. Written in PHP with `chunkById` rather than a JOIN UPDATE so it runs identically on MySQL and on the sqlite harness. `down()` drops the index before the column, which sqlite requires. Deploy-order safe via `Todo::supportsSource()`: creating a to-do still works without the column, it just carries no badge.)
+66. `2026_09_04_000003_create_claims_table` (Session 119 — the after-sales claims queue; creates `claims`. One NEW table, guarded with `Schema::hasTable`; nothing existing read, altered or backfilled. `status`/`type` are plain strings with the value lists in `Claim::STATUSES`/`TYPES` — the enum lesson. **Deploy-order safe** — `Claim::available()` answers "not yet", the queue page renders its unavailable state, and My Work's claims section sits in the standard try/catch. Proved idempotent by `ClaimsQueueTest`, which runs the file itself and re-runs it.)
 62. `2026_09_02_000001_add_created_by_to_finance_liquidity_entries` (Session 111 — adds `created_by` + an index and `updated_by` to `finance_liquidity_entries`, which shipped in Session 99 with no attribution at all. Additive, nullable, guarded on `hasTable`/`hasColumn`, **no backfill by design**: the 66 existing rows came from `liquidity:import`, a command rather than a person, and inventing an author would be worse than an honestly empty past. Deploy-order safe via `FinanceLiquidityEntry::supportsAttribution()` — a liquidity line still saves without the column, because the file is finance's live working and a reporting column must never block it.)
 
 
