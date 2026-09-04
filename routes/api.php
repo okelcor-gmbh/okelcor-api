@@ -86,6 +86,7 @@ use App\Http\Controllers\Admin\AdminCrmFollowUpController;
 use App\Http\Controllers\Admin\AdminCommunicationController;
 use App\Http\Controllers\Admin\AdminStaffMessageController;
 use App\Http\Controllers\Admin\AdminChatController;
+use App\Http\Controllers\Admin\AdminClaimController;
 use App\Http\Controllers\Admin\AdminCrispController;
 use App\Http\Controllers\Admin\AdminCrmEmailController;
 use App\Http\Controllers\Admin\CustomerImportController;
@@ -457,6 +458,7 @@ Route::prefix('v1')->group(function () {
         // permission middleware here.
         Route::patch('my-work/finance-items/{id}', [AdminWorkQueueController::class, 'updateFinanceItem']);
         Route::patch('my-work/ec-invoice-lines/{id}', [AdminWorkQueueController::class, 'updateEcInvoiceLine']);
+        Route::patch('my-work/claims/{id}', [AdminWorkQueueController::class, 'updateClaim']);
 
         // 2FA management — all authenticated admin users
         Route::prefix('2fa')->group(function () {
@@ -1019,6 +1021,24 @@ Route::prefix('v1')->group(function () {
         // own record.
         Route::middleware('permission:staff.view_team')->group(function () {
             Route::get('staff/team-report', [AdminStaffLedgerController::class, 'teamReport']);
+        });
+
+        // -----------------------------------------------------------------
+        // After-sales claims queue — Session 119. Read and write are
+        // separate keys; deleting is super_admin only (a wrong claim is
+        // closed with a note, not erased). An assignee without any of these
+        // works their claim via PATCH /admin/my-work/claims/{id} above.
+        // -----------------------------------------------------------------
+        Route::middleware('permission:claims.view')->group(function () {
+            Route::get('claims', [AdminClaimController::class, 'index']);
+            Route::get('claims/{id}', [AdminClaimController::class, 'show'])->whereNumber('id');
+        });
+        Route::middleware('permission:claims.manage')->group(function () {
+            Route::post('claims', [AdminClaimController::class, 'store']);
+            Route::patch('claims/{id}', [AdminClaimController::class, 'update'])->whereNumber('id');
+        });
+        Route::middleware('permission:claims.delete')->group(function () {
+            Route::delete('claims/{id}', [AdminClaimController::class, 'destroy'])->whereNumber('id');
         });
 
         // -----------------------------------------------------------------

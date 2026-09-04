@@ -77,6 +77,20 @@ class AdminPermissions
         // never quietly routine.
         'orders.signoff_bypass'   => ['super_admin'],
 
+        // ── After-sales claims queue ──────────────────────────────────────
+        // The people who answer unhappy customers: orders/logistics (it is
+        // usually their shipment) and support (it is usually their inbox).
+        // Finance reads it because an approved claim becomes a credit note.
+        // Being ASSIGNED a claim is authorization on its own and needs none
+        // of these keys — see AdminWorkQueueController::updateClaim, the
+        // same contract as the finance snapshot. No claims.delete for
+        // anyone below super_admin: a claim logged wrongly is closed with a
+        // note, not erased, because the queue is also the record of what
+        // customers told us.
+        'claims.view'             => ['super_admin', 'admin', 'order_manager', 'support', 'finance'],
+        'claims.manage'           => ['super_admin', 'admin', 'order_manager', 'support'],
+        'claims.delete'           => ['super_admin'],
+
         // ── Finance system reconciliation (sevDesk) ───────────────────────
         'finance.view'            => ['super_admin', 'admin', 'finance', 'order_manager'],
         'finance.manage'          => ['super_admin', 'admin', 'finance'],

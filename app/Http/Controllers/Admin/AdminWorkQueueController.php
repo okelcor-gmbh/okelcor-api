@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\Claim;
 use App\Models\CustomerAccessRequest;
 use App\Models\Customer;
 use App\Models\EcInvoiceLine;
@@ -236,6 +237,55 @@ class AdminWorkQueueController extends Controller
         } catch (\Throwable) {
         }
 
+        // Same guard again: the claims queue can reach production before its
+        // migration.
+        $claimTasks = collect();
+        // Same contract as the snapshot board link: only someone who may open
+        // the claims queue gets a link to it; for everyone else the claim is
+        // worked from My Work and the queue link is absent rather than
+        // offered and refused.
+        $canOpenClaimsQueue = AdminPermissions::can($user->role, 'claims.view');
+        try {
+            $claimTasks = Claim::where('assigned_admin_id', $userId)
+                ->whereNotIn('status', Claim::CLOSED_STATUSES)
+                ->orderBy('created_at')
+                ->limit(100)
+                ->get()
+                ->map(fn (Claim $c) => [
+                    'type'       => 'claim_task',
+                    'id'         => $c->id,
+                    'title'      => $c->ref . ' — ' . $c->customer_name,
+                    'subtitle'   => (Claim::TYPE_LABELS[$c->type] ?? $c->type)
+                        . ($c->order_number ? " · order {$c->order_number}" : '')
+                        . ' · waiting ' . (int) round($c->created_at->diffInHours(now()) / 24) . ' days',
+                    // A customer who has waited a week on a complaint is the
+                    // most urgent thing in anyone's queue.
+                    'priority'   => $c->created_at->lt($now->copy()->subDays(7)) ? 'urgent'
+                        : ($c->status === 'new' ? 'high' : 'medium'),
+                    'due_at'     => null,
+                    // The claim is worked HERE — most assignees will hold
+                    // claims.view too, but the tag must work even for one
+                    // who does not.
+                    'action_url' => '/admin/my-work?claim=' . $c->id,
+                    'status'     => $c->status,
+                    'editable'   => true,
+                    'status_options' => collect(Claim::STATUS_LABELS)
+                        ->map(fn ($label, $key) => ['value' => $key, 'label' => $label])->values(),
+                    // The claim's raw fields, so the row can show and edit
+                    // them rather than only render the subtitle it baked
+                    // them into. `description` is the customer's complaint
+                    // and is read-only here; `outcome_note` is the reply.
+                    'description'   => $c->description,
+                    'outcome_note'  => $c->outcome_note,
+                    'customer'      => $c->customer_name,
+                    'claim_type'    => $c->type,
+                    'queue_url'     => $canOpenClaimsQueue
+                        ? '/admin/claims?claim=' . $c->id
+                        : null,
+                ])->values();
+        } catch (\Throwable) {
+        }
+
         $pendingApprovals = collect();
         $accessRequests   = collect();
 
@@ -280,6 +330,7 @@ class AdminWorkQueueController extends Controller
                 'finance_tasks'       => $financeTasks,
                 'ec_invoice_tasks'    => $ecInvoiceTasks,
                 'todo_tasks'          => $todoTasks,
+                'claim_tasks'         => $claimTasks,
                 'pending_approvals'   => $pendingApprovals->values(),
                 'access_requests'     => $accessRequests->values(),
             ],
@@ -291,6 +342,7 @@ class AdminWorkQueueController extends Controller
                     'finance_tasks'      => $financeTasks->count(),
                     'ec_invoice_tasks'   => $ecInvoiceTasks->count(),
                     'todo_tasks'         => $todoTasks->count(),
+                    'claim_tasks'        => $claimTasks->count(),
                     'pending_approvals'  => $pendingApprovals->count(),
                     'access_requests'    => $accessRequests->count(),
                 ],
@@ -407,6 +459,55 @@ class AdminWorkQueueController extends Controller
         return response()->json([
             'data'    => ['id' => $line->id, 'task_status' => $line->task_status],
             'message' => "{$line->invoice_number} updated.",
+        ]);
+    }
+
+    // ── PATCH /admin/my-work/claims/{id} ─────────────────────────────────────
+    //
+    // Same contract as the finance-item and EC-line updates above: being the
+    // assignee IS the authorization — the person handed a claim does not need
+    // claims.manage to work it — and whoever logged the claim hears the
+    // status change without chasing anyone. The stamp rules and notification
+    // live on AdminClaimController so the queue page and My Work cannot
+    // drift apart.
+    public function updateClaim(Request $request, int $id): JsonResponse
+    {
+        $claim = Claim::findOrFail($id);
+        $user  = $request->user();
+
+        $mayEdit = $claim->assigned_admin_id === $user->id
+            || $user->hasPermission('claims.manage');
+
+        if (! $mayEdit) {
+            return response()->json([
+                'message' => 'Only the person this claim is assigned to (or the claims team) can update it.',
+            ], 403);
+        }
+
+        $data = $request->validate([
+            'status'       => ['required', Rule::in(Claim::STATUSES)],
+            'outcome_note' => ['nullable', 'string', 'max:5000'],
+        ]);
+
+        $previousStatus = $claim->status;
+
+        $claim->status = $data['status'];
+        if (array_key_exists('outcome_note', $data) && $data['outcome_note'] !== null) {
+            $claim->outcome_note = $data['outcome_note'];
+        }
+
+        AdminClaimController::applyStatusStamps($claim, $previousStatus, $user);
+        $claim->save();
+
+        AdminClaimController::notifyCreatorOfStatusChange($claim, $previousStatus, $user);
+
+        return response()->json([
+            'data' => [
+                'id'           => $claim->id,
+                'status'       => $claim->status,
+                'outcome_note' => $claim->outcome_note,
+            ],
+            'message' => "{$claim->ref} updated.",
         ]);
     }
 

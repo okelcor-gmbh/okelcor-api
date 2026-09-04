@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\AdminSecurityEvent;
 use App\Models\AdminUser;
 use App\Models\BulkEmailCampaign;
+use App\Models\Claim;
 use App\Models\CustomerCommunication;
 use App\Models\EbayListingLog;
 use App\Models\EcInvoiceGroup;
@@ -314,6 +315,55 @@ class StaffActivityRecorder
                 'amount'   => $item->amount === null ? null : (string) $item->amount,
             ], fn ($v) => $v !== null && $v !== ''),
         ], $item->created_by);
+    }
+
+    /**
+     * An after-sales claim. Two distinct pieces of work, written as two
+     * idempotent rows: LOGGING the claim (pulling it out of the e-mail
+     * thread and into the system) credits whoever created it, and DECIDING
+     * it credits whoever approved or rejected it. Re-saves update in place —
+     * the (source_type, source_id, action) key — so a claim edited ten times
+     * still counts once per act.
+     */
+    public function fromClaim(Claim $claim): ?StaffActivity
+    {
+        $label = trim(($claim->ref ?: ('Claim #' . $claim->id))
+            . ($claim->customer_name ? " — {$claim->customer_name}" : ''));
+
+        $raised = $this->write([
+            'category'      => 'support',
+            'action'        => 'claim_logged',
+            'subject_type'  => 'claim',
+            'subject_id'    => $claim->id,
+            'subject_label' => $label,
+            'source_type'   => 'claim',
+            'source_id'     => $claim->id,
+            'occurred_at'   => $claim->created_at ?? now(),
+            'metadata'      => array_filter([
+                'type'   => $claim->type,
+                'status' => $claim->status,
+                'order'  => $claim->order_number,
+            ], fn ($v) => $v !== null && $v !== ''),
+        ], $claim->created_by);
+
+        if ($claim->resolved_at !== null) {
+            $this->write([
+                'category'      => 'support',
+                'action'        => 'claim_resolved',
+                'subject_type'  => 'claim',
+                'subject_id'    => $claim->id,
+                'subject_label' => $label,
+                'source_type'   => 'claim',
+                'source_id'     => $claim->id,
+                'occurred_at'   => $claim->resolved_at,
+                'metadata'      => array_filter([
+                    'type'    => $claim->type,
+                    'outcome' => in_array($claim->status, Claim::RESOLVED_STATUSES, true) ? $claim->status : null,
+                ]),
+            ], $claim->resolved_by);
+        }
+
+        return $raised;
     }
 
     /** A country/VAT group opened on the EC Invoice List. */
