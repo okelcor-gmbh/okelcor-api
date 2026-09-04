@@ -1,18 +1,17 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-09-02 | Branch: `main` | **Production is at `66fbeee` — sessions 86–110 (weekly liquidity with closed weeks + moves + CSV downloads, EC exports, the tagged-task fix, and the to-do list that could finally be opened, stamped with the department that raised it, and moved by that department), migrations #1–63 applied, every deploy verified from outside the same day**
+Last updated: 2026-09-04 | Branch: `main` | **Production is at `88b875c` — sessions 86–119 (through the claims queue), migrations #1–66 applied | **Production was at `66fbeee` — sessions 86–110 (weekly liquidity with closed weeks + moves + CSV downloads, EC exports, the tagged-task fix, and the to-do list that could finally be opened, stamped with the department that raised it, and moved by that department), migrations #1–63 applied, every deploy verified from outside the same day**
 
 ---
 
 ## 📮 Session 119: claims come out of the inbox
 
-> **Deploy status:** backend committed and pushed (`6874ff8`), **NOT yet on
-> production** — the SSH deploy needs a manual run (backup taken:
-> `okelcor-backup-2026-09-04-1255.zip`; the session's auto mode would not
-> execute `git reset`/`pull` on the server). Frontend pushed (`c5d50ac`),
-> Vercel auto-deploying. Deploy-order safe in EITHER order: the panel reads
-> `claims_available: false` until migration #66 runs, and My Work's claims
-> section sits in the same try/catch as every other task source.
+> **Deploy status:** ✅ BOTH halves live the same day. Backend `6874ff8`
+> deployed over SSH after the user re-authorized (backup first:
+> `okelcor-backup-2026-09-04-1255.zip`; migration #66 ran in 102ms; config/
+> route/view caches rebuilt), verified from outside — `/admin/claims` and
+> `/admin/my-work/claims/{id}` answer 401-not-404, public catalogue 200.
+> Frontend `c5d50ac` deployed by Vercel once the account block cleared.
 
 Started the greenlit claims queue — the last of the agreed admin-plan items
 before the list-pattern work. Also this session, verified live on
