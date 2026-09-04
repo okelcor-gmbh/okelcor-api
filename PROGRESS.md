@@ -41,6 +41,36 @@ untouched.
 
 ---
 
+## 🧾 Session 114 (frontend): the product page's arithmetic, and FET rebuilt on its evidence
+
+> **Deploy status:** ✅ all live on okelcor.com (`05eeb1f` inner pages →
+> `336d637` product page → `cefae34` FET rebuild → `3dc15e4` navbar green),
+> the middle two having queued behind a second Vercel account block that
+> lifted the same day. Verified live: FET serves the evidence table, the
+> product page serves the wholesale nudge, and `#22c55e` appears zero times
+> on the site.
+
+**Product page:** quantity presets for 2/4/6 with a live line total (tyres
+sell in sets; the page now does the sum), the specification/size/load tables
+open by default and multi-open, the wholesale sign-in nudge at the decision
+point, breadcrumb de-duped ("Rapid Rapid"), pills flattened, em dashes out.
+
+**FET, second pass:** the recolour was not enough — under the orange it was
+still the generated skeleton (icon-circle grids, watermark stat cards). Rebuilt
+on what FET actually has: the live engine lookup as the FIRST section with
+both compatibility PDFs, the three tests as a table (VW T5 field test by
+Landesbaubehörde Stadthagen, 11.52 → 9.92 l/100km, 13.9% verified, signed
+report downloadable; Unimog ~10.9%; lab up to 15%), twelve icon cards
+collapsed into six checkmark facts, the ROI calculator kept, certification
+as one honest row. The navbar's FET mega-menu — carried by every page — was
+the last green and is now orange.
+
+**⚠️ Flagged to the business, not fixed:** the ISO 9001 certificate displayed
+on /fet states validity to **30 January 2026 — expired**. Renew or remove;
+the page currently shows the date factually.
+
+---
+
 ## 🏷️ What an FET unit costs us (Session 112)
 
 > **Deploy status:** ✅ **backend deployed 2026-09-03** as `66fbeee`; **#63
