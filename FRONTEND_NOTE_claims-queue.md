@@ -66,3 +66,19 @@ Priority: `urgent` once the claim is 7 days old, `high` while `new`, else
 `claim_assigned` → assignee (deduped per day, links to My Work).
 `claim_status_changed` → whoever logged the claim (links to the queue).
 Both carry `related_type: "claim"`.
+
+## Portal half (Session 120)
+
+| Method & path | Auth | Notes |
+|---|---|---|
+| `GET /api/v1/auth/claims` | customer Bearer | this account's claims only (`customer_id`); each row carries `status_note` in plain words plus `outcome_note` |
+| `POST /api/v1/auth/claims` | customer Bearer | `{ order_ref?, type?, description (min 20 chars), quantity? }` — an order_ref must be the customer's own order (matched by e-mail) or the request is a 422; throttled 10/hour |
+
+Filing marks the claim `source: "portal"` (badged in the admin queue),
+notifies every active `claims.manage` holder (`claim_filed`, deduped per
+claim per admin), and drops a `claim_received` confirmation in the
+customer's in-app inbox. Every later status change by staff sends the
+customer a `claim_update` notification with plain-words copy and the
+outcome note; both link to `/account/claims`. Staff-logged claims carry no
+`customer_id` and notify no portal account. `meta.claims_available: false`
+until migration #67 runs.

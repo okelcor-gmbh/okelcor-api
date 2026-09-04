@@ -1,6 +1,52 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-09-04 | Branch: `main` | **Production is at `88b875c` — sessions 86–119 (through the claims queue), migrations #1–66 applied | **Production was at `66fbeee` — sessions 86–110 (weekly liquidity with closed weeks + moves + CSV downloads, EC exports, the tagged-task fix, and the to-do list that could finally be opened, stamped with the department that raised it, and moved by that department), migrations #1–63 applied, every deploy verified from outside the same day**
+Last updated: 2026-09-04 | Branch: `main` | **Production is at `ec0e780` — sessions 86–120 (claims queue + portal claims), migrations #1–67 applied | **Production was at `66fbeee` — sessions 86–110 (weekly liquidity with closed weeks + moves + CSV downloads, EC exports, the tagged-task fix, and the to-do list that could finally be opened, stamped with the department that raised it, and moved by that department), migrations #1–63 applied, every deploy verified from outside the same day**
+
+---
+
+## 🔁 Session 120: the customer's half of the loop, and the phone audit
+
+> **Deploy status:** ✅ backend `ec0e780` deployed same-session (backup
+> `okelcor-backup-2026-09-04-1335.zip`, migration #67 in 50ms, caches
+> rebuilt, `/auth/claims` answering 401-not-404 from outside; the bare-POST
+> 403 is the host WAF rejecting body-less POSTs, with JSON headers it is a
+> clean 401). Frontend: portal claims `2c846c4`, mobile fixes `5e88e0e`
+> (Vercel success), copy pass `d778d57`.
+
+**Claims reach the portal.** Session 119's queue still began with a
+customer writing an e-mail. Now they file from their account (`POST
+/auth/claims`, prefilled, optionally pinned to one of their orders, which
+must be theirs, matched by e-mail like the rest of the portal), and it
+lands in the SAME admin queue marked `source: portal`. The whole claims
+team is notified of the unassigned arrival; the customer gets a
+filed-and-numbered confirmation, a plain-words status line per claim
+(`status_note`), and a `claim_update` in-app notification on every staff
+status change, riding `CustomerNotifier` like their order updates. No
+`created_by` on a portal claim keeps the customer's act out of the
+contribution ledger ("no person, no row"); the decision is still credited.
+Portal UI: Claims & Returns page + dashboard card on both dashboards + a
+"Report a problem" card on every order detail that opens the form with the
+order attached. 8 new tests / **852 passing**.
+
+**The mobile audit** (second ask: every page responsive on all mobile
+screens). Method matters: `--window-size=390` headless screenshots LIE —
+they render desktop mode and clip; real CDP device emulation (390x844,
+mobile flag, touch UA) showed `scrollWidth` exactly 390 on every page.
+Audited home, shop, PDP, FET, about, contact, quote, news, article, login,
+register, checkout and the SEO landers. Four real defects, all fixed:
+
+| Defect | Fix |
+|---|---|
+| Private buyer / Trade buyer toggle was `hidden md:flex` — a phone guest could NEVER reach the trade catalogue | full-width mobile twin under the shop search row |
+| About page logistics band drew its heading over the photo's bright sky | scrim deepened (30/45/80) |
+| Register still said "Request Access" / "B2B access only" from before instant retail accounts | copy now tells the truth about both paths |
+| CMS article tables could stretch the page | horizontal scroll below `lg` |
+
+The wholesaler lander's "giant empty hero" turned out to be a capture
+artifact (72vh against the inflated full-page viewport), not a bug. Riding
+the audit: 12 SEO H1s and ~20 prose lines still carried em/en dashes; all
+rewritten per the standing rule, ranges as words, meta-title separators to
+`|`. Placeholder "—" glyphs in tables are data, not prose, and stay.
 
 ---
 
@@ -4149,6 +4195,7 @@ touching order 10112 or the two lump-sum orders.
 
 60. `2026_09_01_000001_add_assignee_note_to_todos_table` (Session 108 — adds `todos.assignee_note`, nullable TEXT. Additive and guarded on both `Schema::hasTable` and `Schema::hasColumn`, so a re-run is a no-op; nothing existing is read, altered or backfilled. **Deploy-order safe in both directions, proved rather than assumed**: `Todo::supportsAssigneeNote()` gates every read and write, readers get null and `AdminTodoController::update()` drops the field rather than failing the whole update — the status is the load-bearing half and must still land. Exercised against real SQL by `TeamTodoListTest`, which runs the migration file itself, re-runs it, and separately drops the column to prove the code survives without it.)
 61. `2026_09_01_000002_add_created_by_role_to_todos_table` (Session 109 — adds `todos.created_by_role` VARCHAR(30) + an index, and backfills it from each creator's current role. Additive, nullable, guarded on `hasTable`/`hasColumn`. **The backfill is re-runnable and cannot overwrite an existing stamp**: it writes only where the column is still null and a creator resolves, so a second run after somebody has changed role leaves the frozen value alone — asserted by `test_the_backfill_stamps_existing_rows_and_is_re_runnable`. Written in PHP with `chunkById` rather than a JOIN UPDATE so it runs identically on MySQL and on the sqlite harness. `down()` drops the index before the column, which sqlite requires. Deploy-order safe via `Todo::supportsSource()`: creating a to-do still works without the column, it just carries no badge.)
+67. `2026_09_04_000004_add_customer_link_to_claims_table` (Session 120 — adds `claims.customer_id` (FK customers, nullOnDelete) + composite index and `claims.source` ('admin'|'portal', plain string). Additive, guarded on `hasTable`/`hasColumn`, no backfill: every existing row is staff-logged and 'admin' is the default. **Deploy-order safe in both directions** via `Claim::supportsCustomerLink()` — portal endpoints answer "not available yet" and the admin queue works unchanged without the columns, proved by `CustomerClaimPortalTest`, which rebuilds the pre-migration state and asserts both.)
 66. `2026_09_04_000003_create_claims_table` (Session 119 — the after-sales claims queue; creates `claims`. One NEW table, guarded with `Schema::hasTable`; nothing existing read, altered or backfilled. `status`/`type` are plain strings with the value lists in `Claim::STATUSES`/`TYPES` — the enum lesson. **Deploy-order safe** — `Claim::available()` answers "not yet", the queue page renders its unavailable state, and My Work's claims section sits in the standard try/catch. Proved idempotent by `ClaimsQueueTest`, which runs the file itself and re-runs it.)
 62. `2026_09_02_000001_add_created_by_to_finance_liquidity_entries` (Session 111 — adds `created_by` + an index and `updated_by` to `finance_liquidity_entries`, which shipped in Session 99 with no attribution at all. Additive, nullable, guarded on `hasTable`/`hasColumn`, **no backfill by design**: the 66 existing rows came from `liquidity:import`, a command rather than a person, and inventing an author would be worse than an honestly empty past. Deploy-order safe via `FinanceLiquidityEntry::supportsAttribution()` — a liquidity line still saves without the column, because the file is finance's live working and a reporting column must never block it.)
 
