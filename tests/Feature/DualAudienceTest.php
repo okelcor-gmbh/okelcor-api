@@ -83,6 +83,7 @@ class DualAudienceTest extends TestCase
             $table->string('password');
             $table->string('role');
             $table->boolean('is_active')->default(true);
+            $table->timestamp('two_factor_confirmed_at')->nullable();
             $table->timestamps();
         });
 
@@ -166,6 +167,17 @@ class DualAudienceTest extends TestCase
         Schema::enableForeignKeyConstraints();
         Product::forgetAudienceCheck();
         parent::tearDown();
+    }
+
+    private function admin(): \App\Models\AdminUser
+    {
+        return \App\Models\AdminUser::create([
+            'name'     => 'Editor ' . uniqid(),
+            'email'    => 'ed' . uniqid() . '@okelcor.test',
+            'role'     => 'editor',
+            'password' => \Illuminate\Support\Facades\Hash::make('secret-pass-123'),
+            'two_factor_confirmed_at' => now(),
+        ]);
     }
 
     private function registerPayload(string $type): array
@@ -277,6 +289,65 @@ class DualAudienceTest extends TestCase
 
         $b2b = collect($this->getJson('/api/v1/products?in_stock=1&segment=b2b')->assertOk()->json('data'))->pluck('name');
         $this->assertFalse($b2b->contains('No b2b price 175/65R14'), 'segment=b2b must exclude products with no trade price');
+    }
+
+    // ── the writing half, at scale ────────────────────────────────────────
+
+    public function test_bulk_audience_surveys_first_then_writes_the_scope(): void
+    {
+        $this->seedAudiences();
+        $admin = $this->admin();
+
+        // Survey: how many rows would this touch. Nothing written.
+        $this->actingAs($admin, 'sanctum')
+            ->postJson('/api/v1/admin/products/bulk-audience', [
+                'audience' => 'b2b', 'all' => false, 'type' => 'TBR', 'dry_run' => true,
+            ])
+            ->assertOk()
+            ->assertJsonPath('matched', 1);
+        $this->assertSame(0, Product::where('type', 'TBR')->where('audience', '!=', 'b2b')->whereNot('name', 'Container lot 315/80R22.5')->count());
+
+        // Write: the TBR scope moves to trade-only; nothing else moves.
+        $this->actingAs($admin, 'sanctum')
+            ->postJson('/api/v1/admin/products/bulk-audience', [
+                'audience' => 'b2b', 'all' => false, 'type' => 'TBR',
+            ])
+            ->assertOk()
+            ->assertJsonPath('affected', 1);
+
+        $this->assertSame('b2b', Product::where('type', 'TBR')->first()->audience);
+        $this->assertSame('both', Product::where('name', 'Everyman 205/55R16')->first()->audience);
+    }
+
+    public function test_bulk_audience_refuses_an_accidentally_empty_scope(): void
+    {
+        // all=false with no ids, brand or type would match nothing silently —
+        // or, worse in a future refactor, everything. Refused with the fix
+        // named instead.
+        $this->seedAudiences();
+
+        $this->actingAs($this->admin(), 'sanctum')
+            ->postJson('/api/v1/admin/products/bulk-audience', [
+                'audience' => 'b2b', 'all' => false,
+            ])
+            ->assertStatus(422);
+
+        $this->assertSame(0, Product::where('audience', 'b2b')->where('name', '!=', 'Container lot 315/80R22.5')->count());
+    }
+
+    public function test_the_admin_list_filters_by_audience(): void
+    {
+        $this->seedAudiences();
+
+        $names = collect(
+            $this->actingAs($this->admin(), 'sanctum')
+                ->getJson('/api/v1/admin/products?audience=b2b')
+                ->assertOk()
+                ->json('data')
+        )->pluck('name');
+
+        $this->assertTrue($names->contains('Container lot 315/80R22.5'));
+        $this->assertFalse($names->contains('Everyman 205/55R16'));
     }
 
     public function test_the_catalogue_survives_the_audience_column_arriving_later(): void

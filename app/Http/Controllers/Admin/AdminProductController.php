@@ -48,6 +48,9 @@ class AdminProductController extends Controller
         if ($request->filled('type')) {
             $query->where('type', $request->type);
         }
+        if ($request->filled('audience') && Product::supportsAudience()) {
+            $query->where('audience', $request->audience);
+        }
         if ($request->filled('brand')) {
             $query->where('brand', $request->brand);
         }
@@ -145,6 +148,76 @@ class AdminProductController extends Controller
         return response()->json([
             'message'  => 'Updated successfully.',
             'affected' => $affected,
+        ]);
+    }
+
+    // -------------------------------------------------------------------------
+    // POST /admin/products/bulk-audience — products.edit
+    //
+    // The writing half of the B2B/B2C separation at scale. 15,265 products
+    // cannot be re-listed one row at a time, so this takes a SCOPE (brand
+    // and/or type, or explicit ids, or all) plus the target audience.
+    //
+    // `dry_run` first, the survey-then-fix pattern every bulk command in this
+    // project follows: the same request with dry_run true answers "how many
+    // rows would this touch" so the panel can confirm with a real number
+    // instead of a shrug.
+    // -------------------------------------------------------------------------
+    public function bulkAudience(Request $request): JsonResponse
+    {
+        if (! Product::supportsAudience()) {
+            return response()->json([
+                'message' => 'Audience is not available yet — the database migration has not run.',
+            ], 503);
+        }
+
+        $data = $request->validate([
+            'audience' => ['required', 'in:both,b2b,b2c'],
+            'dry_run'  => ['sometimes', 'boolean'],
+            'all'      => ['required', 'boolean'],
+            'ids'      => ['nullable', 'array'],
+            'ids.*'    => ['integer'],
+            'brand'    => ['nullable', 'string', 'max:100'],
+            'type'     => ['nullable', 'string', 'max:10'],
+        ]);
+
+        $query = Product::query();
+
+        if (! $request->boolean('all')) {
+            // A narrow scope must actually be narrow: ids, or a brand/type
+            // filter. Refusing an empty scope beats silently matching nothing.
+            if (empty($data['ids']) && empty($data['brand']) && empty($data['type'])) {
+                return response()->json([
+                    'message' => 'Narrow the scope: pass ids, a brand or a type — or set all to true deliberately.',
+                ], 422);
+            }
+            if (! empty($data['ids'])) {
+                $query->whereIn('id', $data['ids']);
+            }
+            if (! empty($data['brand'])) {
+                $query->where('brand', $data['brand']);
+            }
+            if (! empty($data['type'])) {
+                $query->where('type', $data['type']);
+            }
+        }
+
+        $matched = (clone $query)->count();
+
+        if ($request->boolean('dry_run')) {
+            return response()->json([
+                'message' => 'Dry run — nothing written.',
+                'matched' => $matched,
+            ]);
+        }
+
+        $affected = $query->update(['audience' => $data['audience']]);
+
+        return response()->json([
+            'message'  => 'Audience updated.',
+            'matched'  => $matched,
+            'affected' => $affected,
+            'audience' => $data['audience'],
         ]);
     }
 

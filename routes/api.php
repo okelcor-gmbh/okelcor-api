@@ -515,6 +515,7 @@ Route::prefix('v1')->group(function () {
         Route::middleware('permission:products.edit')->group(function () {
             // Products
             Route::post('products/bulk-stock', [AdminProductController::class, 'bulkStock']);
+            Route::post('products/bulk-audience', [AdminProductController::class, 'bulkAudience']);
             // Static before {product} so "spec-options" is never read as an id.
             Route::get('products/spec-options', [AdminProductController::class, 'specOptions']);
             Route::post('products/{id}/restore', [AdminProductController::class, 'restore']);
