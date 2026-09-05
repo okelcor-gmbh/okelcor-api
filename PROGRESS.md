@@ -4,6 +4,30 @@ Last updated: 2026-09-04 | Branch: `main` | **Production is at `ec0e780` — ses
 
 ---
 
+## 📱 Session 121 (frontend only): the mobile navbar earns its keep
+
+> **Deploy status:** ✅ live on okelcor.com (`b490046`, Vercel success),
+> verified against production with the drawer open, the accordion expanded
+> and the footer clear of the cookie banner. **No backend changes.**
+
+Follow-on from Session 120's phone audit, on the user's ask to improve the
+mobile navbar specifically. Verification method carried over: headless
+Chrome driven over CDP with real device emulation (390x844, mobile flag),
+cookie banner declined via Reject Non-Essential before shooting so the
+drawer footer is actually visible in the shot.
+
+| Change | Why |
+|---|---|
+| **One-tap search icon on the phone bar** (next to cart) | Search was buried inside the menu, two taps deep. Class is `lg:hidden!` with the trailing important, because the unlayered `.tesla-icon-btn` display rule beats plain utilities — the exact cascade bug that once rendered two search icons side by side (Session 115). Desktop keeps the single search field, confirmed by a 1440px shot. |
+| **Drawer header carries the wordmark**, not a lone X | Orientation; the logo also closes the drawer and goes home. |
+| **Shop row folds out its mega-menu destinations** | Passenger (PCR), Truck & Bus (TBR), OTR and Used routed to the quote desk, full catalogue — each with its icon, indented behind a rotating chevron. The Shop link itself still navigates; only the chevron expands. State resets in `closeAll()` with every other panel. |
+| **Pinned drawer footer: Quote CTA + tap-to-call + e-mail** | The utility bar holding the phone number and quote CTA is desktop-only, so none of this existed anywhere on mobile. Orange `Quote` button, `tel:+498954558360` and `mailto:info@okelcor.com` chips. Hidden while the language sub-panel is open so the two do not stack. |
+
+Handed to the user: if sales wants Call us / E-mail routed elsewhere (for
+example the WhatsApp line), it is a one-line change.
+
+---
+
 ## 🔁 Session 120: the customer's half of the loop, and the phone audit
 
 > **Deploy status:** ✅ backend `ec0e780` deployed same-session (backup
