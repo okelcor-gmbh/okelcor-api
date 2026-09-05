@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-09-04 | Branch: `main` | **Production is at `ec0e780` — sessions 86–120 (claims queue + portal claims), migrations #1–67 applied | **Production was at `66fbeee` — sessions 86–110 (weekly liquidity with closed weeks + moves + CSV downloads, EC exports, the tagged-task fix, and the to-do list that could finally be opened, stamped with the department that raised it, and moved by that department), migrations #1–63 applied, every deploy verified from outside the same day**
+Last updated: 2026-09-05 | Branch: `main` | **API production is at `ec0e780` — sessions 86 to 120 (through the claims queue and its portal half), migrations #1 to #67 applied. Website production is at `b490046` — sessions 113 to 121 (the frontend rebuild through the mobile navbar). Every deploy verified from outside the same day.**
 
 ---
 
