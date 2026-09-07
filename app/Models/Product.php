@@ -96,6 +96,7 @@ class Product extends Model
         'speed_rating',
         'stock',
         'cost_price',
+        'price_tier',
         'ebay_listed',
         'ebay_item_id',
         'ebay_offer_id',

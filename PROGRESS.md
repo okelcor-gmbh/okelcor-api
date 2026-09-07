@@ -4,6 +4,38 @@ Last updated: 2026-09-07 | Branch: `main` | **API production is at `ec0e780` —
 
 ---
 
+## 🧮 Session 123: tier pricing — Tyre100 is the truth, both channels derive
+
+> **Deploy status:** 🔲 pending this session — migration #68
+> (`products.price_tier`, guarded/additive).
+
+The team's decision (user + order manager, 2026-09-07) replaced Session
+122's adopt-eBay-price direction hours after it shipped: eBay is NOT the
+price source — **Tyre100, the supplier, is**. The model:
+
+```
+base    = cost_price (Tyre100) × (1 + margin)   Premium 15% / Mid-range 20% / Budget 30%
+website = base × 1.03      (Stripe fee baked in)
+eBay    = base × 1.095     (Stripe swapped for eBay charges)
+```
+
+| Piece | How it lands |
+|---|---|
+| `products.price_tier` (migration #68) | Plain string (the enum lesson), nullable — an unassigned product is skipped, never guessed. Tiers validated against `TierPricingService::TIERS`. |
+| `TierPricingService` | The one place the formula lives. All five percentages env-configurable (`PRICING_*`) without a deploy. |
+| `GET /admin/pricing/preview` · `POST set-tier` · `POST apply` | New `pricing.manage` permission (super_admin, admin — "products.edit has no business setting what a unit sells for", same reasoning as fet.pricing). Set-tier sweeps a whole brand or ticked ids; apply writes the website price for everything priceable, reporting skips. 503 pre-migration. |
+| eBay offers price themselves | `EbaySellingService::buildOfferBody` runs every pushed offer through the formula (fallback: plain `price`) — so list/update/sync all carry cost × margin × 1.095 with **no new eBay endpoint**. |
+| The audit's drift, re-based | Under this model the eBay price is SUPPOSED to sit ~6% above the site price, so `price_drift` now compares live eBay against `expected_ebay_price` (the formula), not against `db_price` — otherwise every product would flag forever. |
+| **Removed** — Session 122's adopt endpoints/UI | eBay-as-truth contradicts the new model; endpoints, tests and panel buttons deleted the same day they shipped. The audit keeps the drift *display*. |
+| Frontend | New **Sales Channels → Tyre Pricing** page (`/admin/pricing`): brand→tier sweep, per-row tier select, Tyre100 cost / current / →website / →eBay columns, apply selected/all with skip reporting. Rides the `ebay` section (same roles as `pricing.manage`). |
+
+Tests: `TierPricingTest` (8 tests) — all three tiers' math to the cent,
+preview readiness counts, brand + id tier assignment, apply skipping the
+unpriceable, the offer body carrying 125.93 for a €100 premium cost,
+pre-migration 503s, permission edges. Suite: **861 passing**.
+
+---
+
 ## 🔁 Session 122 (backend): the price comparison closes the loop the other way
 
 > **Deploy status:** ✅ BOTH halves live same-session. Backend `c1d7565`

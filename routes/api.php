@@ -45,6 +45,7 @@ use App\Http\Controllers\Partner\PartnerSaleController;
 use App\Http\Controllers\Admin\AdminNewsletterController;
 use App\Http\Controllers\Admin\AdminFinanceInvoiceController;
 use App\Http\Controllers\Admin\AdminEbayAuditController;
+use App\Http\Controllers\Admin\AdminTierPricingController;
 use App\Http\Controllers\Admin\AdminFinanceSnapshotController;
 use App\Http\Controllers\Admin\AdminEcInvoiceController;
 use App\Http\Controllers\Admin\AdminSalesOrderBoardController;
@@ -1247,6 +1248,16 @@ Route::prefix('v1')->group(function () {
         });
 
         // -----------------------------------------------------------------
+        // Tier pricing — pricing.manage (super_admin, admin). Tyre100 cost
+        // + tier margin drives both the website and the eBay price.
+        // -----------------------------------------------------------------
+        Route::middleware('permission:pricing.manage')->group(function () {
+            Route::get('pricing/preview', [AdminTierPricingController::class, 'preview']);
+            Route::post('pricing/set-tier', [AdminTierPricingController::class, 'setTier']);
+            Route::post('pricing/apply', [AdminTierPricingController::class, 'apply']);
+        });
+
+        // -----------------------------------------------------------------
         // eBay listing sync — ebay.manage (super_admin, admin)
         // -----------------------------------------------------------------
         Route::middleware('permission:ebay.manage')->group(function () {
@@ -1263,10 +1274,6 @@ Route::prefix('v1')->group(function () {
             // and the audited one-step price correction (site + eBay together)
             Route::get('ebay/audit', [AdminEbayAuditController::class, 'index']);
             Route::post('ebay/audit/{id}/apply-price', [AdminEbayAuditController::class, 'applyPrice']);
-            // Price comparison adoption — eBay's live price taken as the
-            // truth and written to the website (single row, or bulk sweep)
-            Route::post('ebay/audit/adopt-ebay-prices', [AdminEbayAuditController::class, 'adoptEbayPrices']);
-            Route::post('ebay/audit/{id}/adopt-ebay-price', [AdminEbayAuditController::class, 'adoptEbayPrice']);
             // Live snapshot refresh — walks every SKU on eBay, so throttled
             // like the other whole-account syncs
             Route::post('ebay/audit/sync-live', [AdminEbayAuditController::class, 'syncLive'])

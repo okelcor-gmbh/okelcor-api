@@ -1,0 +1,3542 @@
+{
+  "items": [
+    {
+      "id": 2,
+      "category": "OPEN PROPOSALS",
+      "person": "Edinah",
+      "ref": "AN-1298",
+      "date": "2026-04-30",
+      "client": "NIOS GROUP CORP Moustapha Niodogo 3850 Welcome All road, Atlanta 30349 Georgia",
+      "status": "Pending",
+      "comment": "Client Say wait from 25th Jul 2026",
+      "amount": 20712
+    },
+    {
+      "id": 4,
+      "category": "OPEN PROPOSALS",
+      "person": "Edinah",
+      "ref": "AN-1333",
+      "date": "2026-08-13",
+      "client": "HAMIDIL Zorobar 0 Lome Togo",
+      "status": "Under Review",
+      "comment": "Client is reviewing 14-Aug-2026",
+      "amount": 20000
+    },
+    {
+      "id": 1786707995410,
+      "category": "OPEN PROPOSALS",
+      "person": "Lisa",
+      "ref": "AN-1329",
+      "date": "2026-06-04",
+      "client": "Muscali Tyres\t 0000 Berbera",
+      "status": "Pending",
+      "comment": "Pending client Last, Lisa to ask 17Aug2026",
+      "amount": 20319.9
+    },
+    {
+      "id": 1786708109363,
+      "category": "OPEN PROPOSALS",
+      "person": "Solomon",
+      "ref": "AN-1268",
+      "date": "2026-01-08",
+      "client": "OVI EVENTS MANAGEMENT\t Bahnstr, 13 83533 Edling",
+      "status": "Pending",
+      "comment": "Solomon to give update",
+      "amount": 214.8
+    },
+    {
+      "id": 1786708168642,
+      "category": "OPEN PROPOSALS",
+      "person": "Solomon",
+      "ref": "AN-1310",
+      "date": "2026-06-14",
+      "client": "Autoservice Engin\t Kfz-Werkstatt und Reifendienst Landsberger Str 216C 80687 München",
+      "status": "Pending",
+      "comment": "Solomon to Give update",
+      "amount": 1057.12
+    },
+    {
+      "id": 1786708384426,
+      "category": "OPEN ORDERS",
+      "person": "Edinah",
+      "ref": "AB-1148",
+      "date": "2026-04-23",
+      "client": "Wizzy Dee solutions Pty ltd\t\"Plot 6404 Unit 10 6404 Gaborone Botswana\"",
+      "status": "Pending",
+      "comment": "Edinah to talk to client 14-Aug-2026",
+      "amount": 11750
+    },
+    {
+      "id": 1786708517212,
+      "category": "OPEN ORDERS",
+      "person": "Edinah",
+      "ref": "AB-1156",
+      "date": "2026-05-16",
+      "client": "DAKEX LTD 15 Collingham Street\tManchester United Kingdom M8 8RQ Great Britain",
+      "status": "Pending",
+      "comment": "Edinah to check with Client",
+      "amount": 34000
+    },
+    {
+      "id": 1786708769047,
+      "category": "OPEN ORDERS",
+      "person": "Edinah",
+      "ref": "AB-1176",
+      "date": "2026-08-14",
+      "client": "Mamaleeko Company LTD\t\"9 Weaver Walk, Higher Openshaw M11 2LG Manchester Great Britain\"",
+      "status": "Pending",
+      "comment": "Edinah to expects client to pay endmonth",
+      "amount": 12000
+    },
+    {
+      "id": 1786711922342,
+      "category": "OPEN ORDERS",
+      "person": "Edinah",
+      "ref": "AB-1182",
+      "date": "2026-08-14",
+      "client": "TyreFlexx\t\"Contact Person: Theo Nartey 2 The Old Rectory, Greenhithe DA9 9AS Greenhithe Great Britain\"",
+      "status": "Pending",
+      "comment": "50% paid FIN to Check",
+      "amount": 22250
+    },
+    {
+      "id": 1786712483861,
+      "category": "OPEN ORDERS",
+      "person": "Lisa",
+      "ref": "AB-1128",
+      "date": "2026-02-24",
+      "client": "DEGLO GLOBAL INVESTMENTS PTY LTD\t Gaborone",
+      "status": "Pending",
+      "comment": "Lisa to update 17Aug2026",
+      "amount": 7800
+    },
+    {
+      "id": 1786712556089,
+      "category": "OPEN ORDERS",
+      "person": "Lisa",
+      "ref": "AB-1175",
+      "date": "2026-08-14",
+      "client": "RIDE ON MOTORCYCLE SPARE PARTS\t\"Street 808 Building 24 Zone 39 Floor 3 Unit 5 0 Doha Qatar\"",
+      "status": "Pending",
+      "comment": "Lisa to update 17Aug2026",
+      "amount": 71458.1
+    },
+    {
+      "id": 1786712612685,
+      "category": "OPEN ORDERS",
+      "person": "Lisa",
+      "ref": "AB-1179",
+      "date": "2026-06-30",
+      "client": "ERIC EFFAH YAW ENTERPRISE\t BEREKUM 122 BEREKUM",
+      "status": "Pending",
+      "comment": "Client Needs time like 2weeks",
+      "amount": 13300
+    },
+    {
+      "id": 1786712918403,
+      "category": "OUTSTANDING INVOICES",
+      "person": "Edinah",
+      "ref": "RE-1365",
+      "date": "2026-07-07",
+      "client": "Lillian Ikulumet Ruessstr 40, 80997 München Germany",
+      "status": "Pending",
+      "comment": "Pending Payment 31st Jul EUR 100",
+      "amount": 283.61
+    },
+    {
+      "id": 1786716166516,
+      "category": "OUTSTANDING INVOICES",
+      "person": "Solomon",
+      "ref": "RE-1330",
+      "date": "05/02/2026",
+      "client": "YAY Tyres  50 Allen avenue ,Ikeja Lagos",
+      "status": "Pending",
+      "comment": "Follow up For Payment, Ask Solomon,Gave New tyres",
+      "amount": 1160
+    },
+    {
+      "id": 1786716184467,
+      "category": "OUTSTANDING INVOICES",
+      "person": "Solomon",
+      "ref": "RE-1330",
+      "date": "05/02/2026",
+      "client": "YAY Tyres  50 Allen avenue ,Ikeja Lagos",
+      "status": "Pending",
+      "comment": "Follow up For Payment, Ask Solomon,Gave New tyres",
+      "amount": 1160
+    },
+    {
+      "id": 1786716419863,
+      "category": "OUTSTANDING INVOICES",
+      "person": "Solomon",
+      "ref": "RE-1330",
+      "date": "05/02/2026",
+      "client": "YAY Tyres  50 Allen avenue ,Ikeja Lagos",
+      "status": "Pending",
+      "comment": "Follow up For Payment, Ask Solomon,Gave New tyres",
+      "amount": 1160
+    },
+    {
+      "id": 1786716419864,
+      "category": "OUTSTANDING INVOICES",
+      "person": "Edinah",
+      "ref": "RE-1334",
+      "date": "30/12/2024",
+      "client": "Full Circle Used Tire LLC DBA Ben Tire 2500 Brunswick Ave, Bldg. D07036 Linden NJUnited States of America",
+      "status": "Pending",
+      "comment": "We need to add Wise USD in Sevdesk",
+      "amount": 27180
+    },
+    {
+      "id": 1786716419865,
+      "category": "OUTSTANDING INVOICES",
+      "person": "Edinah",
+      "ref": "RE-1338",
+      "date": "23/03/2026",
+      "client": "Full Circle Used Tire LLC DBA Ben Tire  DBA Ben Tire 2500 Brunswick Ave, Bldg. D 07036 Linden NJ",
+      "status": "Pending",
+      "comment": "Paid USD 10777, Paid USD 16,159.63 Balance USD 26,949.31",
+      "amount": 22948.73
+    },
+    {
+      "id": 1786716419866,
+      "category": "OUTSTANDING INVOICES",
+      "person": "Solomon",
+      "ref": "RE-1340",
+      "date": "11/05/2025",
+      "client": "DEGLO GLOBAL INVESTMENTS PTY LTD GaboroneBotswana",
+      "status": "Pending",
+      "comment": "Follow up for payment Solomon",
+      "amount": 520
+    },
+    {
+      "id": 1786716419867,
+      "category": "OUTSTANDING INVOICES",
+      "person": "Solomon",
+      "ref": "RE-1341",
+      "date": "06/01/2025",
+      "client": "cargo center ghana limited Dr Boadi Acheampong EbenezerPMB 233 TOPIC ADJACENT TDC HEIGHTSCOMMUNITY 2 AccraGhana",
+      "status": "Pending",
+      "comment": "Follow up for payment Solomon",
+      "amount": 14237
+    },
+    {
+      "id": 1786716419869,
+      "category": "OUTSTANDING INVOICES",
+      "person": "Chama",
+      "ref": "RE-1352",
+      "date": "13/05/2026",
+      "client": "Nafass B CO. LTD  Ackah Gabriel ACCRA",
+      "status": "Pending",
+      "comment": "Follow up For Payment-Chama/Solomon",
+      "amount": 2750
+    },
+    {
+      "id": 1786716419870,
+      "category": "OUTSTANDING INVOICES",
+      "person": "Chama",
+      "ref": "RE-1353",
+      "date": "15/05/2026",
+      "client": "Nafass B CO. LTD  Ackah Gabriel ACCRA",
+      "status": "Pending",
+      "comment": "Follow up For Payment-Chama/Solomon",
+      "amount": 1190
+    },
+    {
+      "id": 1786716419871,
+      "category": "OUTSTANDING INVOICES",
+      "person": "Chama",
+      "ref": "RE-1355",
+      "date": "26/05/2026",
+      "client": "DONE DELIVERIES SP. Z O.O. BATOREGO 3534-120 AndrychwPoland",
+      "status": "Pending",
+      "comment": "Solomon to Approve Credit Note",
+      "amount": 508.5
+    },
+    {
+      "id": 1786716419872,
+      "category": "OUTSTANDING INVOICES",
+      "person": "Chama",
+      "ref": "RE-1356",
+      "date": "26/05/2026",
+      "client": "Namo Namah Global LLC BFD Group UAB  Sharjah Media City",
+      "status": "Pending",
+      "comment": "Unpaid EUR 120 Chama/Solomon to Advise",
+      "amount": 120
+    },
+    {
+      "id": 1786716419873,
+      "category": "OUTSTANDING INVOICES",
+      "person": "Solomon",
+      "ref": "RE-1360",
+      "date": "04/06/2026",
+      "client": "I&i mobile tires services  inc 4445 Commerce Drive Southwest Atlanta, GA 30336",
+      "status": "Pending",
+      "comment": "Follow up For Payment,Solomon",
+      "amount": 16489.59
+    },
+    {
+      "id": 1786716419874,
+      "category": "OUTSTANDING INVOICES",
+      "person": "Solomon",
+      "ref": "RE-1362",
+      "date": "10/06/2026",
+      "client": "cargo center ghana limited  Dr Boadi Acheampong Ebenezer PMB 233 TOPIC ADJACENT TDC HEIGHTS COMMUNITY 2 Accra",
+      "status": "Pending",
+      "comment": "Follow up For Payment,,,,Solomon",
+      "amount": 1550
+    },
+    {
+      "id": 1786716419875,
+      "category": "OUTSTANDING INVOICES",
+      "person": "Solomon",
+      "ref": "RE-1363",
+      "date": "12/06/2026",
+      "client": "Autoservice Engin  Kfz-Werkstatt und Reifendienst Landsberger Str 216C 80687 Mnchen",
+      "status": "Pending",
+      "comment": "Follow up For Payment,,,,Solomon",
+      "amount": 279.03
+    },
+    {
+      "id": 1786716419876,
+      "category": "OUTSTANDING INVOICES",
+      "person": "Solomon",
+      "ref": "RE-1364",
+      "date": "02/07/2026",
+      "client": "Christian Baah  P.O.Box AT6149 - Achimota, Accra",
+      "status": "Pending",
+      "comment": "Follow up For Payment,,,,Solomon",
+      "amount": 10000
+    },
+    {
+      "id": 1786716419878,
+      "category": "OUTSTANDING INVOICES",
+      "person": "Solomon",
+      "ref": "RE-1366",
+      "date": "03/04/2026",
+      "client": "Imperial Sales & Services n.v.  Rooi santoe 700b NA Willemstad",
+      "status": "Pending",
+      "comment": "Part Paid Order not Sent, Solomon",
+      "amount": 2098.68
+    },
+    {
+      "id": 1786716419879,
+      "category": "OUTSTANDING INVOICES",
+      "person": "Solomon",
+      "ref": "RE-1368",
+      "date": "2026-07-12",
+      "client": "cargo center ghana limited  Dr Boadi Acheampong Ebenezer PMB 233 TOPIC ADJACENT TDC HEIGHTS COMMUNITY 2 Accra",
+      "status": "Pending",
+      "comment": "To Pay 50% 21st Aug 2026",
+      "amount": 14000
+    },
+    {
+      "id": 1786716419880,
+      "category": "OUTSTANDING INVOICES",
+      "person": "Solomon",
+      "ref": "RE-1369",
+      "date": "2026-07-14",
+      "client": "cargo center ghana limited  Dr Boadi Acheampong Ebenezer PMB 233 TOPIC ADJACENT TDC HEIGHTS COMMUNITY 2 Accra",
+      "status": "Pending",
+      "comment": "To Pay 50% 21st Aug 2026",
+      "amount": 14000
+    },
+    {
+      "id": 1786716419881,
+      "category": "OUTSTANDING INVOICES",
+      "person": "Edinah",
+      "ref": "RE-1377",
+      "date": "29/07/2026",
+      "client": "MLK Tires LLC 2484 Martin Luther King jr Drive30311 SW Atlanta GeorgiaUnited States of America",
+      "status": "Pending",
+      "comment": "Paid USD 15,000 Balance 15,565",
+      "amount": 12978.11
+    },
+    {
+      "id": 1786716419882,
+      "category": "OUTSTANDING INVOICES",
+      "person": "Edinah",
+      "ref": "RE-1380",
+      "date": "04/08/2026",
+      "client": "Autoservice Engin Kfz-Werkstatt und ReifendienstLandsberger Str 216C80687 MnchenDeutschland",
+      "status": "Pending",
+      "comment": "Edinah Still Following for Payment",
+      "amount": 210.11
+    },
+    {
+      "id": 1786721827151,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-1",
+      "date": "31/01/2026",
+      "client": "Hotel de Paris Montparnasse Hotel de Paris Montparnasse",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -257.87
+    },
+    {
+      "id": 1786721827153,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-2",
+      "date": "30/01/2026",
+      "client": "Headout Disneyland Headout Disneyland",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -308.97
+    },
+    {
+      "id": 1786721827154,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-3",
+      "date": "29/01/2026",
+      "client": "TotalEnergies TotalEnergies",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -98.95
+    },
+    {
+      "id": 1786721827155,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-4",
+      "date": "28/01/2026",
+      "client": "EUROSENDER EUR",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -924.38
+    },
+    {
+      "id": 1786721827156,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-5",
+      "date": "27/01/2026",
+      "client": "HANDYPARKEN MUENCHEN",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -4
+    },
+    {
+      "id": 1786721827157,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-6",
+      "date": "24/01/2026",
+      "client": "JET-Tankstelle",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -96.59
+    },
+    {
+      "id": 1786721827158,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-7",
+      "date": "23/01/2026",
+      "client": "PIA AUTOPFLEGEZENTRUM",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -16
+    },
+    {
+      "id": 1786721827159,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-8",
+      "date": "22/01/2026",
+      "client": "Hauptzollamt Rosenheim Invoice Number: 002335-2026-7750",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -388.6
+    },
+    {
+      "id": 1786721827160,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-9",
+      "date": "14/01/2026",
+      "client": "JET-Tankstelle",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -98.94
+    },
+    {
+      "id": 1786721827161,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-10",
+      "date": "09/01/2026",
+      "client": "Edinah Elleazar Agalla Dez Lohngehalt",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -2465
+    },
+    {
+      "id": 1786721827162,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-11",
+      "date": "07/01/2026",
+      "client": "Stadtsparkasse M�nchen KREDITKARTENABRECHNUNG 06.01.26 558401XXXXXX1132",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -93.99
+    },
+    {
+      "id": 1786721827163,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-12",
+      "date": "24/02/2026",
+      "client": "Reifen Steinbart Sent Reifen Steinbart",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -950
+    },
+    {
+      "id": 1786721827164,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-13",
+      "date": "19/02/2026",
+      "client": "Aelia Duty Free Walkthrough Aelia Duty Free Walkthrough",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -310.7
+    },
+    {
+      "id": 1786721827165,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-14",
+      "date": "18/02/2026",
+      "client": "Lufthansa Lufthansa",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -840
+    },
+    {
+      "id": 1786721827166,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-15",
+      "date": "17/02/2026",
+      "client": "Windorf M+A Holdings GmbH Sent Windorf M+A Holdings GmbH Consulting service",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -1190
+    },
+    {
+      "id": 1786721827167,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-16",
+      "date": "13/02/2026",
+      "client": "Online Shop Orlen",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -23.99
+    },
+    {
+      "id": 1786721827168,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-17",
+      "date": "09/02/2026",
+      "client": "Ethiopian Airlines Ethiopian Airlines",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -75.44
+    },
+    {
+      "id": 1786721827169,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-18",
+      "date": "04/02/2026",
+      "client": "Edinah Elleazar Agalla Januar Gehalt",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -2465
+    },
+    {
+      "id": 1786721827170,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-19",
+      "date": "2026-02-01",
+      "client": "Asia Gourmet Asia Gourmet",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -57
+    },
+    {
+      "id": 1786721827171,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-20",
+      "date": "01/02/2026",
+      "client": "Intermarch� Intermarch�",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -81.15
+    },
+    {
+      "id": 1786721827172,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-21",
+      "date": "30/03/2026",
+      "client": "Card transaction of 715.49 EUR issued by Back Market Paris",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -227.5
+    },
+    {
+      "id": 1786721827173,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-22",
+      "date": "13/03/2026",
+      "client": "eDreams eDreams",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -764.76
+    },
+    {
+      "id": 1786721827174,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-23",
+      "date": "28/04/2026",
+      "client": "Action 3175",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -44.23
+    },
+    {
+      "id": 1786721827175,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-24",
+      "date": "26/04/2026",
+      "client": "Card transaction of 23.98 EUR issued by Paypal *Netflix.com 4029357733",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -23.98
+    },
+    {
+      "id": 1786721827176,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-25",
+      "date": "25/04/2026",
+      "client": "HANDYPARKEN MUENCHEN",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -5
+    },
+    {
+      "id": 1786721827177,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-26",
+      "date": "24/04/2026",
+      "client": "AOK Bayern Die Gesundheitskasse Rechnungsnummer: 81857379",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -1727.5
+    },
+    {
+      "id": 1786721827178,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-27",
+      "date": "24/04/2026",
+      "client": "Telekom Deutschland GmbH Festnetz Vertragskonto 5635235777 RG 7269253398/16.04.2026",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -68.58
+    },
+    {
+      "id": 1786721827179,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-28",
+      "date": "24/04/2026",
+      "client": "UBER *TRIP",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -7
+    },
+    {
+      "id": 1786721827180,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-29",
+      "date": "23/04/2026",
+      "client": "Windorf M+A Holdings GmbH payment of consulting invoices",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -4200
+    },
+    {
+      "id": 1786721827181,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-30",
+      "date": "23/04/2026",
+      "client": "Okelcor GmbH Dispo repayment",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -5000
+    },
+    {
+      "id": 1786721827182,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-31",
+      "date": "23/04/2026",
+      "client": "EFON.IO",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -59.5
+    },
+    {
+      "id": 1786721827183,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-32",
+      "date": "23/04/2026",
+      "client": "Jankel Silberstein Rechnungsnummer: 01 17.02.2026",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -999.6
+    },
+    {
+      "id": 1786721827184,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-33",
+      "date": "22/04/2026",
+      "client": "Mekan Restaurant",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -26.7
+    },
+    {
+      "id": 1786721827185,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-34",
+      "date": "21/04/2026",
+      "client": "EFON.IO",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -5.95
+    },
+    {
+      "id": 1786721827186,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-35",
+      "date": "20/04/2026",
+      "client": "Wix.com Luxembourg SARL Wix Payments",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": 497.24
+    },
+    {
+      "id": 1786721827187,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-36",
+      "date": "20/04/2026",
+      "client": "Temu.com",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -34.68
+    },
+    {
+      "id": 1786721827188,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-37",
+      "date": "20/04/2026",
+      "client": "Restaurant DuDu",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -85.08
+    },
+    {
+      "id": 1786721827189,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-38",
+      "date": "19/04/2026",
+      "client": "MEDIA MARKT TV-HIFI-EL",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -264.99
+    },
+    {
+      "id": 1786721827190,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-39",
+      "date": "16/04/2026",
+      "client": "Wix.com Luxembourg SARL Wix Payments",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": 204.04
+    },
+    {
+      "id": 1786721827191,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-40",
+      "date": "13/04/2026",
+      "client": "Card transaction of 23.00 EUR issued by Paypal *Dpddeutschl 2618889480",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -23
+    },
+    {
+      "id": 1786721827192,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-41",
+      "date": "13/04/2026",
+      "client": "eBay S.a.r.l. P.7430877635",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": 129.14
+    },
+    {
+      "id": 1786721827193,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-42",
+      "date": "13/04/2026",
+      "client": "MED DREAM d.o.o. Rechnungsnummer: 8-001-1 08.04.2026",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -2000
+    },
+    {
+      "id": 1786721827194,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-43",
+      "date": "10/04/2026",
+      "client": "KSP Kanzlei Dr. Seegers, Dr. Frankenheim Rechtsanwaltsgesellschaft mbH Rechnungsnummer: PL5144671",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -976.1
+    },
+    {
+      "id": 1786721827195,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-44",
+      "date": "08/04/2026",
+      "client": "Vodafone GmbH Rechnungsnummer: 122133911299 11.03.2026 Kundennummer: 118373278",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -84.73
+    },
+    {
+      "id": 1786721827196,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-45",
+      "date": "07/04/2026",
+      "client": "EL INTERNATIONAL B.V. Rechnungsnummer: 260251 18-03-2026",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -3570
+    },
+    {
+      "id": 1786721827197,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-46",
+      "date": "07/04/2026",
+      "client": "EL INTERNATIONAL B.V. Rechnungsnummer: 260286 25-03-2026",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -3200
+    },
+    {
+      "id": 1786721827198,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-47",
+      "date": "06/04/2026",
+      "client": "Sent money to Stella Norte Consulting, LLC (fee: 2.32 USD) Okelcor GmbH USD -4601.68 TRANSFER-2064585631",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -4098.26
+    },
+    {
+      "id": 1786721827199,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-48",
+      "date": "05/04/2026",
+      "client": "NOURI GASTRO HERZOGENR",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -17.67
+    },
+    {
+      "id": 1786721827201,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-49",
+      "date": "03/04/2026",
+      "client": "HP INC HP.COM STORE DE",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -749.26
+    },
+    {
+      "id": 1786721827202,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-50",
+      "date": "02/04/2026",
+      "client": "eBay S.a.r.l. P.7415292971",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": 221.35
+    },
+    {
+      "id": 1786721827203,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-51",
+      "date": "02/04/2026",
+      "client": "Konig Buro-Management Verwaltungs G RE261264 13360",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -602.14
+    },
+    {
+      "id": 1786721827204,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-52",
+      "date": "02/04/2026",
+      "client": "Debitor-Inkasso GmbH RF8821D219798001",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -969.22
+    },
+    {
+      "id": 1786721827205,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-53",
+      "date": "01/04/2026",
+      "client": "Abrechnung 31.03.2026siehe Anlage",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -577.79
+    },
+    {
+      "id": 1786721827206,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-54",
+      "date": "01/04/2026",
+      "client": "OKELCOR GMBH Weiterleitung Entgeltevon Konto: 890013154Abrechnung vom: 31.03.2026Abrechnungsbetrag inW�hrung USD 17,85-Wechselkurs 1,15560",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -15.45
+    },
+    {
+      "id": 1786721827207,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-55",
+      "date": "01/04/2026",
+      "client": "Entgeltabrechnungsiehe Anlage",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -18.15
+    },
+    {
+      "id": 1786721827208,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-56",
+      "date": "31/05/2026",
+      "client": "Peek & Cloppenburg",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -955.59
+    },
+    {
+      "id": 1786721827209,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-57",
+      "date": "30/05/2026",
+      "client": "JET-Tankstelle",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -115.27
+    },
+    {
+      "id": 1786721827210,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-58",
+      "date": "27/05/2026",
+      "client": "Telekom Deutschland GmbH Festnetz Vertragskonto 5635235777 RG 7285456781/18.05.2026",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -31.31
+    },
+    {
+      "id": 1786721827211,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-59",
+      "date": "26/05/2026",
+      "client": "Card transaction of 23.98 EUR issued by Paypal *Netflix.com 4029357733",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -23.98
+    },
+    {
+      "id": 1786721827212,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-60",
+      "date": "24/05/2026",
+      "client": "ALLGUTH GMBH 1202",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -114.49
+    },
+    {
+      "id": 1786721827213,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-61",
+      "date": "22/05/2026",
+      "client": "Versicherungskammer Bayern KAUTION BC-8599-9999-3563 01.01.2026",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -728.82
+    },
+    {
+      "id": 1786721827214,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-62",
+      "date": "21/05/2026",
+      "client": "Vodafone GmbH 40549 Duesseldorf 0000118373278 0020983524924 KdNr. 118373278 Vodafone sagt Danke",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -71.88
+    },
+    {
+      "id": 1786721827215,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-63",
+      "date": "19/05/2026",
+      "client": "Penny Dachau",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -70.75
+    },
+    {
+      "id": 1786721827216,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-64",
+      "date": "19/05/2026",
+      "client": "HANDYPARKEN MUENCHEN",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -5
+    },
+    {
+      "id": 1786721827217,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-65",
+      "date": "19/05/2026",
+      "client": "HANDYPARKEN MUENCHEN",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -4
+    },
+    {
+      "id": 1786721827218,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-66",
+      "date": "18/05/2026",
+      "client": "Finanzamt M�nchen 9143/167/80505 - VOX40 - 69 34 AO DATUM 18.05.2026, 16.46 UHR",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -26185.54
+    },
+    {
+      "id": 1786721827219,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-67",
+      "date": "18/05/2026",
+      "client": "Finanzamt M�nchen AZ 9143/167/80505 - VOV35 -59407/25 F, Pf�ndung vom 03.11.2025,ZlgvDS, Kd. OKELCOR GmbH, Pf.Nr. 223119, Vollzahlung",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -22348.74
+    },
+    {
+      "id": 1786721827220,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-68",
+      "date": "18/05/2026",
+      "client": "Windorf M+A Holdings GmbH Darlehen vom 13.05.2026 Rest",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": 1000
+    },
+    {
+      "id": 1786721827221,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-69",
+      "date": "17/05/2026",
+      "client": "PIA AUTOPFLEGEZENTRUM",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -16.5
+    },
+    {
+      "id": 1786721827222,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-70",
+      "date": "17/05/2026",
+      "client": "Commerzbank 00210793",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -1000
+    },
+    {
+      "id": 1786721827223,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-71",
+      "date": "16/05/2026",
+      "client": "Card transaction of 29.75 EUR issued by Paypal *Creditrefor 35314369001",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -29.75
+    },
+    {
+      "id": 1786721827224,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-72",
+      "date": "15/05/2026",
+      "client": "Windorf M+A Holdings GmbH Darlehen gem�� Vertrag vom 13. Mai2026",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": 99000
+    },
+    {
+      "id": 1786721827225,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-73",
+      "date": "13/05/2026",
+      "client": "Vodafone GmbH Rechnungsnummer: 122203435898 14.04.2026",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -71.88
+    },
+    {
+      "id": 1786721827226,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-74",
+      "date": "12/05/2026",
+      "client": "Demir Keramik & Stein GmbH & Co.KG 202430708",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -734.83
+    },
+    {
+      "id": 1786721827227,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-75",
+      "date": "11/05/2026",
+      "client": "Riverty Services GmbH S.24.2803569.01.6",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -546.81
+    },
+    {
+      "id": 1786721827228,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-76",
+      "date": "11/05/2026",
+      "client": "OGVin-Schoppert 70 DR 50/26",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -598
+    },
+    {
+      "id": 1786721827229,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-77",
+      "date": "10/05/2026",
+      "client": "MUENCHENHOFBRAEUKELLER",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -15
+    },
+    {
+      "id": 1786721827230,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-78",
+      "date": "07/05/2026",
+      "client": "TOTAL SERVICE STATION",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -123.64
+    },
+    {
+      "id": 1786721827231,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-79",
+      "date": "07/05/2026",
+      "client": "PIA AUTOPFLEGEZENTRUM",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -16.5
+    },
+    {
+      "id": 1786721827232,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-80",
+      "date": "05/05/2026",
+      "client": "HANDYPARKEN MUENCHEN",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -3.46
+    },
+    {
+      "id": 1786721827233,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-81",
+      "date": "05/05/2026",
+      "client": "Telefonica Germany GmbH + Co. OHG Kd-Nr.: 6116029742, Rg-Nr.: 1546559584/8, Ihre Tarifrechnung",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -59.99
+    },
+    {
+      "id": 1786721827234,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-82",
+      "date": "05/05/2026",
+      "client": "Solomon Okello April Lohn Gehalt",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -4131.92
+    },
+    {
+      "id": 1786721827235,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-83",
+      "date": "05/05/2026",
+      "client": "Card transaction of 34.99 EUR issued by Okelcor Gmbh MUNCHEN",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -34.99
+    },
+    {
+      "id": 1786721827236,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-84",
+      "date": "04/05/2026",
+      "client": "Microsoft Payments MSFT . E0600Z9X7I",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -114.66
+    },
+    {
+      "id": 1786721827237,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-85",
+      "date": "04/05/2026",
+      "client": "MED - DREAM d.o.o. 10-001-1",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -2000
+    },
+    {
+      "id": 1786721827238,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-86",
+      "date": "04/05/2026",
+      "client": "Princewill Moto Fabi April Gehalt",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -520
+    },
+    {
+      "id": 1786721827239,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-87",
+      "date": "04/05/2026",
+      "client": "Landeshauptstadt M�nchen Stadtk�mmerei GPNummer: 1001574555",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -4854.5
+    },
+    {
+      "id": 1786721827240,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-88",
+      "date": "02/05/2026",
+      "client": "Debitor-Inkasso GmbH RF8821D219798001",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -969.22
+    },
+    {
+      "id": 1786721827241,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-89",
+      "date": "01/05/2026",
+      "client": "DHL*DQU2ZDHXTRS8",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -164
+    },
+    {
+      "id": 1786721827242,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-90",
+      "date": "01/05/2026",
+      "client": "IMO-Autowaschstrasse",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -21
+    },
+    {
+      "id": 1786721827243,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-91",
+      "date": "30/06/2026",
+      "client": "Solomon Okello Juni gehalt",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -4120
+    },
+    {
+      "id": 1786721827244,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-92",
+      "date": "29/06/2026",
+      "client": "eBay S.a.r.l. P.7578205211",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": 49.46
+    },
+    {
+      "id": 1786721827245,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-93",
+      "date": "27/06/2026",
+      "client": "Penny Dachau Card transaction of 60.75 EUR issued by Penny Dachau Dachau",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -60.75
+    },
+    {
+      "id": 1786721827246,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-94",
+      "date": "26/06/2026",
+      "client": "Card transaction of 23.98 EUR issued by Paypal *Netflix.com 4029357733",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -23.98
+    },
+    {
+      "id": 1786721827247,
+      "category": "PENDING RECEIPTS",
+      "person": "John",
+      "ref": "Ref-95",
+      "date": "24/06/2026",
+      "client": "RESEND",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -18.27
+    },
+    {
+      "id": 1786721827248,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-96",
+      "date": "22/06/2026",
+      "client": "Received money from TYREX13 TIRE SHOP AND AUTO BODY I NC. with reference 20260623B6B7HU1R015780 20260623B6B7HU1R015780 USD 16165.8 TRANSFER-2208095186",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": 14125.68
+    },
+    {
+      "id": 1786721827249,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-97",
+      "date": "22/06/2026",
+      "client": "eBay S.a.r.l. P.7563699779",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": 80.72
+    },
+    {
+      "id": 1786721827250,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-98",
+      "date": "22/06/2026",
+      "client": "Rundfunk ARD, ZDF, DRadio RF09X266061737",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -440.69
+    },
+    {
+      "id": 1786721827251,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-99",
+      "date": "19/06/2026",
+      "client": "Vodafone GmbH 40549 Duesseldorf 0000118373278 0021035594852 Rechnungsnr: 122343480846 KdNr. 118373278 Vodafone sagt Danke",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -84.73
+    },
+    {
+      "id": 1786721827252,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-100",
+      "date": "16/06/2026",
+      "client": "Card transaction of 29.75 EUR issued by Paypal *Creditrefor 35314369001",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -29.75
+    },
+    {
+      "id": 1786721827253,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-101",
+      "date": "13/06/2026",
+      "client": "Serways Koenigsforst We",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -36.46
+    },
+    {
+      "id": 1786721827254,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-102",
+      "date": "12/06/2026",
+      "client": "KOELNMESSE PARKEN",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -20
+    },
+    {
+      "id": 1786721827255,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-103",
+      "date": "12/06/2026",
+      "client": "TIRESUR SL Rechnungsnummer: 66195584 Kunden-Nr: 10091584",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -148.64
+    },
+    {
+      "id": 1786721827256,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-104",
+      "date": "11/06/2026",
+      "client": "Transglobal Express",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -94.86
+    },
+    {
+      "id": 1786721827257,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-105",
+      "date": "10/06/2026",
+      "client": "PAYPAL *INTER DRIVE",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -428.03
+    },
+    {
+      "id": 1786721827258,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-106",
+      "date": "09/06/2026",
+      "client": "B+B Reifencenter GmbH Rechnungsnummer: 66169716",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -1303.92
+    },
+    {
+      "id": 1786721827259,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-107",
+      "date": "08/06/2026",
+      "client": "SOVANE Pirelli 295/40R22 Scorpion Zero A MO1 XL Pirelli 112W",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -972.24
+    },
+    {
+      "id": 1786721827260,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-108",
+      "date": "08/06/2026",
+      "client": "MED DREAM d.o.o. Rechnungsnummer: 16-001-1 02.06.2026",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -1800
+    },
+    {
+      "id": 1786721827261,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-109",
+      "date": "05/06/2026",
+      "client": "DHL*BLGZQZXN7RUK",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -26.99
+    },
+    {
+      "id": 1786721827262,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-110",
+      "date": "05/06/2026",
+      "client": "Allianz Versicherungs-AG Vertrag AS-6192753179 Kfz-Versicherung M-CR 543",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -1422.96
+    },
+    {
+      "id": 1786721827263,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-111",
+      "date": "05/06/2026",
+      "client": "Telefonica Germany GmbH + Co. OHG Kd-Nr.: 6116029742, Rg-Nr.: 1572123111/8, Ihre Tarifrechnung",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -59.99
+    },
+    {
+      "id": 1786721827264,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-112",
+      "date": "04/06/2026",
+      "client": "eDreams",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -962.88
+    },
+    {
+      "id": 1786721827265,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-113",
+      "date": "03/06/2026",
+      "client": "Freistaat Bayern Rechnungsnummer: 9143/167/80505 VOX40 LG 27.05.2026",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -369.6
+    },
+    {
+      "id": 1786721827266,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-114",
+      "date": "02/06/2026",
+      "client": "Debitor-Inkasso GmbH RF8821D219798001",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -969.22
+    },
+    {
+      "id": 1786721827267,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-115",
+      "date": "02/06/2026",
+      "client": "Konig Buro-Management Verwaltungs G RE261955 13360",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -612.49
+    },
+    {
+      "id": 1786721827268,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-116",
+      "date": "01/06/2026",
+      "client": "Princewill Moto Fabi Mai Gehalt",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -520
+    },
+    {
+      "id": 1786721827269,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-117",
+      "date": "01/06/2026",
+      "client": "Solomon Okello Mai Gehalt",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -4131.92
+    },
+    {
+      "id": 1786721827270,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-118",
+      "date": "31/05/2026",
+      "client": "Sent money to Christian Baah (fee: 16.65 USD) USD -4000.35 TRANSFER-2166800394",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -3517.91
+    },
+    {
+      "id": 1786721827271,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-119",
+      "date": "31/07/2026",
+      "client": "OKELCOR GMBH Self transfer",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": 1000
+    },
+    {
+      "id": 1786721827272,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-120",
+      "date": "31/07/2026",
+      "client": "OKELCOR GMBH Self transfer",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -1000
+    },
+    {
+      "id": 1786721827273,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-121",
+      "date": "31/07/2026",
+      "client": "OKELCOR GMBH Self transfer",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -1000
+    },
+    {
+      "id": 1786721827274,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-122",
+      "date": "30/07/2026",
+      "client": "Tyres IG GmbH Rechnung 001012/7/2026",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -135.8
+    },
+    {
+      "id": 1786721827275,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-123",
+      "date": "30/07/2026",
+      "client": "OKELCOR GMBH Self transfer",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": 1877.4
+    },
+    {
+      "id": 1786721827276,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-124",
+      "date": "30/07/2026",
+      "client": "Tyres IG GmbH Rechnung 000950/7/2026",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -91.4
+    },
+    {
+      "id": 1786721827278,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-125",
+      "date": "30/07/2026",
+      "client": "OKELCOR GMBH Self transfer",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -1877.4
+    },
+    {
+      "id": 1786721827279,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-126",
+      "date": "30/07/2026",
+      "client": "OKELCOR GMBH Self transfer",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -1877.4
+    },
+    {
+      "id": 1786721827280,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-127",
+      "date": "29/07/2026",
+      "client": "GOOGLE*ADS5977276742",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -500
+    },
+    {
+      "id": 1786721827281,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-128",
+      "date": "29/07/2026",
+      "client": "Topped up account",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": 15000
+    },
+    {
+      "id": 1786721827282,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-129",
+      "date": "29/07/2026",
+      "client": "Topped up account",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": 15000
+    },
+    {
+      "id": 1786721827283,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-130",
+      "date": "28/07/2026",
+      "client": "Topped up account USD -17137.56 TRANSFER-2277113788",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -15048.49
+    },
+    {
+      "id": 1786721827284,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-131",
+      "date": "28/07/2026",
+      "client": "El Boussamaki ahmed",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -51.5
+    },
+    {
+      "id": 1786721827285,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-132",
+      "date": "28/07/2026",
+      "client": "a.b.s. Rechenzentrum GmbH FKN 206710 RE 322444 14.52, 322445 14.52, 322531 44.27",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -73.31
+    },
+    {
+      "id": 1786721827286,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-133",
+      "date": "28/07/2026",
+      "client": "Vivid Money GmbH",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": 2.61
+    },
+    {
+      "id": 1786721827287,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-134",
+      "date": "26/07/2026",
+      "client": "Wise Charges for: TRANSFER-2273547226 20260727F2QCZ00C001171 USD -6.11 FEE-TRANSFER-2273547226",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -5.35
+    },
+    {
+      "id": 1786721827288,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-135",
+      "date": "26/07/2026",
+      "client": "Total Service Station Card transaction of 151.15 EUR issued by Total Service Station NIEDERZISSEN",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -151.15
+    },
+    {
+      "id": 1786721827289,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-136",
+      "date": "26/07/2026",
+      "client": "Card transaction of 23.98 EUR issued by Paypal *Netflix.com 4029357733",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -23.98
+    },
+    {
+      "id": 1786721827290,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-137",
+      "date": "26/07/2026",
+      "client": "Total Service Station Card transaction of 151.15 EUR issued by Total Service Station NIEDERZISSEN",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -151.15
+    },
+    {
+      "id": 1786721827291,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-138",
+      "date": "26/07/2026",
+      "client": "Card transaction of 23.98 EUR issued by Paypal *Netflix.com 4029357733",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -23.98
+    },
+    {
+      "id": 1786721827292,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-139",
+      "date": "25/07/2026",
+      "client": "HEM Tankstelle",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -126.63
+    },
+    {
+      "id": 1786721827293,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-140",
+      "date": "25/07/2026",
+      "client": "GOOGLE*GOOGLE PLAY APP",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -16.99
+    },
+    {
+      "id": 1786721827294,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-141",
+      "date": "25/07/2026",
+      "client": "Solomon Okello Lian repayment",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -1000
+    },
+    {
+      "id": 1786721827295,
+      "category": "PENDING RECEIPTS",
+      "person": "John",
+      "ref": "Ref-142",
+      "date": "24/07/2026",
+      "client": "RESEND",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -18.26
+    },
+    {
+      "id": 1786721827296,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-143",
+      "date": "24/07/2026",
+      "client": "AVIA TANKSTELLE",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -111.81
+    },
+    {
+      "id": 1786721827297,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-144",
+      "date": "23/07/2026",
+      "client": "Vivid Money S.A.",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -5
+    },
+    {
+      "id": 1786721827298,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-145",
+      "date": "23/07/2026",
+      "client": "*Arabellastrasse 11",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -1000
+    },
+    {
+      "id": 1786721827299,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-146",
+      "date": "23/07/2026",
+      "client": "SENIA GMBH 2026/02",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -2448
+    },
+    {
+      "id": 1786721827300,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-147",
+      "date": "23/07/2026",
+      "client": "SENIA GMBH 2026/02",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -2448
+    },
+    {
+      "id": 1786721827301,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-148",
+      "date": "22/07/2026",
+      "client": "Felappi S.r.l. Fattura: 623741CE del 16-07-26",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -670.64
+    },
+    {
+      "id": 1786721827302,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-149",
+      "date": "22/07/2026",
+      "client": "Card transaction of 1,000.00 EUR issued by *Arabellastrasse 11 Muenchen",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -1026.9
+    },
+    {
+      "id": 1786721827303,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-150",
+      "date": "22/07/2026",
+      "client": "Card transaction of 1,000.00 EUR issued by *Arabellastrasse 11 Muenchen",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -1026.9
+    },
+    {
+      "id": 1786721827304,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-151",
+      "date": "22/07/2026",
+      "client": "Card transaction of 1,000.00 EUR issued by *Arabellastrasse 11 Muenchen",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -1026.9
+    },
+    {
+      "id": 1786721827305,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-152",
+      "date": "22/07/2026",
+      "client": "Card transaction of 1,000.00 EUR issued by *Arabellastrasse 11 Muenchen",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -1026.9
+    },
+    {
+      "id": 1786721827306,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-153",
+      "date": "21/07/2026",
+      "client": "GOOGLE*ADS5977276742",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -500
+    },
+    {
+      "id": 1786721827307,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-154",
+      "date": "21/07/2026",
+      "client": "Mercedes-Benz Bank AG Ref. 1117702156/71510111:14.04.2026 553,00-/71510111:M-CR543:15.06.2026:546,38/71510111:M-CR543:15.07.202",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -539.76
+    },
+    {
+      "id": 1786721827308,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-155",
+      "date": "21/07/2026",
+      "client": "Card transaction of 200.00 EUR issued by Stadtsparkasse Muenchen SCHLUES.ST",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -205.38
+    },
+    {
+      "id": 1786721827309,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-156",
+      "date": "21/07/2026",
+      "client": "Card transaction of 200.00 EUR issued by Stadtsparkasse Muenchen SCHLUES.ST",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -205.38
+    },
+    {
+      "id": 1786721827310,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-157",
+      "date": "20/07/2026",
+      "client": "Received money from MLK TIRES LLC with reference 20260721F2QCZ00C000753 20260721F2QCZ00C000753 USD 12750 TRANSFER-2262580684",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": 11123.1
+    },
+    {
+      "id": 1786721827311,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-158",
+      "date": "20/07/2026",
+      "client": "Wise Charges for: TRANSFER-2262580684 20260721F2QCZ00C000753 USD -6.11 FEE-TRANSFER-2262580684",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -5.33
+    },
+    {
+      "id": 1786721827312,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-159",
+      "date": "20/07/2026",
+      "client": "Tyres IG GmbH Rechnung 000728/7/2026",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -234.16
+    },
+    {
+      "id": 1786721827313,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-160",
+      "date": "19/07/2026",
+      "client": "UZR*Nguyen Dan Tien - N",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -66.2
+    },
+    {
+      "id": 1786721827314,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-161",
+      "date": "19/07/2026",
+      "client": "Card transaction of 9.00 EUR issued by Paypal *Mercedesben 4029357733",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -9
+    },
+    {
+      "id": 1786721827315,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-162",
+      "date": "18/07/2026",
+      "client": "Francis ihunenyem",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -500
+    },
+    {
+      "id": 1786721827316,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-163",
+      "date": "17/07/2026",
+      "client": "Reifen Team West GmbH 63345816 / 124,12 / 0,00",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -124.12
+    },
+    {
+      "id": 1786721827317,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-164",
+      "date": "17/07/2026",
+      "client": "Card transaction of 1,000.00 EUR issued by *Baeckerstrasse 10 Muenchen",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -1026.9
+    },
+    {
+      "id": 1786721827318,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-165",
+      "date": "16/07/2026",
+      "client": "Card transaction of 250.00 EUR issued by Sparkasse Dachau HOCHHAUS",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -256.73
+    },
+    {
+      "id": 1786721827319,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-166",
+      "date": "16/07/2026",
+      "client": "Card transaction of 29.75 EUR issued by Paypal *Creditrefor 35314369001",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -29.75
+    },
+    {
+      "id": 1786721827320,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-167",
+      "date": "16/07/2026",
+      "client": "Card transaction of 211.86 EUR issued by Tankstelle Linner Langenaltheim",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -211.86
+    },
+    {
+      "id": 1786721827321,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-168",
+      "date": "16/07/2026",
+      "client": "Card transaction of 250.00 EUR issued by Sparkasse Dachau HOCHHAUS",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -256.73
+    },
+    {
+      "id": 1786721827322,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-169",
+      "date": "16/07/2026",
+      "client": "Card transaction of 29.75 EUR issued by Paypal *Creditrefor 35314369001",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -29.75
+    },
+    {
+      "id": 1786721827323,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-170",
+      "date": "16/07/2026",
+      "client": "Card transaction of 211.86 EUR issued by Tankstelle Linner Langenaltheim",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -211.86
+    },
+    {
+      "id": 1786721827324,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-171",
+      "date": "15/07/2026",
+      "client": "PIA AUTOPFLEGEZENTRUM",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -16.5
+    },
+    {
+      "id": 1786721827325,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-172",
+      "date": "15/07/2026",
+      "client": "Atlantis Zollspedition GmbH 20236476",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -83.3
+    },
+    {
+      "id": 1786721827327,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-173",
+      "date": "15/07/2026",
+      "client": "Atlantis Zollspedition GmbH 20236476",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -83.3
+    },
+    {
+      "id": 1786721827328,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-174",
+      "date": "14/07/2026",
+      "client": "eBay S.a.r.l. P.7609607363",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": 88.65
+    },
+    {
+      "id": 1786721827329,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-175",
+      "date": "14/07/2026",
+      "client": "a.b.s. Rechenzentrum GmbH FKN 206710 RE 320863 176.36, 320866 14.52",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -190.88
+    },
+    {
+      "id": 1786721827330,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-176",
+      "date": "14/07/2026",
+      "client": "AG Company Srl /CNR/C062287/DOC/21695/M/ 20260709",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -409.9
+    },
+    {
+      "id": 1786721827331,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-177",
+      "date": "13/07/2026",
+      "client": "Vivid Money S.A.",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -96
+    },
+    {
+      "id": 1786721827332,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-178",
+      "date": "13/07/2026",
+      "client": "Card transaction of 200.00 EUR issued by Josephsburgstr. 71 Muenchen",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -205.38
+    },
+    {
+      "id": 1786721827333,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-179",
+      "date": "13/07/2026",
+      "client": "Card transaction of 2,431.03 EUR issued by Odoo De Gmbh Berlin",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -2431.03
+    },
+    {
+      "id": 1786721827334,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-180",
+      "date": "13/07/2026",
+      "client": "Card transaction of 2,431.03 EUR issued by Odoo De Gmbh Berlin",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -2431.03
+    },
+    {
+      "id": 1786721827335,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-181",
+      "date": "13/07/2026",
+      "client": "Card transaction of 200.00 EUR issued by Josephsburgstr. 71 Muenchen",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -205.38
+    },
+    {
+      "id": 1786721827336,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-182",
+      "date": "11/07/2026",
+      "client": "GOOGLE*ADS5977276742",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -500
+    },
+    {
+      "id": 1786721827337,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-183",
+      "date": "10/07/2026",
+      "client": "DELTAPNEUS EASYROAD EASY4D-EASY4D Fa. OKELCOR GMBH",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -399.7
+    },
+    {
+      "id": 1786721827338,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-184",
+      "date": "10/07/2026",
+      "client": "TIOR SPOLKA Z OGRANICZONA ODPOWIEDZ TYRE100 66346394",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -176.84
+    },
+    {
+      "id": 1786721827339,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-185",
+      "date": "09/07/2026",
+      "client": "Tyres IG GmbH Rechnung 000004/7/2026",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -187.16
+    },
+    {
+      "id": 1786721827340,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-186",
+      "date": "09/07/2026",
+      "client": "Vivid Money GmbH",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": 1.96
+    },
+    {
+      "id": 1786721827341,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-187",
+      "date": "08/07/2026",
+      "client": "RechnungL�schung �berweisungsauftr.Ablehnungsentgelt20260708-BY001-00118630795siehe Anlage",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -2.14
+    },
+    {
+      "id": 1786721827342,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-188",
+      "date": "08/07/2026",
+      "client": "OPENAI *CHATGPT SUBSCR",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -131.1
+    },
+    {
+      "id": 1786721827343,
+      "category": "PENDING RECEIPTS",
+      "person": "Chama",
+      "ref": "Ref-189",
+      "date": "08/07/2026",
+      "client": "Atlantis Zollspedition GmbH Rechnungsnummer: 20236397 08.07.2026",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -83.3
+    },
+    {
+      "id": 1786721827344,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-190",
+      "date": "07/07/2026",
+      "client": "Sent money to OKELCOR GMBH (fee: 7.26 USD) Self transfer USD -2313.5 TRANSFER-2297764843",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -2001.87
+    },
+    {
+      "id": 1786721827345,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-191",
+      "date": "07/07/2026",
+      "client": "a.b.s. Rechenzentrum GmbH FKN 206710 RE 320134 217.43",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -217.43
+    },
+    {
+      "id": 1786721827346,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-192",
+      "date": "07/07/2026",
+      "client": "Vivid Money GmbH",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": 0.75
+    },
+    {
+      "id": 1786721827347,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-193",
+      "date": "07/07/2026",
+      "client": "eBay S.a.r.l. P.7595927387",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": 46.76
+    },
+    {
+      "id": 1786721827348,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-194",
+      "date": "06/07/2026",
+      "client": "Microsoft Payments MSFT . E0600ZQQNF",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -105.3
+    },
+    {
+      "id": 1786721827349,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-195",
+      "date": "06/07/2026",
+      "client": "Card transaction of 1,000.00 EUR issued by *Bahnhofstr. 7 Dachau",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -1020.18
+    },
+    {
+      "id": 1786721827350,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-196",
+      "date": "06/07/2026",
+      "client": "ELTE INTERNATIONAL B.V. 2600629",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -8162.5
+    },
+    {
+      "id": 1786721827351,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-197",
+      "date": "05/07/2026",
+      "client": "Sent money to Christian Baah (fee: 16.65 USD) USD -8796.21 TRANSFER-2232851784",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -7645.67
+    },
+    {
+      "id": 1786721827352,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-198",
+      "date": "05/07/2026",
+      "client": "Wise Charges for: TRANSFER-2232851784 USD -16.65 FEE-TRANSFER-2232851784",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -14.47
+    },
+    {
+      "id": 1786721827353,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-199",
+      "date": "05/07/2026",
+      "client": "Pizza Hut Am Stachus",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -52.8
+    },
+    {
+      "id": 1786721827354,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-200",
+      "date": "03/07/2026",
+      "client": "PayPal Europe S.a.r.l. et Cie S.C.A 1051399706647/PP.8060.PP/. DPD Deutschland GmbH, Ihr Einkauf bei DPD Deutschland GmbH",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -26
+    },
+    {
+      "id": 1786721827355,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-201",
+      "date": "03/07/2026",
+      "client": "PayPal Europe S.a.r.l. et Cie S.C.A 1051399809070/PP.8060.PP/. DPD Deutschland GmbH, Ihr Einkauf bei DPD Deutschland GmbH",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -26
+    },
+    {
+      "id": 1786721827356,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-202",
+      "date": "02/07/2026",
+      "client": "Cashback USD 15.54 BALANCE_CASHBACK-7c89cf74-00db-455d-adf4-ad19109f91f9",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": 13.52
+    },
+    {
+      "id": 1786721827357,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-203",
+      "date": "02/07/2026",
+      "client": "GOOGLE*ADS5977276742",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -295.5
+    },
+    {
+      "id": 1786721827358,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-204",
+      "date": "02/07/2026",
+      "client": "Princewill Moto Fabi Juni Gehalt",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -520
+    },
+    {
+      "id": 1786721827359,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-205",
+      "date": "02/07/2026",
+      "client": "Konig Buro-Management Verwaltungs G RE262297 13360",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -571.2
+    },
+    {
+      "id": 1786721827360,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-206",
+      "date": "02/07/2026",
+      "client": "Telefonica Germany GmbH + Co. OHG Kd-Nr.: 6116029742, Rg-Nr.: 1598870032/8, Ihre Tarifrechnung",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -59.99
+    },
+    {
+      "id": 1786721827361,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-207",
+      "date": "02/07/2026",
+      "client": "EUR Assets service fee",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -4.15
+    },
+    {
+      "id": 1786721827362,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-208",
+      "date": "01/07/2026",
+      "client": "Wise Charges for: TRANSFER-2226497898 June bill USD -8.54 FEE-TRANSFER-2226497898",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -7.43
+    },
+    {
+      "id": 1786721827363,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-209",
+      "date": "01/07/2026",
+      "client": "Wise Charges for: TRANSFER-2226495403 June bills USD -8.54 FEE-TRANSFER-2226495403",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -7.43
+    },
+    {
+      "id": 1786721827364,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-210",
+      "date": "01/07/2026",
+      "client": "Entgeltabrechnungsiehe Anlage",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -20.47
+    },
+    {
+      "id": 1786721827365,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-211",
+      "date": "01/07/2026",
+      "client": "OKELCOR GMBH Weiterleitung Entgeltevon Konto: 890013154Abrechnung vom: 30.06.2026Abrechnungsbetrag inW�hrung USD 17,70-Wechselkurs 1,14550",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -15.45
+    },
+    {
+      "id": 1786721827366,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-212",
+      "date": "01/07/2026",
+      "client": "Abrechnung 30.06.2026siehe Anlage",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -622.6
+    },
+    {
+      "id": 1786721827367,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-213",
+      "date": "01/07/2026",
+      "client": "MED DREAM d.o.o. Rechnungsnummer: 19-001-1 26.06.2026",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -1800
+    },
+    {
+      "id": 1786721827368,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-214",
+      "date": "01/07/2026",
+      "client": "*Bahnhofstr. 7",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -1000
+    },
+    {
+      "id": 1786721827369,
+      "category": "PENDING RECEIPTS",
+      "person": "Solomon",
+      "ref": "Ref-215",
+      "date": "01/07/2026",
+      "client": "Vivid Money S.A.",
+      "status": "Pending",
+      "comment": "Pending",
+      "amount": -10
+    },
+    {
+      "id": 1787031140680,
+      "category": "SHIPMENTS IN TRANSIT",
+      "person": "Chama",
+      "ref": "HLBU2874170-RE-1368",
+      "date": "2026-06-14",
+      "client": "Cargo Centre Ghana Limited",
+      "status": "Pending",
+      "comment": "Order Confirmed",
+      "amount": 14000
+    },
+    {
+      "id": 1787031229634,
+      "category": "SHIPMENTS IN TRANSIT",
+      "person": "Chama",
+      "ref": "UACU5657422-RE-1369",
+      "date": "2026-06-14",
+      "client": "Cargo Center Ghana Limited",
+      "status": "Pending",
+      "comment": "Order Comfirmed",
+      "amount": 14000
+    },
+    {
+      "id": 1787031606821,
+      "category": "SHIPMENTS IN TRANSIT",
+      "person": "Chama",
+      "ref": "MRSU2227047-RE-1381,RE-1358,RE-1339",
+      "date": "2026-08-18",
+      "client": "PIT-STOP EHF-Supplier QINGDAO LANDSPIDER TIRE CORP.,LTD",
+      "status": "Pending",
+      "comment": "Order Confirmed",
+      "amount": 43980
+    },
+    {
+      "id": 1787033174564,
+      "category": "OPEN ORDERS",
+      "person": "Solomon",
+      "ref": "AB-1115",
+      "date": "2026-01-20",
+      "client": "Royal Roots Goods Wholesalers L.L.C",
+      "status": "Pending",
+      "comment": "Solomon to Comment",
+      "amount": 200500
+    },
+    {
+      "id": 1787033240996,
+      "category": "OPEN ORDERS",
+      "person": "Solomon",
+      "ref": "AB-1131",
+      "date": "2026-03-03",
+      "client": "Royal Roots Goods Wholesalers L.L.C",
+      "status": "Pending",
+      "comment": "Solomon to Comment",
+      "amount": 33500
+    },
+    {
+      "id": 1787033323486,
+      "category": "OPEN ORDERS",
+      "person": "Solomon",
+      "ref": "AB-1141",
+      "date": "2026-04-17",
+      "client": "BMP Group EU Sp. z o.o.",
+      "status": "Pending",
+      "comment": "Solomon to Comment",
+      "amount": 11200
+    },
+    {
+      "id": 1787033407594,
+      "category": "OPEN ORDERS",
+      "person": "Solomon",
+      "ref": "AB-1157",
+      "date": "2026-05-18",
+      "client": "YAY Tyres",
+      "status": "Pending",
+      "comment": "Solomon to Comment",
+      "amount": 14500
+    },
+    {
+      "id": 1787037308599,
+      "category": "SHIPMENTS IN TRANSIT",
+      "person": "Chama",
+      "ref": "CMAU7830405-RE-1364",
+      "date": "2026-07-02",
+      "client": "Christian Baah",
+      "status": "Pending",
+      "comment": "Order Confirmed",
+      "amount": 10000
+    },
+    {
+      "id": 1787038005481,
+      "category": "SHIPMENTS IN TRANSIT",
+      "person": "Chama",
+      "ref": "HAMU2394551-RE-1338",
+      "date": "2026-03-24",
+      "client": "Full Circle Used Tire LLC DBA Ben Tire",
+      "status": "Pending",
+      "comment": "Order Comfirmed",
+      "amount": 46621.64
+    },
+    {
+      "id": 1787038706829,
+      "category": "SHIPMENTS IN TRANSIT",
+      "person": "Chama",
+      "ref": "TLLU8229999-RE-1377",
+      "date": "2026-07-29",
+      "client": "MLK Tires LLC",
+      "status": "Pending",
+      "comment": "Awaiting Shipment",
+      "amount": 26577.07
+    },
+    {
+      "id": 1787039018744,
+      "category": "SHIPMENTS IN TRANSIT",
+      "person": "Chama",
+      "ref": "TCKU6256639-RE-1360",
+      "date": "2026-06-04",
+      "client": "I&i mobile tires services inc",
+      "status": "Pending",
+      "comment": "Awaiting Shipment",
+      "amount": 16489.59
+    },
+    {
+      "id": 1787039517868,
+      "category": "SHIPMENTS IN TRANSIT",
+      "person": "Chama",
+      "ref": "(ONE LINE)  KKFU7958920-RE-1362",
+      "date": "2026-06-10",
+      "client": "Cargo Centre Ghana Limited",
+      "status": "Pending",
+      "comment": "Awaiting Shipment",
+      "amount": 1550
+    },
+    {
+      "id": 1787039839374,
+      "category": "SHIPMENTS IN TRANSIT",
+      "person": "Chama",
+      "ref": "(ONE LINE)  ONEU0677425-RE-1341",
+      "date": "2025-01-06",
+      "client": "Cargo centre Ghana Limited",
+      "status": "Pending",
+      "comment": "Awaiting Shipment",
+      "amount": 14237
+    },
+    {
+      "id": 1787040025647,
+      "category": "SHIPMENTS IN TRANSIT",
+      "person": "Chama",
+      "ref": "RE-1257",
+      "date": "2024-08-12",
+      "client": "Impulse Trading UK",
+      "status": "Pending",
+      "comment": "Order Comfirmed",
+      "amount": 9800
+    },
+    {
+      "id": 1787121607108,
+      "category": "OPEN PROPOSALS",
+      "person": "Edinah",
+      "ref": "AN-1334",
+      "date": "2026-08-18",
+      "client": "Farah trading ltd",
+      "status": "Pending",
+      "comment": "Client to review till 23 Aug 2026",
+      "amount": 7150
+    },
+    {
+      "id": 1787137156236,
+      "category": "DELIVERY CONFIRMATIONS",
+      "person": "Chama",
+      "ref": "RE-1381",
+      "date": "2026-08-19",
+      "client": "Pit-stop ehf. ICELAND-Supplier QINGDAO LANDSPIDER TIRE CORP.,LTD",
+      "status": "In Progress",
+      "comment": "Not yet Delivered",
+      "amount": 43980
+    },
+    {
+      "id": 1787139537486,
+      "category": "DELIVERY CONFIRMATIONS",
+      "person": "Chama",
+      "ref": "RE-1378",
+      "date": "2026-07-30",
+      "client": "LLC  “ZORITAN”",
+      "status": "In Progress",
+      "comment": "Not delivered yet",
+      "amount": 46621.64
+    },
+    {
+      "id": 1787140053783,
+      "category": "DELIVERY CONFIRMATIONS",
+      "person": "Chama",
+      "ref": "MLK RE-1377",
+      "date": "2026-07-29",
+      "client": "MLK Tires LLC",
+      "status": "In Progress",
+      "comment": "Not delivered",
+      "amount": 26577.07
+    },
+    {
+      "id": 1787141601358,
+      "category": "DELIVERY CONFIRMATIONS",
+      "person": "Chama",
+      "ref": "RE-1369",
+      "date": "2026-07-13",
+      "client": "Cargo centre Ghana Limited",
+      "status": "In Progress",
+      "comment": "Not delivered",
+      "amount": 14000
+    },
+    {
+      "id": 1787143511572,
+      "category": "DELIVERY CONFIRMATIONS",
+      "person": "Chama",
+      "ref": "RE-1368",
+      "date": "2026-07-12",
+      "client": "Cargo centre Ghana Limited",
+      "status": "In Progress",
+      "comment": "Not delivered",
+      "amount": 14000
+    },
+    {
+      "id": 1787143874540,
+      "category": "DELIVERY CONFIRMATIONS",
+      "person": "Chama",
+      "ref": "RE-1367",
+      "date": "2026-07-09",
+      "client": "Ernest Agyeman",
+      "status": "Pending",
+      "comment": "Not delivered",
+      "amount": 225.6
+    },
+    {
+      "id": 1787144679044,
+      "category": "DELIVERY CONFIRMATIONS",
+      "person": "Chama",
+      "ref": "RE-1366",
+      "date": "2026-04-02",
+      "client": "Imperial Sales & Services n.v.",
+      "status": "Under Review",
+      "comment": "Still to check",
+      "amount": 21750
+    },
+    {
+      "id": 1787144900717,
+      "category": "DELIVERY CONFIRMATIONS",
+      "person": "Chama",
+      "ref": "RE-1364",
+      "date": "2026-07-02",
+      "client": "Christian Baah",
+      "status": "In Progress",
+      "comment": "Delivered but yet to confirm",
+      "amount": 10000
+    },
+    {
+      "id": 1787145251347,
+      "category": "DELIVERY CONFIRMATIONS",
+      "person": "Chama",
+      "ref": "RE-1362",
+      "date": "2026-07-10",
+      "client": "cargo center ghana limited",
+      "status": "In Progress",
+      "comment": "Chama to check about its delivery",
+      "amount": 1550
+    },
+    {
+      "id": 1787145752439,
+      "category": "DELIVERY CONFIRMATIONS",
+      "person": "Chama",
+      "ref": "RE-1360",
+      "date": "2026-08-19",
+      "client": "I&i mobile tires services inc",
+      "status": "In Progress",
+      "comment": "Chama to confirm details",
+      "amount": 19125
+    },
+    {
+      "id": 1787146087697,
+      "category": "DELIVERY CONFIRMATIONS",
+      "person": "Chama",
+      "ref": "RE-1359",
+      "date": "2026-05-28",
+      "client": "RE-1359 MLK Tires LLC",
+      "status": "In Progress",
+      "comment": "Chama to confirm status",
+      "amount": 21928.39
+    },
+    {
+      "id": 1787146354671,
+      "category": "DELIVERY CONFIRMATIONS",
+      "person": "Chama",
+      "ref": "RE-1358",
+      "date": "2026-05-21",
+      "client": "Pit-stop ehf",
+      "status": "In Progress",
+      "comment": "Chama to check on status",
+      "amount": 4000
+    },
+    {
+      "id": 1787146725723,
+      "category": "DELIVERY CONFIRMATIONS",
+      "person": "Chama",
+      "ref": "RE-1357",
+      "date": "2026-05-15",
+      "client": "AUTO PRO",
+      "status": "Pending",
+      "comment": "Chama to check",
+      "amount": 15000
+    },
+    {
+      "id": 1787147140768,
+      "category": "DELIVERY CONFIRMATIONS",
+      "person": "Chama",
+      "ref": "RE-1356",
+      "date": "2026-05-26",
+      "client": "BFD Group UAB",
+      "status": "In Progress",
+      "comment": "Chama to check on the status",
+      "amount": 16120
+    },
+    {
+      "id": 1787147508058,
+      "category": "DELIVERY CONFIRMATIONS",
+      "person": "Chama",
+      "ref": "RE-1362",
+      "date": "2026-05-26",
+      "client": "DONE DELIVERIES SP. Z O.O POLAND",
+      "status": "In Progress",
+      "comment": "Chama to check on status",
+      "amount": 508.5
+    },
+    {
+      "id": 1787148387592,
+      "category": "DELIVERY CONFIRMATIONS",
+      "person": "Chama",
+      "ref": "RE-1354",
+      "date": "2026-05-16",
+      "client": "YAY Tyres Lagos Nigeria",
+      "status": "Under Review",
+      "comment": "Chama to check on its status",
+      "amount": 680
+    },
+    {
+      "id": 1787149494033,
+      "category": "DELIVERY CONFIRMATIONS",
+      "person": "Chama",
+      "ref": "RE-1353",
+      "date": "2026-05-15",
+      "client": "Nafass B CO. LTD Ghana Accra",
+      "status": "Under Review",
+      "comment": "Chama to check status",
+      "amount": 1190
+    },
+    {
+      "id": 1787149617743,
+      "category": "DELIVERY CONFIRMATIONS",
+      "person": "Chama",
+      "ref": "RE-1352",
+      "date": "2026-05-13",
+      "client": "Nafass B CO. LTD Ghana Accra",
+      "status": "Under Review",
+      "comment": "Chama to check",
+      "amount": 2750
+    },
+    {
+      "id": 1787149771738,
+      "category": "DELIVERY CONFIRMATIONS",
+      "person": "Chama",
+      "ref": "RE-1351",
+      "date": "2026-04-30",
+      "client": "All Drive Recovery Great Britain",
+      "status": "Under Review",
+      "comment": "Chama to check",
+      "amount": 8125
+    },
+    {
+      "id": 1787150047860,
+      "category": "DELIVERY CONFIRMATIONS",
+      "person": "Chama",
+      "ref": "RE-1339",
+      "date": "2026-03-30",
+      "client": "Pit-stop ehf Iceland",
+      "status": "Under Review",
+      "comment": "Chama to check status",
+      "amount": 34880
+    },
+    {
+      "id": 1787150176526,
+      "category": "DELIVERY CONFIRMATIONS",
+      "person": "Chama",
+      "ref": "RE-1338",
+      "date": "2026-03-23",
+      "client": "Full Circle Used Tire LLC DBA Ben Tire USA",
+      "status": "Under Review",
+      "comment": "Chama to check status and confirm",
+      "amount": 46621.64
+    },
+    {
+      "id": 1787150325035,
+      "category": "DELIVERY CONFIRMATIONS",
+      "person": "Chama",
+      "ref": "RE-1337",
+      "date": "2026-03-20",
+      "client": "cargo center ghana limited",
+      "status": "Under Review",
+      "comment": "Chama to check the status",
+      "amount": 14000
+    },
+    {
+      "id": 1787150430960,
+      "category": "DELIVERY CONFIRMATIONS",
+      "person": "Chama",
+      "ref": "RE-1336",
+      "date": "2026-03-18",
+      "client": "cargo center ghana limited",
+      "status": "Under Review",
+      "comment": "Chama to check status",
+      "amount": 14000
+    },
+    {
+      "id": 1787150597213,
+      "category": "DELIVERY CONFIRMATIONS",
+      "person": "Chama",
+      "ref": "RE-1331",
+      "date": "2026-02-25",
+      "client": "cargo center ghana limited",
+      "status": "Under Review",
+      "comment": "Chama to check on order status",
+      "amount": 14000
+    },
+    {
+      "id": 1787150711397,
+      "category": "DELIVERY CONFIRMATIONS",
+      "person": "Chama",
+      "ref": "RE-1330",
+      "date": "2026-02-05",
+      "client": "YAY Tyres Lagos Nigeria",
+      "status": "Under Review",
+      "comment": "Chama to check  order status",
+      "amount": 1160
+    },
+    {
+      "id": 1787150918343,
+      "category": "DELIVERY CONFIRMATIONS",
+      "person": "Chama",
+      "ref": "RE-1328",
+      "date": "2026-01-21",
+      "client": "LLC “ZORITAN Ukraine",
+      "status": "Under Review",
+      "comment": "Chama to check for status",
+      "amount": 6240
+    },
+    {
+      "id": 1787151145372,
+      "category": "DELIVERY CONFIRMATIONS",
+      "person": "Chama",
+      "ref": "RE-1326",
+      "date": "2026-01-09",
+      "client": "Abderrahmane JAMI France",
+      "status": "Under Review",
+      "comment": "Chama to check on order status",
+      "amount": 3213
+    }
+  ],
+  "liquidityItems": [
+    {
+      "id": "bank_balance",
+      "label": "Bank Balance",
+      "openCurrent": [
+        {
+          "id": 1787042807846,
+          "desc": "Bank balance",
+          "ref": "Wise EUR",
+          "amount": 452
+        },
+        {
+          "id": 1787042870136,
+          "desc": "Bank balance",
+          "ref": "Wise USD",
+          "amount": 25267.6
+        },
+        {
+          "id": 1787042910921,
+          "desc": "Bank balance",
+          "ref": "Vivid Money eur",
+          "amount": 500
+        }
+      ],
+      "nextMonth": []
+    },
+    {
+      "id": "cost_of_sales",
+      "label": "Cost of sales",
+      "openCurrent": [
+        {
+          "id": 1787043025976,
+          "desc": "Cost of sales",
+          "ref": "CETROC INTERNATIONAL CO.,LIMITED",
+          "amount": -12224.2
+        },
+        {
+          "id": 1787043076621,
+          "desc": "Cost of sales",
+          "ref": "QINGDAO LANDSPIDER TIRE CORP., LTD",
+          "amount": -15551.75
+        },
+        {
+          "id": 1787043117434,
+          "desc": "Cost of sales",
+          "ref": "CTI GmbH",
+          "amount": -1130.35
+        },
+        {
+          "id": 1787043174514,
+          "desc": "Cost of sales",
+          "ref": "Bender Reifen-Recycling GmbH",
+          "amount": -6574.75
+        },
+        {
+          "id": 1787043207550,
+          "desc": "Cost of sales",
+          "ref": "Bender Reifen-Recycling GmbH",
+          "amount": -6307
+        },
+        {
+          "id": 1787043261136,
+          "desc": "Cost of sales",
+          "ref": "Bender Reifen-Recycling GmbH",
+          "amount": -5831
+        }
+      ],
+      "nextMonth": []
+    },
+    {
+      "id": "rent",
+      "label": "Rent",
+      "openCurrent": [],
+      "nextMonth": [
+        {
+          "id": 1787045767463,
+          "desc": "Rent",
+          "ref": "Coloyal GmbH",
+          "amount": -3213
+        },
+        {
+          "id": 1787045801183,
+          "desc": "Is Same Eco Work Space",
+          "ref": "Konig Buro-Management Verwaltungs G",
+          "amount": 571
+        },
+        {
+          "id": 1787045844441,
+          "desc": "Rent-Need to Pay on 31-Jul-2026",
+          "ref": "Demir Keramik & Stein GmbH",
+          "amount": 4500
+        }
+      ]
+    },
+    {
+      "id": "salaries",
+      "label": "Salaries",
+      "openCurrent": [
+        {
+          "id": 1787043537261,
+          "desc": "Salaries",
+          "ref": "Solomon",
+          "amount": -6000
+        },
+        {
+          "id": 1787043583452,
+          "desc": "Salaries",
+          "ref": "Victor",
+          "amount": -869
+        },
+        {
+          "id": 1787043597982,
+          "desc": "Salaries",
+          "ref": "Edina",
+          "amount": -3500
+        },
+        {
+          "id": 1787043626576,
+          "desc": "Salaries",
+          "ref": "Chama",
+          "amount": -3000
+        },
+        {
+          "id": 1787043653794,
+          "desc": "Salaries",
+          "ref": "Lisa",
+          "amount": -1800
+        },
+        {
+          "id": 1787043672344,
+          "desc": "Salaries",
+          "ref": "Fabi",
+          "amount": -520
+        },
+        {
+          "id": 1787043706708,
+          "desc": "Salaries",
+          "ref": "Joseph",
+          "amount": -1304
+        }
+      ],
+      "nextMonth": []
+    },
+    {
+      "id": "tax_obligations",
+      "label": "Tax Obligations Salary",
+      "openCurrent": [
+        {
+          "id": 1787043837790,
+          "desc": "Tax obligation salary",
+          "ref": "Edinah Apr to June 2026",
+          "amount": -3605.19
+        },
+        {
+          "id": 1787043873589,
+          "desc": "Tax obligation salary",
+          "ref": "Solomon Apr to June 2026",
+          "amount": -4500
+        },
+        {
+          "id": 1787043923049,
+          "desc": "Tax obligation salary",
+          "ref": "Fabi Jan to Mar 2026",
+          "amount": -270
+        },
+        {
+          "id": 1787043960708,
+          "desc": "Tax obligation salary",
+          "ref": "Fabi Apr to June 2026",
+          "amount": -270
+        }
+      ],
+      "nextMonth": []
+    },
+    {
+      "id": "internet_phone",
+      "label": "Internet & Phone",
+      "openCurrent": [
+        {
+          "id": 601,
+          "desc": "Office Broadband & Telecoms",
+          "ref": "INV-6612",
+          "amount": -84.73
+        }
+      ],
+      "nextMonth": [
+        {
+          "id": 1787045651606,
+          "desc": "Internet & Phone",
+          "ref": "Vodafone GmbH 40549 Duesseldorf",
+          "amount": 84.73
+        },
+        {
+          "id": 1787045680211,
+          "desc": "Internet & Phone",
+          "ref": "Telefonica Germany GmbH + Co. OHG",
+          "amount": 59.99
+        }
+      ]
+    },
+    {
+      "id": "loan_payment",
+      "label": "Loan Payment",
+      "openCurrent": [],
+      "nextMonth": [
+        {
+          "id": 1787044224956,
+          "desc": "Mercedes-Loan Ends 4-Oct-2029 ",
+          "ref": "Benz Bank AG Paid July 2026",
+          "amount": -539.76
+        },
+        {
+          "id": 1787044288697,
+          "desc": "MIR Lux Capital . Vivid Paid july 2026",
+          "ref": "Vivid Money Loan Ending Sept 2026",
+          "amount": -1702.97
+        },
+        {
+          "id": 1787044376913,
+          "desc": "Car Loan Paid july 2026",
+          "ref": "Bank11",
+          "amount": -266
+        }
+      ]
+    },
+    {
+      "id": "consultancy",
+      "label": "Consultancy",
+      "openCurrent": [
+        {
+          "id": 1787044498504,
+          "desc": "Consultancy",
+          "ref": "Windorf M+A Holdings GmbH",
+          "amount": -1190
+        },
+        {
+          "id": 1787044576017,
+          "desc": "Consultancy - Need to Pay on 24-Jul-2026",
+          "ref": "WTS Wirtschaftstreuhand GmbH",
+          "amount": -5000
+        },
+        {
+          "id": 1787044656627,
+          "desc": "Website design",
+          "ref": "Takeover Creatives",
+          "amount": -1000
+        }
+      ],
+      "nextMonth": []
+    },
+    {
+      "id": "revenue_payment",
+      "label": "Revenue Payment",
+      "openCurrent": [
+        {
+          "id": 1787044744125,
+          "desc": "In transit",
+          "ref": "MLK Tires LLC",
+          "amount": 11087.27
+        },
+        {
+          "id": 1787044785895,
+          "desc": "Order AB-1177 Paid USD 15K",
+          "ref": "MLK Tires LLC",
+          "amount": 13342.96
+        },
+        {
+          "id": 1787044832405,
+          "desc": "Revenue payment",
+          "ref": "YAY Tyres",
+          "amount": 1160
+        },
+        {
+          "id": 1787044871428,
+          "desc": "Solomon to find out",
+          "ref": "Full Circle Used Tire LLC",
+          "amount": 22948.73
+        },
+        {
+          "id": 1787044928718,
+          "desc": "Solomon to find out",
+          "ref": "Nafass B CO. LTD",
+          "amount": 2750
+        },
+        {
+          "id": 1787044963130,
+          "desc": "Solomon to find out",
+          "ref": "Nafass B CO. LTD",
+          "amount": 1190
+        },
+        {
+          "id": 1787045021875,
+          "desc": "Solomon to confirm",
+          "ref": "I&i mobile tires services",
+          "amount": 16489.59
+        },
+        {
+          "id": 1787045074981,
+          "desc": "Revenue payment",
+          "ref": "cargo center ghana limited",
+          "amount": 1550
+        },
+        {
+          "id": 1787045097876,
+          "desc": "Solomon to confirm",
+          "ref": "Autoservice Engin",
+          "amount": 279.03
+        },
+        {
+          "id": 1787045136006,
+          "desc": "Lillian Ikulumet",
+          "ref": "Lillian Ikulumet",
+          "amount": 283.61
+        },
+        {
+          "id": 1787045166238,
+          "desc": "Solomon to confirm",
+          "ref": "Christian Baah",
+          "amount": 10000
+        },
+        {
+          "id": 1787045209608,
+          "desc": "Revenue repayment",
+          "ref": "Imperial Sales & Services n.v.",
+          "amount": 2098
+        },
+        {
+          "id": 1787045246201,
+          "desc": "Revenue repayment",
+          "ref": "cargo center ghana limited",
+          "amount": 56000
+        },
+        {
+          "id": 1787045283616,
+          "desc": "Revenue payment",
+          "ref": "George Hohmuth",
+          "amount": 200.67
+        },
+        {
+          "id": 1787045308565,
+          "desc": "Revenue payment",
+          "ref": "Familie Roth",
+          "amount": 191.95
+        }
+      ],
+      "nextMonth": []
+    }
+  ]
+}

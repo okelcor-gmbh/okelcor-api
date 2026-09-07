@@ -941,7 +941,10 @@ XML;
             ],
             'pricingSummary' => [
                 'price' => [
-                    'value'    => number_format((float) $product->price, 2, '.', ''),
+                    // The tier formula when the product carries a cost price
+                    // and a tier (cost × margin × eBay uplift — Stripe's cut
+                    // swapped for eBay's), else the plain website price.
+                    'value'    => number_format(app(TierPricingService::class)->ebayOfferPriceFor($product), 2, '.', ''),
                     'currency' => 'EUR',
                 ],
             ],

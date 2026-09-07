@@ -41,13 +41,22 @@ class AdminEbayAuditController extends Controller
         $thinPercent   = (float) config('services.ebay_sell.thin_margin_percent', 8.0);
         $targetPercent = (float) config('services.ebay_sell.target_margin_percent', 15.0);
 
+        $columns = [
+            'id', 'sku', 'brand', 'name', 'size', 'type', 'season',
+            'price', 'price_b2b', 'price_b2c', 'cost_price', 'stock',
+            'ebay_item_id', 'ebay_status', 'ebay_last_synced_at', 'ebay_sync_error',
+        ];
+        // Graceful pre-migration: without the column the expected eBay
+        // price falls back to the plain website price.
+        if (\Illuminate\Support\Facades\Schema::hasColumn('products', 'price_tier')) {
+            $columns[] = 'price_tier';
+        }
+
         $products = Product::where('ebay_listed', true)
             ->orderBy('brand')->orderBy('name')
-            ->get([
-                'id', 'sku', 'brand', 'name', 'size', 'type', 'season',
-                'price', 'price_b2b', 'price_b2c', 'cost_price', 'stock',
-                'ebay_item_id', 'ebay_status', 'ebay_last_synced_at', 'ebay_sync_error',
-            ]);
+            ->get($columns);
+
+        $tierPricing = app(\App\Services\TierPricingService::class);
 
         // What each SKU actually sold for on eBay in the last 90 days —
         // list price is the intention, this is the evidence.
@@ -81,7 +90,7 @@ class AdminEbayAuditController extends Controller
         } catch (\Throwable) {
         }
 
-        $rows = $products->map(function (Product $p) use ($sold, $live, $liveFetchedAt, $feePercent, $feeFixed, $thinPercent, $targetPercent) {
+        $rows = $products->map(function (Product $p) use ($sold, $live, $liveFetchedAt, $feePercent, $feeFixed, $thinPercent, $targetPercent, $tierPricing) {
             $liveRow = $p->sku ? $live->get($p->sku) : null;
 
             // The margin is judged on the price buyers actually see when we
@@ -111,9 +120,14 @@ class AdminEbayAuditController extends Controller
             $soldRow = $p->sku ? $sold->get($p->sku) : null;
 
             $dbPrice = (float) $p->price;
-            // Drift: eBay shows one price, our system believes another.
-            $priceDrift = ($liveRow !== null && $liveRow->price !== null && abs((float) $liveRow->price - $dbPrice) >= 0.01)
-                ? round((float) $liveRow->price - $dbPrice, 2)
+            // What the offer SHOULD be priced at: the tier formula (cost ×
+            // margin × eBay uplift) when the product carries cost + tier,
+            // else the plain website price. Under the tier model the eBay
+            // price is deliberately above the website price, so drift is
+            // judged against the formula, never against the site price.
+            $expectedEbay = $tierPricing->ebayOfferPriceFor($p);
+            $priceDrift = ($liveRow !== null && $liveRow->price !== null && abs((float) $liveRow->price - $expectedEbay) >= 0.01)
+                ? round((float) $liveRow->price - $expectedEbay, 2)
                 : null;
 
             return [
@@ -137,6 +151,7 @@ class AdminEbayAuditController extends Controller
                 // A snapshot exists but this "listed" product is not in it —
                 // eBay is not actually showing it.
                 'live_missing'  => $liveFetchedAt !== null && $liveRow === null,
+                'expected_ebay_price' => $expectedEbay,
                 'price_drift'   => $priceDrift,
                 'cost_price'    => $cost,
                 'price_b2b'     => $p->price_b2b !== null ? (float) $p->price_b2b : null,
@@ -304,173 +319,4 @@ class AdminEbayAuditController extends Controller
         ]);
     }
 
-    // ── POST /api/v1/admin/ebay/audit/{id}/adopt-ebay-price — ebay.manage ────
-    //
-    // The reverse of applyPrice: eBay's live price is taken as the truth and
-    // written to the website. No eBay call — eBay already shows this price;
-    // only our own `price` was stale. Requires a live snapshot row for the
-    // SKU (run sync-live first), and refuses a non-EUR live price because
-    // the website prices are EUR.
-    public function adoptEbayPrice(Request $request, int $id): JsonResponse
-    {
-        $product = Product::findOrFail($id);
-
-        [$error, $live] = $this->liveRowForAdoption($product);
-        if ($error !== null) {
-            return response()->json(['message' => $error], 422);
-        }
-
-        $oldPrice = (float) $product->price;
-        $newPrice = round((float) $live->price, 2);
-
-        if (abs($newPrice - $oldPrice) < 0.01) {
-            return response()->json([
-                'data'    => ['id' => $product->id, 'price' => $oldPrice],
-                'message' => "Nothing to change — the website already matches eBay for {$product->sku}.",
-            ]);
-        }
-
-        $this->writeAdoption($product, $live, $oldPrice, $newPrice, $request);
-
-        return response()->json([
-            'data'    => ['id' => $product->id, 'price' => $newPrice, 'old_price' => $oldPrice],
-            'message' => "Website price updated from eBay: {$product->sku} " . number_format($oldPrice, 2) . ' € → ' . number_format($newPrice, 2) . ' €.',
-        ]);
-    }
-
-    // ── POST /api/v1/admin/ebay/audit/adopt-ebay-prices — ebay.manage ────────
-    //
-    // The bulk sweep the comparison exists for: either `ids` (the rows the
-    // admin ticked) or `all_drifted: true` (every listed product whose live
-    // eBay price differs from the website). Each product is corrected
-    // independently and reported — one bad row must not stop the other 200.
-    public function adoptEbayPrices(Request $request): JsonResponse
-    {
-        $data = $request->validate([
-            'ids'         => ['required_without:all_drifted', 'array', 'max:500'],
-            'ids.*'       => ['integer'],
-            'all_drifted' => ['required_without:ids', 'boolean'],
-        ]);
-
-        $products = Product::where('ebay_listed', true)
-            ->when(! empty($data['ids']), fn ($q) => $q->whereIn('id', $data['ids']))
-            ->get();
-
-        $updated = [];
-        $skipped = [];
-
-        foreach ($products as $product) {
-            [$error, $live] = $this->liveRowForAdoption($product);
-            if ($error !== null) {
-                // In all_drifted mode a product without a usable live row is
-                // simply not drifted — only report it when explicitly asked for.
-                if (! empty($data['ids'])) {
-                    $skipped[] = ['id' => $product->id, 'sku' => $product->sku, 'reason' => $error];
-                }
-                continue;
-            }
-
-            $oldPrice = (float) $product->price;
-            $newPrice = round((float) $live->price, 2);
-
-            if (abs($newPrice - $oldPrice) < 0.01) {
-                if (! empty($data['ids'])) {
-                    $skipped[] = ['id' => $product->id, 'sku' => $product->sku, 'reason' => 'Already matches eBay.'];
-                }
-                continue;
-            }
-
-            $this->writeAdoption($product, $live, $oldPrice, $newPrice, $request);
-
-            $updated[] = [
-                'id'        => $product->id,
-                'sku'       => $product->sku,
-                'old_price' => $oldPrice,
-                'new_price' => $newPrice,
-            ];
-        }
-
-        AdminAuditLogger::warning('ebay_prices_adopted_bulk', count($updated) . ' website price(s) updated from live eBay prices', $request, $request->user(), [
-            'updated_count' => count($updated),
-            'skipped_count' => count($skipped),
-        ]);
-
-        return response()->json([
-            'data' => [
-                'updated' => $updated,
-                'skipped' => $skipped,
-            ],
-            'meta' => [
-                'updated_count' => count($updated),
-                'skipped_count' => count($skipped),
-            ],
-            'message' => count($updated) . ' website price(s) updated from eBay.',
-        ]);
-    }
-
-    /**
-     * The guard both adopt endpoints share: is there a live eBay price this
-     * product's website price can safely be set to? Returns [error, liveRow].
-     *
-     * @return array{0: ?string, 1: ?EbayLiveListing}
-     */
-    private function liveRowForAdoption(Product $product): array
-    {
-        if (! $product->ebay_listed) {
-            return ['Product is not listed on eBay.', null];
-        }
-        if (! $product->sku) {
-            return ['Product has no SKU to match against the eBay snapshot.', null];
-        }
-
-        try {
-            $live = EbayLiveListing::where('sku', $product->sku)->first();
-        } catch (\Throwable) {
-            return ['The live snapshot table is not available yet — run the migration.', null];
-        }
-
-        if ($live === null || $live->price === null) {
-            return ['No live eBay price for this SKU — refresh the snapshot (sync-live) first.', null];
-        }
-        if ($live->currency !== null && $live->currency !== 'EUR') {
-            return ["Live eBay price is in {$live->currency}, not EUR — not adopting it automatically.", null];
-        }
-
-        return [null, $live];
-    }
-
-    /**
-     * One adopted price: update the product, log it to the listing log and
-     * the admin audit trail. DB-only on purpose — eBay already shows this
-     * price, so there is nothing to push.
-     */
-    private function writeAdoption(Product $product, EbayLiveListing $live, float $oldPrice, float $newPrice, Request $request): void
-    {
-        $product->update(['price' => $newPrice]);
-
-        try {
-            EbayListingLog::create([
-                'product_id'      => $product->id,
-                'admin_user_id'   => $request->user()->id,
-                'sku'             => $product->sku,
-                'action'          => 'ebay_price_adopted',
-                'ebay_item_id'    => $product->ebay_item_id,
-                'ebay_offer_id'   => $product->ebay_offer_id,
-                'status'          => $product->ebay_status,
-                'payload_summary' => [
-                    'old_price'           => $oldPrice,
-                    'new_price'           => $newPrice,
-                    'snapshot_fetched_at' => $live->fetched_at?->toIso8601String(),
-                ],
-            ]);
-        } catch (\Throwable $e) {
-            Log::warning('EbayAudit: listing log write failed', ['error' => $e->getMessage()]);
-        }
-
-        AdminAuditLogger::info('ebay_price_adopted', "Website price set from eBay for {$product->sku}: {$oldPrice} → {$newPrice}", $request, $request->user(), [
-            'product_id' => $product->id,
-            'old_price'  => $oldPrice,
-            'new_price'  => $newPrice,
-        ]);
-    }
 }

@@ -222,6 +222,10 @@ class AdminPermissions
 
         // ── eBay ──────────────────────────────────────────────────────────
         'ebay.manage'             => ['super_admin', 'admin'],
+        // Tier pricing sets what every unit sells for, on the site and on
+        // eBay — same narrow audience as the eBay tools, for the same
+        // reason products.edit was never allowed to set prices at scale.
+        'pricing.manage'          => ['super_admin', 'admin'],
 
         // ── Staff contribution ledger ─────────────────────────────────────
         // Every role holds `staff.self`, and that is the design rather than an

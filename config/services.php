@@ -116,6 +116,22 @@ return [
         'target_margin_percent'  => (float) env('EBAY_TARGET_MARGIN_PERCENT', 15.0),
     ],
 
+    // Tier pricing — the model the team agreed with the order manager
+    // (2026-09-07). cost_price is the Tyre100 supplier price; margin is
+    // set by the product's tier; the website price bakes in the Stripe
+    // fee; the eBay price swaps the Stripe fee for the eBay uplift:
+    //   base    = cost × (1 + tier margin)
+    //   website = base × (1 + stripe fee %)
+    //   eBay    = base × (1 + eBay uplift %)
+    // All correctable in .env without a deploy.
+    'pricing' => [
+        'premium_margin_percent'  => (float) env('PRICING_PREMIUM_MARGIN_PERCENT', 15.0),
+        'midrange_margin_percent' => (float) env('PRICING_MIDRANGE_MARGIN_PERCENT', 20.0),
+        'budget_margin_percent'   => (float) env('PRICING_BUDGET_MARGIN_PERCENT', 30.0),
+        'stripe_fee_percent'      => (float) env('PRICING_STRIPE_FEE_PERCENT', 3.0),
+        'ebay_uplift_percent'     => (float) env('PRICING_EBAY_UPLIFT_PERCENT', 9.5),
+    ],
+
     // Inbound e-mail capture — a Cloudflare Email Worker POSTs parsed
     // customer replies here (see EmailInboundWebhookController and
     // cloudflare-worker/), so a customer's reply to a system-sent e-mail
