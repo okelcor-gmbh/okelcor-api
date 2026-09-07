@@ -1261,6 +1261,10 @@ Route::prefix('v1')->group(function () {
             // and the audited one-step price correction (site + eBay together)
             Route::get('ebay/audit', [AdminEbayAuditController::class, 'index']);
             Route::post('ebay/audit/{id}/apply-price', [AdminEbayAuditController::class, 'applyPrice']);
+            // Price comparison adoption — eBay's live price taken as the
+            // truth and written to the website (single row, or bulk sweep)
+            Route::post('ebay/audit/adopt-ebay-prices', [AdminEbayAuditController::class, 'adoptEbayPrices']);
+            Route::post('ebay/audit/{id}/adopt-ebay-price', [AdminEbayAuditController::class, 'adoptEbayPrice']);
             // Live snapshot refresh — walks every SKU on eBay, so throttled
             // like the other whole-account syncs
             Route::post('ebay/audit/sync-live', [AdminEbayAuditController::class, 'syncLive'])
