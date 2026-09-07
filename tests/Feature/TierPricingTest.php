@@ -273,7 +273,15 @@ class TierPricingTest extends TestCase
 
     public function test_only_pricing_manage_roles_can_use_the_tool(): void
     {
-        foreach (['order_manager', 'marketing', 'editor'] as $role) {
+        // Widened on the user's ask: the order manager and marketing run
+        // the repricing day to day.
+        foreach (['order_manager', 'marketing'] as $role) {
+            $this->actingAs($this->admin($role), 'sanctum')
+                ->getJson('/api/v1/admin/pricing/preview')
+                ->assertOk();
+        }
+
+        foreach (['editor', 'support', 'viewer', 'finance'] as $role) {
             $this->actingAs($this->admin($role), 'sanctum')
                 ->getJson('/api/v1/admin/pricing/preview')
                 ->assertForbidden();
