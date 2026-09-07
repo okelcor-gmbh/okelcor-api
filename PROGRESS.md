@@ -42,6 +42,13 @@ preview readiness counts, brand + id tier assignment, apply skipping the
 unpriceable, the offer body carrying 125.93 for a €100 premium cost,
 pre-migration 503s, permission edges. Suite: **861 passing**.
 
+**Same-day follow-up, deployed (`3c797b1` API / `119665c` Vercel):**
+`pricing.manage` widened to order_manager and marketing on the user's ask
+— they run the repricing day to day. The page moved off the `ebay`
+section onto its own `pricing` section (mapped to `pricing.manage` so
+per-user overrides work); editor, support, viewer and finance stay out,
+and the permission test now proves both sides.
+
 ---
 
 ## 🔁 Session 122 (backend): the price comparison closes the loop the other way
