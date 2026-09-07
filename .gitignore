@@ -39,3 +39,4 @@ cloudflare-worker/.wrangler
 /*.docx
 /*.xlsx
 /*.html
+financial_snapshot_backup_*.json
