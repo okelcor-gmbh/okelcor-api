@@ -6,8 +6,16 @@ Last updated: 2026-09-07 | Branch: `main` | **API production is at `ec0e780` —
 
 ## 🧮 Session 123: tier pricing — Tyre100 is the truth, both channels derive
 
-> **Deploy status:** 🔲 pending this session — migration #68
-> (`products.price_tier`, guarded/additive).
+> **Deploy status:** ✅ BOTH halves live same-session. Backend `f4f289a`
+> over SSH (backup `okelcor-backup-2026-09-07-1403.zip`, migration #68
+> pretended then run in 26ms, caches rebuilt) — pricing endpoints answer
+> 401-not-404 from outside, the removed adopt endpoint 404s, catalogue 200.
+> Frontend `64f0029` via Vercel (the recurring transient "Account is
+> blocked" status flipped to success two minutes later, same as both
+> earlier deploys today) — `/admin/pricing` live behind the admin login.
+> Note: `git add -A` swept the local `financial_snapshot_backup_*.json`
+> into `0078edc`; untracked + gitignored in `f4f289a`, still in that one
+> commit's history if a rewrite is ever wanted.
 
 The team's decision (user + order manager, 2026-09-07) replaced Session
 122's adopt-eBay-price direction hours after it shipped: eBay is NOT the
