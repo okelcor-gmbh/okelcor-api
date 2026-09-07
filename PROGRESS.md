@@ -6,8 +6,12 @@ Last updated: 2026-09-07 | Branch: `main` | **API production is at `ec0e780` —
 
 ## 🔁 Session 122 (backend): the price comparison closes the loop the other way
 
-> **Deploy status:** 🔲 not yet deployed — code + tests on `main`, suite
-> **857 passed**. No migration.
+> **Deploy status:** ✅ BOTH halves live same-session. Backend `c1d7565`
+> deployed over SSH (backup first: `okelcor-backup-2026-09-07-1249.zip`,
+> no migration, caches rebuilt), verified from outside — the two adopt
+> endpoints answer 401-not-404, `/products/sitemap` serves 15,265 handles.
+> Frontend `964d742` via Vercel — homepage links slugged, PDP-by-slug 200,
+> sitemap.xml carries all 15,265 slug URLs (after the revalidate fix below).
 
 The user's ask: the website prices are stale and the live eBay prices are
 the maintained ones — so the audit needed a comparison and a way to pull
@@ -48,6 +52,12 @@ slug-or-id + `updated_at`, one flat response, registered above
 `products/{id}` so "sitemap" can't resolve as a slug). The PDP canonical
 already pointed at the slug, so Google folds the id-era URLs back in.
 Article sitemap routes still read mock data — flagged, not touched.
+
+Deploy race, caught and fixed same-session: the first Vercel build fetched
+`/products/sitemap` before the API's route cache was rebuilt, got a 404,
+and baked an EMPTY product list into the static sitemap. `revalidate =
+3600` on the sitemap route makes it self-heal hourly; the follow-up build
+verified with all 15,265 slug URLs present.
 
 Suite: **858 passing** (1 new sitemap-feed test in
 `ProductOptimizationTest`). Frontend `next build` clean.
