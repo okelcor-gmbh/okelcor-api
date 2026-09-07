@@ -255,6 +255,25 @@ class ProductOptimizationTest extends TestCase
             ->assertJsonPath('data.slug', $product->slug);
     }
 
+    public function test_the_sitemap_feed_serves_slugs_with_id_fallback_for_active_products_only(): void
+    {
+        $slugged  = $this->product();
+        $inactive = $this->product(['is_active' => false]);
+
+        // A legacy row that predates the slug migration: force the slug off
+        // after creation (the model auto-slugs on create).
+        $legacy = $this->product();
+        \Illuminate\Support\Facades\DB::table('products')->where('id', $legacy->id)->update(['slug' => null]);
+
+        $handles = collect($this->getJson('/api/v1/products/sitemap')
+            ->assertOk()
+            ->json('data'))->pluck('handle');
+
+        $this->assertTrue($handles->contains($slugged->slug));
+        $this->assertTrue($handles->contains((string) $legacy->id), 'a slug-less row must fall back to its id');
+        $this->assertFalse($handles->contains($inactive->slug), 'inactive products must not be in the sitemap');
+    }
+
     public function test_renaming_a_product_does_not_move_its_url(): void
     {
         // The slug is in Google's index and in sent campaign e-mails. A rename

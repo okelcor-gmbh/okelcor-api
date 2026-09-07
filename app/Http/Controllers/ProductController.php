@@ -161,6 +161,31 @@ class ProductController extends Controller
         return $filters;
     }
 
+    /**
+     * GET /api/v1/products/sitemap — the whole active catalogue as URL
+     * handles for the frontend's sitemap.xml: slug when the product has one
+     * (the SEO shape), id for legacy rows without. One flat response on
+     * purpose — two columns for ~12k rows beats sixty paginated calls at
+     * every sitemap rebuild.
+     */
+    public function sitemap(): JsonResponse
+    {
+        $rows = Product::where('is_active', true)
+            ->orderBy('id')
+            ->get(['id', 'slug', 'updated_at'])
+            ->map(fn (Product $p) => [
+                'handle'     => $p->slug ?: (string) $p->id,
+                'updated_at' => $p->updated_at?->toIso8601String(),
+            ])
+            ->values();
+
+        return response()->json([
+            'data'    => $rows,
+            'meta'    => ['total' => $rows->count()],
+            'message' => 'success',
+        ])->withHeaders(['Cache-Control' => 'public, max-age=3600']);
+    }
+
     public function specs(): JsonResponse
     {
         $base = Product::where('is_active', true);

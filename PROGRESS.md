@@ -1,6 +1,56 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-09-05 | Branch: `main` | **API production is at `ec0e780` — sessions 86 to 120 (through the claims queue and its portal half), migrations #1 to #67 applied. Website production is at `b490046` — sessions 113 to 121 (the frontend rebuild through the mobile navbar). Every deploy verified from outside the same day.**
+Last updated: 2026-09-07 | Branch: `main` | **API production is at `ec0e780` — sessions 86 to 120 (through the claims queue and its portal half), migrations #1 to #67 applied. Website production is at `b490046` — sessions 113 to 121 (the frontend rebuild through the mobile navbar). Every deploy verified from outside the same day.**
+
+---
+
+## 🔁 Session 122 (backend): the price comparison closes the loop the other way
+
+> **Deploy status:** 🔲 not yet deployed — code + tests on `main`, suite
+> **857 passed**. No migration.
+
+The user's ask: the website prices are stale and the live eBay prices are
+the maintained ones — so the audit needed a comparison and a way to pull
+eBay's price INTO the site. The comparison data already existed on `GET
+/admin/ebay/audit` (`db_price`, `live.price`, `price_drift`,
+`meta.counts.price_drift`); what was missing was the action, and the
+existing `apply-price` goes the wrong direction (pushes a typed price to
+both site and eBay).
+
+| Piece | How it lands |
+|---|---|
+| `POST /admin/ebay/audit/{id}/adopt-ebay-price` (new) | Sets the product's website `price` to the live snapshot price for its SKU. **Deliberately never calls eBay** — eBay already shows that price; only our DB was behind. 422 with a plain-words reason when there's no snapshot row (run sync-live first), no SKU, or the live price isn't EUR. |
+| `POST /admin/ebay/audit/adopt-ebay-prices` (new, bulk) | `{ids: [...]}` (max 500) or `{all_drifted: true}`. Each row corrected independently — one bad row can't stop the sweep. `ids` mode reports every skip with its reason; `all_drifted` mode treats no-snapshot/no-drift rows as simply not drifted. |
+| Traceability | Every adoption → `ebay_listing_logs` action `ebay_price_adopted` with old/new price AND the snapshot's `fetched_at` (so a stale-snapshot adoption is diagnosable later), plus the admin audit trail (info per row, warning summary on bulk). |
+| Permissions | Both under the existing `ebay.manage` group (super_admin, admin) — same door as the rest of the audit. |
+
+`FRONTEND_NOTE_ebay-price-comparison.md` specs the panel side: drift
+filter/tab, per-row "Use eBay price", header "Adopt all (N)" off
+`meta.counts.price_drift`, and a direction cheat-sheet so `apply-price`
+(site + eBay) and `adopt-ebay-price` (site only) never get mislabeled.
+
+Tests: 6 new in `EbayPricingAuditTest` — adoption without an eBay call,
+the 422 guards (no snapshot, foreign currency), the all-drifted sweep
+leaving matching/ghost rows untouched, ids-mode skip reporting, and the
+permission edge.
+
+**Also this session: the SEO slugs come back to the product URLs.** The
+SEO manager noticed product links showing ids again after the Session 113
+UI/UX rebuild. Root cause on the frontend: the rebuilt shop's `toProduct()`
+mapper dropped `slug` from the API rows, so `productPath()` (which already
+prefers the slug, per the Session 92 contract) always fell back to the id —
+plus two components (`product-list-row`, homepage `featured-stock`) linking
+`/shop/${id}` directly against the documented rule. Fixed all three. While
+in there: `app/sitemap.ts` was mapping the DEMO catalogue (a dozen mock
+products by id) into the live sitemap — now fed by a new backend endpoint
+`GET /products/sitemap` (public, all active products as `handle` =
+slug-or-id + `updated_at`, one flat response, registered above
+`products/{id}` so "sitemap" can't resolve as a slug). The PDP canonical
+already pointed at the slug, so Google folds the id-era URLs back in.
+Article sitemap routes still read mock data — flagged, not touched.
+
+Suite: **858 passing** (1 new sitemap-feed test in
+`ProductOptimizationTest`). Frontend `next build` clean.
 
 ---
 

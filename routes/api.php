@@ -248,6 +248,8 @@ Route::prefix('v1')->group(function () {
         // TODO: restore auth.customer middleware after review is complete
         Route::get('products/brands', [ProductController::class, 'brands']);
         Route::get('products/specs', [ProductController::class, 'specs']);
+        // Must stay above products/{id} or "sitemap" resolves as a slug
+        Route::get('products/sitemap', [ProductController::class, 'sitemap']);
         Route::get('products', [ProductController::class, 'index']);
         Route::get('products/{id}', [ProductController::class, 'show']);
 
