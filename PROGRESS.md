@@ -4,6 +4,25 @@ Last updated: 2026-09-08 | Branch: `main` | **API production is at `ec0e780` —
 
 ---
 
+## ✨ Session 126 (frontend only): the admin panel dresses for work
+
+> **Deploy status:** ✅ live via Vercel (`c8ede27`), the new login verified
+> with a real browser screenshot on production — wordmark, glow, brand
+> button all rendering. **No backend changes.**
+
+The user's ask: the admin panel deserves the same treatment as the site
+and portal, starting from the login; role-appropriate visibility; and a
+"New" indicator so the team always learns about improvements.
+
+| Piece | How it lands |
+|---|---|
+| **The login** | Split-screen: an ink brand panel with the real OKELCOR wordmark (black PNG inverted), "Growing Together" in brand orange, one restrained radial glow and a headline — the sign-in column on its own darker surface. The "OK" monogram square is gone. |
+| **One orange** | The design tokens outlawed `#E85C1A` in Session 113's cleanup, but 159 admin files still carried it. Swept to the single brand `#f4511e` (hovers `#df4618`) across app/admin, components/admin and the admin-facing libs — the panel now obeys the same style guide as the site. Legacy Mollie e-mail HTML left untouched (inactive). |
+| **What's New** | `lib/whats-new.ts` is a ship-with-the-code changelog. Header sparkle button with an unread dot; a panel of dated briefs, each linking to its page; entries role-gated by admin section so nobody is told about a page they cannot open; and the sidebar pins a "New" pill on each referenced page until the panel is opened (live-cleared via a window event). Seen-state in localStorage per person. Seeded with the week's real features. **Standing convention: every shipped feature adds its entry in the same commit.** |
+| **Role visibility, audited** | Confirmed already-solid: the sidebar filters every item through `canAccessSection` with per-user overrides and drops empty groups; the `section: null` items (My Work, Team To-Dos, Contribution, Messages, Notifications) are deliberate and documented. Nothing dead found to remove. |
+
+---
+
 ## 🏠 Session 125 (frontend only): the customer portal becomes one product
 
 > **Deploy status:** ✅ live via Vercel (`a122ada`, the usual transient
