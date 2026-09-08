@@ -28,6 +28,16 @@ word twice.
 Tests: `ProductExportTest` (3 new — brand scoping, full export, permission
 edge). Suite: **864 passing**. Two What's New entries shipped with it.
 
+**Second follow-up (`eb09e64`, Vercel success):** the pricing guide
+became two tabs — the four steps plus a **"Reading the table"** tab
+explaining every column, ending with the user's own Michelin row worked
+to the cent (cost 126.93 → site 150.35 / eBay 159.84, Change minus
+54.93 explained as the pricing decision it represents, not a bug).
+Step 3 now says to read the Change column before anything else. Every
+em dash in the visible copy of both guides rewritten as sentences per
+the standing rule (now also saved to session memory); the placeholder
+glyphs in data cells stay, being data.
+
 **Follow-up (`6006d32`, Vercel success):** the round-trip guide moved
 into the panel — a **"Read before export"** button beside the brand
 dropdown opens the whole guide as a modal (the loop, the column rules
