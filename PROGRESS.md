@@ -4,7 +4,21 @@ Last updated: 2026-09-08 | Branch: `main` | **API production is at `ec0e780` —
 
 ---
 
-## 🧾 Session 124 (frontend only): Exports joins the EU member state dropdown
+## 🧾 Session 124 (frontend only): Exports in the dropdown, and eBay orders read "Paid"
+
+**Second ask, deployed the same day (`5b32409`, Vercel success):** an eBay
+order paid on eBay showed "Confirmed" in the orders list — reading as if
+the money were still open, when eBay had collected it (checked against
+production: the order's `payment_status` WAS `paid`; `status` was
+`confirmed` because eBay fulfilment had not started). eBay handles both
+payment and shipping, so the list now shows **"Paid"** for a paid eBay
+order in the pending/confirmed window, flipping to Processing/Shipped/
+Delivered as eBay fulfils. Display-only — the ENUM pipeline status
+underneath is untouched (no `paid` added to the ENUM: the enum lesson,
+and the fulfilment queues filter on those values), so nothing downstream
+moves.
+
+### First ask: Exports joins the EU member state dropdown
 
 > **Deploy status:** ✅ live via Vercel (`a70daf8`, clean build).
 > **No backend changes.**
