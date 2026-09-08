@@ -1,6 +1,21 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-09-07 | Branch: `main` | **API production is at `ec0e780` — sessions 86 to 120 (through the claims queue and its portal half), migrations #1 to #67 applied. Website production is at `b490046` — sessions 113 to 121 (the frontend rebuild through the mobile navbar). Every deploy verified from outside the same day.**
+Last updated: 2026-09-08 | Branch: `main` | **API production is at `ec0e780` — sessions 86 to 120 (through the claims queue and its portal half), migrations #1 to #67 applied. Website production is at `b490046` — sessions 113 to 121 (the frontend rebuild through the mobile navbar). Every deploy verified from outside the same day.**
+
+---
+
+## 🧾 Session 124 (frontend only): Exports joins the EU member state dropdown
+
+> **Deploy status:** ✅ live via Vercel (`a70daf8`, clean build).
+> **No backend changes.**
+
+Finance's ask on the EC Invoice list. The export path existed (Session's
+EC work: third-country groups audited beside the ZM lines, excluded from
+the ELSTER XML) but hid behind the Transaction-type select. An "Exports
+(non-EU country)" entry in the EU member state dropdown now flips the
+form into export mode directly — the control reshapes into the free-text
+destination field it already was, and the backend's EU/non-EU vocabulary
+validation is untouched.
 
 ---
 
