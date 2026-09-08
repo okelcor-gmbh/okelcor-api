@@ -4,6 +4,30 @@ Last updated: 2026-09-08 | Branch: `main` | **API production is at `ec0e780` —
 
 ---
 
+## 🏠 Session 125 (frontend only): the customer portal becomes one product
+
+> **Deploy status:** ✅ live via Vercel (`a122ada`, the usual transient
+> "blocked" then success). **Verified on production** with a short-lived
+> customer token (minted via tinker, revoked after): every portal page
+> streams complete with the rail; the dashboard renders the greeting,
+> stat tiles, recent orders and status card; the attention panel
+> correctly absent for a customer with nothing pending. **No backend
+> changes.**
+
+The user's verdict: the portal still felt generic next to the Session
+113 website. The diagnosis: thirteen pages, each an island with its own
+navbar/footer/back-link, reachable only through a dashboard that was a
+menu of eight identical cards — a portal that navigates like a brochure.
+
+| Change | Why |
+|---|---|
+| `app/account/layout.tsx` owns the chrome once | Navbar, footer, shell width and the auth guard moved out of every page. A page under /account is now a pane, not a site. |
+| Persistent left rail (`account-nav.tsx`) | Identity block on top, grouped links (portal + Account), active state in the site's language (ink pill, brand icon), live unread badge on Messages polling the existing unread-count endpoint. B2B sees Company/VAT; B2C does not. Mobile: a horizontal pill bar. |
+| Dashboard shows the customer's situation, not a menu | Server-fetches the same endpoints the section pages read. Stat tiles (orders in progress / quotes awaiting you — brand-orange when non-zero), a "Needs your attention" panel synthesized from real state (open payment with a pay URL, entry certificate ready to sign, prepared quote not yet accepted) that only renders when something needs them, and Recent Orders rows with units/total/status. Status card, access requests and quick actions kept. |
+| The 12 sub-pages stripped mechanically | One scripted pass removed main/Navbar/Footer/tesla-shell per page; early-return states shrunk from min-h-screen to a pane-sized box. tsc + build clean. |
+
+---
+
 ## 🧾 Session 124 (frontend only): Exports in the dropdown, and eBay orders read "Paid"
 
 **Second ask, deployed the same day (`5b32409`, Vercel success):** an eBay
