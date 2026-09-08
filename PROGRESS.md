@@ -21,6 +21,23 @@ and portal, starting from the login; role-appropriate visibility; and a
 | **What's New** | `lib/whats-new.ts` is a ship-with-the-code changelog. Header sparkle button with an unread dot; a panel of dated briefs, each linking to its page; entries role-gated by admin section so nobody is told about a page they cannot open; and the sidebar pins a "New" pill on each referenced page until the panel is opened (live-cleared via a window event). Seen-state in localStorage per person. Seeded with the week's real features. **Standing convention: every shipped feature adds its entry in the same commit.** |
 | **Role visibility, audited** | Confirmed already-solid: the sidebar filters every item through `canAccessSection` with per-user overrides and drops empty groups; the `section: null` items (My Work, Team To-Dos, Contribution, Messages, Notifications) are deliberate and documented. Nothing dead found to remove. |
 
+**Follow-up, same day (`5278aef`, Vercel success): the dashboard knows
+your role, and opens with your desk.** The landing page rendered every
+widget for every role — a content editor was greeted by finance charts
+that could only error or sit empty. Widgets now pass the same
+`canAccessSection` gate the sidebar uses (server-side, from the
+role/perms cookies): Revenue needs `finance`, Recent Orders/Status
+Bar/Hero Metrics `orders`, Pending Quotes `quotes`, Low Stock
+`products`, Chats `chats`, the marketing row `analytics`, Security and
+Sentry their own keys — whole columns disappear when empty. Above it
+all, a **"Your desk"** strip counts what is assigned to YOU (leads,
+follow-ups, finance items, EC lines, claims, to-dos, approvals) off the
+existing `/admin/my-work` meta, links into My Work, and stays silent
+when the desk is clear. `PageHeader` becomes the shared header component
+(eyebrow/title/sub/actions slot) — new pages use it, old ones adopt it
+as touched, the dashboard first. What's New entry shipped in the same
+commit, per the standing convention.
+
 ---
 
 ## 🏠 Session 125 (frontend only): the customer portal becomes one product
