@@ -27,6 +27,17 @@ rail deepened to the login's `#101216` at the 256px reference width; the
 header gained its backdrop blur. What's New entry shipped in the same
 commit.
 
+**Convergence batch, same day (`ff74ea0`, Vercel success):** Orders,
+eBay Orders, Products, Quote Requests and Customers moved onto the
+shared `PageHeader` — real title hierarchy where an orange eyebrow used
+to double as the page title, live counts as the sub, page actions in the
+slot. The two big tables adopted the console money rule: right-aligned
+tabular numerals under right-aligned heads. Twenty more files lost the
+last two drifted hover-oranges (`#d04d15`, `#d44d10` → `#df4618`). The
+dashboard header now carries the date; its cards audited against the
+research — revenue already led top-left, numerals already tabular, so
+no forced change (the rule is "converge", not "churn").
+
 ---
 
 ## ✨ Session 126 (frontend only): the admin panel dresses for work
