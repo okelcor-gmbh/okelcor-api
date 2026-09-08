@@ -68,15 +68,20 @@ class ProductImportController extends Controller
     public function export(Request $request): StreamedResponse
     {
         $segment  = $request->input('segment');
+        // ?brand= — one brand's products only, for the scripted-edit
+        // round-trip: export Michelin, edit descriptions in Python, import
+        // the same file back (the importer upserts by SKU).
+        $brand    = trim((string) $request->input('brand', ''));
         $datePart = now()->format('Y-m-d_His');
 
-        $filename = match ($segment) {
-            'b2b'   => "products-b2b-{$datePart}.csv",
-            'b2c'   => "products-b2c-{$datePart}.csv",
-            default => "products-{$datePart}.csv",
+        $brandPart = $brand !== '' ? \Illuminate\Support\Str::slug($brand) . '-' : '';
+        $filename  = match ($segment) {
+            'b2b'   => "products-{$brandPart}b2b-{$datePart}.csv",
+            'b2c'   => "products-{$brandPart}b2c-{$datePart}.csv",
+            default => "products-{$brandPart}{$datePart}.csv",
         };
 
-        return response()->streamDownload(function () use ($segment) {
+        return response()->streamDownload(function () use ($segment, $brand) {
             $handle = fopen('php://output', 'w');
 
             fputcsv($handle, [
@@ -87,6 +92,10 @@ class ProductImportController extends Controller
             ]);
 
             $query = Product::withoutTrashed()->orderBy('id');
+
+            if ($brand !== '') {
+                $query->where('brand', $brand);
+            }
 
             if ($segment === 'b2b') {
                 $query->whereNotNull('price_b2b');

@@ -509,12 +509,18 @@ Route::prefix('v1')->group(function () {
         // Content — products.edit (super_admin, admin, editor, content_manager)
         // -----------------------------------------------------------------
 
-        // Bulk import / destructive — products.import (super_admin, admin)
+        // Bulk import / export — products.import (super_admin, admin; grantable
+        // per-user for the marketing CSV round-trip)
         Route::middleware(['permission:products.import', 'throttle:admin-sensitive'])->group(function () {
             Route::post('products/import', [ProductImportController::class, 'import']);
             Route::get('products/export', [ProductImportController::class, 'export']);
-            Route::delete('products/all', [AdminProductController::class, 'destroyAll']);
             Route::post('fet/engines/import', [AdminFetEngineController::class, 'import']);
+        });
+
+        // Deleting the ENTIRE catalogue is not "importing" — its own key, so
+        // granting someone the CSV round-trip never hands them this.
+        Route::middleware(['permission:products.delete_all', 'throttle:admin-sensitive'])->group(function () {
+            Route::delete('products/all', [AdminProductController::class, 'destroyAll']);
         });
 
         // Content CRUD — products.edit
