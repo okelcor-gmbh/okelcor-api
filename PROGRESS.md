@@ -1,6 +1,32 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-09-08 | Branch: `main` | **API production is at `ec0e780` — sessions 86 to 120 (through the claims queue and its portal half), migrations #1 to #67 applied. Website production is at `b490046` — sessions 113 to 121 (the frontend rebuild through the mobile navbar). Every deploy verified from outside the same day.**
+Last updated: 2026-09-09 | Branch: `main` | **API production is at `ec0e780` — sessions 86 to 120 (through the claims queue and its portal half), migrations #1 to #67 applied. Website production is at `b490046` — sessions 113 to 121 (the frontend rebuild through the mobile navbar). Every deploy verified from outside the same day.**
+
+---
+
+## 🧭 Session 128: marketing gets unblocked — pricing clarity, Fabi's access, the CSV round-trip
+
+> **Deploy status:** ✅ BOTH halves live same-session. Backend `b2fcd76`
+> (backup `okelcor-backup-2026-09-08-1005.zip`, no migration, caches
+> rebuilt; export answers 401-not-404 with `?brand=`). Frontend via
+> Vercel. Ops on production: Fabi granted, tiers reset.
+
+Marketing's issues with the Tyre Pricing tool, unpacked from the event
+log: someone marked **Rapid (37 products) premium** — the tier IS the
+margin, so a budget brand priced at 15% — applied it, then assigned
+Michelin. The columns "Current site" vs "→ Website" read as the same
+word twice.
+
+| Ask | How it landed |
+|---|---|
+| **Pricing tool made plain** | Columns renamed to what they mean — "Price now" (what the site charges today) / "New website price" / "New eBay price", each with a tooltip — and a 4-step guide (cost in → pick tier → check → apply) opens by default until dismissed, "How this works" brings it back. The guide names example brands per tier so Rapid-as-premium cannot happen by vocabulary. |
+| **Fresh start** | All 1,061 tier assignments cleared on production (after backup). The 38 formula-applied prices stay until the team reassigns proper tiers and applies — the formula then self-corrects them. |
+| **Fabi (marketing) → eBay** | `permission_grants: ["ebay.manage", "products.import"]` on his account via the existing per-user override mechanism — verified effective, and verified `products.delete_all` NOT included. He must log out/in to refresh his cookie. |
+| **Delete-all off the import key** | `DELETE /admin/products/all` moved from `products.import` onto the pre-existing `products.delete_all` key — granting someone the CSV round-trip never hands them the catalogue-eraser. |
+| **Brand CSV round-trip** | `?brand=` on the export (backend + proxy + a brand dropdown beside Export CSV). Export one brand → edit in Python keeping `sku` untouched → import back, rows update by SKU (the importer already upserts by SKU and strips the brand prefix the export adds — round-trip verified stable in code). Format contract: `docs/PRODUCT_CSV_ROUND_TRIP.md` (what import never touches: images, slugs, eBay state, rich HTML). |
+
+Tests: `ProductExportTest` (3 new — brand scoping, full export, permission
+edge). Suite: **864 passing**. Two What's New entries shipped with it.
 
 ---
 
