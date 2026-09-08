@@ -28,6 +28,15 @@ word twice.
 Tests: `ProductExportTest` (3 new — brand scoping, full export, permission
 edge). Suite: **864 passing**. Two What's New entries shipped with it.
 
+**Follow-up (`6006d32`, Vercel success):** the round-trip guide moved
+into the panel — a **"Read before export"** button beside the brand
+dropdown opens the whole guide as a modal (the loop, the column rules
+with `sku` marked untouchable, what import can never break, the
+test-3-rows-first habit). Mirrors `docs/PRODUCT_CSV_ROUND_TRIP.md`;
+keep the two in step. Confirmed for the user: import matches by SKU and
+updates in place — an edited Michelin file updates those Michelin
+products, never duplicates, never deletes.
+
 ---
 
 ## 🖥️ Session 127 (frontend only): the admin panel becomes an operations console
