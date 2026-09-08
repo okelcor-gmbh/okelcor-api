@@ -4,6 +4,31 @@ Last updated: 2026-09-08 | Branch: `main` | **API production is at `ec0e780` —
 
 ---
 
+## 🖥️ Session 127 (frontend only): the admin panel becomes an operations console
+
+> **Deploy status:** ✅ live via Vercel (`dbdcd0e`). **No backend changes.**
+
+The user's ask: research how the best companies present their consoles,
+choose the fit for Okelcor, adopt it across the whole panel. Researched
+through the web (925studios' 2026 dashboard survey, Polaris docs,
+Dribbble/Mobbin pattern libraries) and distilled: **Stripe** (the table
+is the truth; colour carries meaning only; one metric leads), **Linear**
+(calm beats dense; the work surface gets the pixels), **Raycast/Vercel**
+(the near-black rail with a single accent — already Okelcor's
+signature), **Polaris** (density where the work is dense). Direction
+written down in `docs/ADMIN_DESIGN_GUIDE.md` — the 8 rules every page
+converges on.
+
+Applied mechanically the same day: 128 files swept from 16px bubbles to
+12px console panels (`rounded-2xl` → `rounded-xl`, pills untouched); the
+shell paints one `#f6f7f9` canvas capped at 1600px (ultra-wide monitors
+get composition, not sprawl) and pages stopped painting their own; the
+rail deepened to the login's `#101216` at the 256px reference width; the
+header gained its backdrop blur. What's New entry shipped in the same
+commit.
+
+---
+
 ## ✨ Session 126 (frontend only): the admin panel dresses for work
 
 > **Deploy status:** ✅ live via Vercel (`c8ede27`), the new login verified
