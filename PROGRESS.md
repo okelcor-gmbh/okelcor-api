@@ -8,6 +8,14 @@ Last updated: 2026-09-09 | Branch: `main` | **API production is at `ec0e780` —
 
 > **Deploy status:** ✅ live via Vercel (`f88890e`). **No backend changes.**
 
+**Second correction, deployed (`0de8430` API with migration #69 in 9ms
+after backup `okelcor-backup-2026-09-09-0752.zip`, frontend via
+Vercel):** the Category select splits Tyres into **New Tyres / Used
+Tyres / FET**. Existing rows renamed to New Tyres (the board never
+distinguished; finance flips individual rows to Used), column default
+moved, `SalesOrderEntry::CATEGORIES` and the form default follow.
+Verified on production: the one existing entry now reads New Tyres.
+
 User correction on Sales & Order Management: the rows the team enters
 there are invoices, so the labels now say so. "New order" became "New
 invoice", "Order no" became "Invoice no" (table header and form label),
