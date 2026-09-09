@@ -66,7 +66,7 @@ class SalesOrderBoardTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_credit_notes_subtract_from_revenue_and_cancelled_lines_count_nowhere(): void
+    public function test_credit_notes_and_cancelled_lines_both_subtract_from_revenue(): void
     {
         $finance = $this->admin();
 
@@ -86,11 +86,11 @@ class SalesOrderBoardTest extends TestCase
         ])->assertCreated();
 
         $entry = $this->actingAs($finance, 'sanctum')->postJson("/api/v1/admin/sales-orders/{$id}/lines", [
-            'party_type' => 'cancelled', 'party_name' => 'Cancelled shipment', 'amount' => 999999,
+            'party_type' => 'cancelled', 'party_name' => 'Cancelled invoice', 'amount' => 500,
         ])->json('data');
 
-        $this->assertSame(8500.0, (float) $entry['revenue'], 'credit note must subtract; cancelled must not count');
-        $this->assertSame(0.0, (float) $entry['costs'], 'cancelled amount must not land in costs either');
+        $this->assertSame(8000.0, (float) $entry['revenue'], 'credit note AND cancelled must both subtract from revenue');
+        $this->assertSame(0.0, (float) $entry['costs'], 'neither lands in costs; only supplier lines do');
 
         $lines = collect($entry['lines']);
         $this->assertSame('CN-2026-009', $lines->firstWhere('party_type', 'credit_note')['invoice_no']);

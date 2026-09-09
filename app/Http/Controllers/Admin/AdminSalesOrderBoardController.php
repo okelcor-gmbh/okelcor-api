@@ -396,11 +396,16 @@ class AdminSalesOrderBoardController extends Controller
     {
         $customer = $entry->lines->where('party_type', SalesOrderLine::PARTY_CUSTOMER);
         $supplier = $entry->lines->where('party_type', SalesOrderLine::PARTY_SUPPLIER);
-        // Credit notes are money handed back: they subtract from revenue.
-        // Cancelled lines count nowhere; they are kept only as the record.
-        $credits  = $entry->lines->where('party_type', SalesOrderLine::PARTY_CREDIT_NOTE);
+        // Every non-customer line pulls the numbers DOWN (the user's rule,
+        // 2026-09-09): credit notes are money handed back and cancelled
+        // invoices are revenue that never happened, so both subtract from
+        // revenue; supplier lines subtract as costs on the way to profit.
+        $negative = $entry->lines->whereIn('party_type', [
+            SalesOrderLine::PARTY_CREDIT_NOTE,
+            SalesOrderLine::PARTY_CANCELLED,
+        ]);
 
-        $revenue = round((float) $customer->sum('amount') - (float) $credits->sum('amount'), 2);
+        $revenue = round((float) $customer->sum('amount') - (float) $negative->sum('amount'), 2);
         $costs   = round((float) $supplier->sum('amount'), 2);
         $gp      = round($revenue - $costs, 2);
 
