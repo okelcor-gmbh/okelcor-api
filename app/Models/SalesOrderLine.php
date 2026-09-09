@@ -11,18 +11,24 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class SalesOrderLine extends Model
 {
-    public const PARTY_CUSTOMER = 'customer';
-    public const PARTY_SUPPLIER = 'supplier';
+    public const PARTY_CUSTOMER    = 'customer';
+    public const PARTY_SUPPLIER    = 'supplier';
+    // A credit note subtracts from revenue; a cancelled line counts nowhere.
+    public const PARTY_CREDIT_NOTE = 'credit_note';
+    public const PARTY_CANCELLED   = 'cancelled';
 
     public const PARTY_TYPES = [
         self::PARTY_CUSTOMER,
         self::PARTY_SUPPLIER,
+        self::PARTY_CREDIT_NOTE,
+        self::PARTY_CANCELLED,
     ];
 
     protected $fillable = [
         'entry_id',
         'party_type',
         'party_name',
+        'invoice_no',
         'tyre_qty',
         'amount',
         'file_path',

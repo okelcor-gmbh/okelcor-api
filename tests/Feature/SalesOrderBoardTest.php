@@ -49,6 +49,7 @@ class SalesOrderBoardTest extends TestCase
         // what prevents a doubled entry, so a hand-built table would be
         // testing a different schema from the one that ships.
         $this->runMigration('2026_08_28_000005_create_sales_order_board_tables');
+        $this->runMigration('2026_09_09_000002_add_invoice_no_and_new_parties_to_sales_order_lines');
 
         Schema::enableForeignKeyConstraints();
 
@@ -63,6 +64,56 @@ class SalesOrderBoardTest extends TestCase
         }
         Schema::enableForeignKeyConstraints();
         parent::tearDown();
+    }
+
+    public function test_credit_notes_subtract_from_revenue_and_cancelled_lines_count_nowhere(): void
+    {
+        $finance = $this->admin();
+
+        $id = $this->actingAs($finance, 'sanctum')
+            ->postJson('/api/v1/admin/sales-orders', [
+                'order_no' => 'INV-CN-1', 'customer_name' => 'Autohaus Nord',
+                'segment' => 'B2B', 'period' => '2026-09', 'amount' => 10000, 'tyre_qty' => 40,
+            ])->json('data.id');
+
+        $this->actingAs($finance, 'sanctum')->postJson("/api/v1/admin/sales-orders/{$id}/lines", [
+            'party_type' => 'customer', 'party_name' => 'Autohaus Nord', 'amount' => 10000, 'tyre_qty' => 40,
+        ])->assertCreated();
+
+        $this->actingAs($finance, 'sanctum')->postJson("/api/v1/admin/sales-orders/{$id}/lines", [
+            'party_type' => 'credit_note', 'party_name' => 'Autohaus Nord', 'amount' => 1500,
+            'invoice_no' => 'CN-2026-009',
+        ])->assertCreated();
+
+        $entry = $this->actingAs($finance, 'sanctum')->postJson("/api/v1/admin/sales-orders/{$id}/lines", [
+            'party_type' => 'cancelled', 'party_name' => 'Cancelled shipment', 'amount' => 999999,
+        ])->json('data');
+
+        $this->assertSame(8500.0, (float) $entry['revenue'], 'credit note must subtract; cancelled must not count');
+        $this->assertSame(0.0, (float) $entry['costs'], 'cancelled amount must not land in costs either');
+
+        $lines = collect($entry['lines']);
+        $this->assertSame('CN-2026-009', $lines->firstWhere('party_type', 'credit_note')['invoice_no']);
+        $this->assertSame(0, $lines->firstWhere('party_type', 'cancelled')['tyre_qty']);
+    }
+
+    public function test_a_line_invoice_number_can_be_set_and_changed(): void
+    {
+        $finance = $this->admin();
+
+        $created = $this->actingAs($finance, 'sanctum')
+            ->postJson('/api/v1/admin/sales-orders', [
+                'order_no' => 'INV-NO-1', 'customer_name' => 'Reifen Krause',
+                'segment' => 'B2B', 'period' => '2026-09',
+            ])->json('data');
+
+        $lineId = $created['lines'][0]['id'];
+
+        $entry = $this->actingAs($finance, 'sanctum')
+            ->patchJson("/api/v1/admin/sales-orders/lines/{$lineId}", ['invoice_no' => 'INV-2026-104'])
+            ->json('data');
+
+        $this->assertSame('INV-2026-104', $entry['lines'][0]['invoice_no']);
     }
 
     private function runMigration(string $name): void

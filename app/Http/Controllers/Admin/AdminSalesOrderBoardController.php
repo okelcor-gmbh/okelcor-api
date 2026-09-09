@@ -227,6 +227,7 @@ class AdminSalesOrderBoardController extends Controller
 
         $data = $request->validate([
             'party_type' => ['required', Rule::in(SalesOrderLine::PARTY_TYPES)],
+            'invoice_no' => ['nullable', 'string', 'max:50'],
             'party_name' => ['required', 'string', 'max:150'],
             'tyre_qty'   => ['nullable', 'integer', 'min:0', 'max:1000000'],
             'amount'     => ['nullable', 'numeric', 'min:0', 'max:99999999'],
@@ -236,6 +237,7 @@ class AdminSalesOrderBoardController extends Controller
         $line = SalesOrderLine::create([
             'entry_id'   => $entry->id,
             'party_type' => $data['party_type'],
+            'invoice_no' => $data['invoice_no'] ?? null,
             'party_name' => $data['party_name'],
             // Tyre quantity is a revenue-side fact — a quantity on a supplier
             // line would double-count the same tyres into the KPIs.
@@ -266,13 +268,14 @@ class AdminSalesOrderBoardController extends Controller
         $data = $request->validate([
             'party_type' => ['sometimes', Rule::in(SalesOrderLine::PARTY_TYPES)],
             'party_name' => ['sometimes', 'string', 'max:150'],
+            'invoice_no' => ['sometimes', 'nullable', 'string', 'max:50'],
             'tyre_qty'   => ['sometimes', 'integer', 'min:0', 'max:1000000'],
             'amount'     => ['sometimes', 'numeric', 'min:0', 'max:99999999'],
         ]);
 
         $line->fill($data);
 
-        if ($line->party_type === SalesOrderLine::PARTY_SUPPLIER) {
+        if ($line->party_type !== SalesOrderLine::PARTY_CUSTOMER) {
             $line->tyre_qty = 0;
         }
 
@@ -393,8 +396,11 @@ class AdminSalesOrderBoardController extends Controller
     {
         $customer = $entry->lines->where('party_type', SalesOrderLine::PARTY_CUSTOMER);
         $supplier = $entry->lines->where('party_type', SalesOrderLine::PARTY_SUPPLIER);
+        // Credit notes are money handed back: they subtract from revenue.
+        // Cancelled lines count nowhere; they are kept only as the record.
+        $credits  = $entry->lines->where('party_type', SalesOrderLine::PARTY_CREDIT_NOTE);
 
-        $revenue = round((float) $customer->sum('amount'), 2);
+        $revenue = round((float) $customer->sum('amount') - (float) $credits->sum('amount'), 2);
         $costs   = round((float) $supplier->sum('amount'), 2);
         $gp      = round($revenue - $costs, 2);
 
@@ -480,6 +486,7 @@ class AdminSalesOrderBoardController extends Controller
                 'id'         => $l->id,
                 'party_type' => $l->party_type,
                 'party_name' => $l->party_name,
+                'invoice_no' => $l->invoice_no,
                 'tyre_qty'   => $l->tyre_qty,
                 'amount'     => (float) $l->amount,
                 'has_file'   => $l->hasFile(),
