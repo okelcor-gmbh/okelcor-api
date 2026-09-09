@@ -4,6 +4,21 @@ Last updated: 2026-09-09 | Branch: `main` | **API production is at `ec0e780` —
 
 ---
 
+## 🔎 Session 130b (frontend only): the eBay page's search actually searches
+
+> **Deploy status:** ✅ live via Vercel (`05fe66f`). **No backend changes.**
+
+The user's report: eBay search does not find products. Root cause was a
+stale closure, not the search itself: `fetchProducts` is memoized once,
+so its internal q/filter/page fallbacks close over the INITIAL state,
+and `handleSearch` called it without passing `q` — every typed search
+silently sent an empty query. All five call sites now pass the live
+values, a clear button resets the search, and the backend needed
+nothing (it already runs the shared `ProductSearch` over sku, ean,
+brand, name, size, spec and brand-default specs).
+
+---
+
 ## 💶 Session 130: Tyre100 costs stay current
 
 > **Deploy status:** ✅ BOTH halves live same-session. Backend `64c8ff3`
