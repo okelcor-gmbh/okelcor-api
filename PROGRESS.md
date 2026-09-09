@@ -1,6 +1,6 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-09-09 | Branch: `main` | **API production is at `ec0e780` — sessions 86 to 120 (through the claims queue and its portal half), migrations #1 to #67 applied. Website production is at `b490046` — sessions 113 to 121 (the frontend rebuild through the mobile navbar). Every deploy verified from outside the same day.**
+Last updated: 2026-09-09 | Branch: `main` | **API production is at `62102a9` — sessions 86 to 130 (through tier pricing, the Tyre100 cost refresh and the Sales & Orders invoice ledger), migrations #1 to #71 applied. Website production is at `05fe66f` — sessions 113 to 130b (the frontend rebuild, the portal redesign, the admin operations-console pass, through the eBay search fix). Every deploy verified from outside the same day.**
 
 ---
 
