@@ -8,6 +8,14 @@ Last updated: 2026-09-09 | Branch: `main` | **API production is at `ec0e780` —
 
 > **Deploy status:** ✅ live via Vercel (`f88890e`). **No backend changes.**
 
+**Formula correction, deployed same-session:** the user's rule is that
+EVERY non-customer line pulls the totals down. Cancelled invoices now
+subtract from revenue exactly like credit notes (revenue that never
+happened); supplier lines already subtracted as costs. The lines table
+renders every non-customer amount in red with a minus, editable rows
+included, while the stored amount stays positive. Test updated to prove
+10000 − 1500 credit − 500 cancelled = 8000. Suite **866 passing**.
+
 **Third addition, deployed (backup `okelcor-backup-2026-09-09-0809.zip`,
 migration #70 in 17ms, frontend via Vercel, `invoice_no` verified present
 on production):** the itemized lines gain a per-line **Invoice no**
