@@ -4,6 +4,19 @@ Last updated: 2026-09-09 | Branch: `main` | **API production is at `ec0e780` —
 
 ---
 
+## 🏷️ Session 129 (frontend only): the Sales & Orders board speaks invoice
+
+> **Deploy status:** ✅ live via Vercel (`f88890e`). **No backend changes.**
+
+User correction on Sales & Order Management: the rows the team enters
+there are invoices, so the labels now say so. "New order" became "New
+invoice", "Order no" became "Invoice no" (table header and form label),
+the add button and its error copy followed, and the placeholder
+suggests INV-. Labels only: the `order_no` field underneath is
+untouched, per the standing rule that column names never move.
+
+---
+
 ## 🧭 Session 128: marketing gets unblocked — pricing clarity, Fabi's access, the CSV round-trip
 
 > **Deploy status:** ✅ BOTH halves live same-session. Backend `b2fcd76`
