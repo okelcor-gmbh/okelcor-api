@@ -35,9 +35,15 @@ class AdminTierPricingController extends Controller
             ], 503);
         }
 
+        $columns = ['id', 'sku', 'brand', 'name', 'size', 'type', 'season', 'stock',
+                    'price', 'cost_price', 'price_tier', 'ebay_listed', 'is_active'];
+        $hasCostStamp = Schema::hasColumn('products', 'cost_price_updated_at');
+        if ($hasCostStamp) {
+            $columns[] = 'cost_price_updated_at';
+        }
+
         $rows = Product::orderBy('brand')->orderBy('name')
-            ->get(['id', 'sku', 'brand', 'name', 'size', 'type', 'season', 'stock',
-                   'price', 'cost_price', 'price_tier', 'ebay_listed', 'is_active'])
+            ->get($columns)
             ->map(function (Product $p) {
                 $cost = $p->cost_price !== null ? (float) $p->cost_price : null;
                 $canPrice = $cost !== null && $cost > 0 && $p->price_tier !== null;
@@ -60,6 +66,8 @@ class AdminTierPricingController extends Controller
                     'ebay_listed'   => (bool) $p->ebay_listed,
                     'tier'          => $p->price_tier,
                     'cost_price'    => $cost,
+                    // Null = the cost predates tracking; treat as stale.
+                    'cost_updated_at' => $p->cost_price_updated_at?->toIso8601String(),
                     'current_price' => $currentPrice,
                     'website_price' => $website,
                     'ebay_price'    => $ebay,
@@ -198,6 +206,103 @@ class AdminTierPricingController extends Controller
             ],
             'meta'    => ['updated_count' => $updated, 'skipped_count' => count($skipped)],
             'message' => "{$updated} website price(s) updated from the tier formula.",
+        ]);
+    }
+
+    // ── POST /api/v1/admin/pricing/import-costs — pricing.manage ─────────────
+    //
+    // The Tyre100 price refresh, until their API exists: a CSV with a sku
+    // (or ean) column and a cost column updates cost_price ONLY, stamping
+    // when each cost was last confirmed against Tyre100. Nothing else on
+    // the product is touched, so this file can come straight from a
+    // massaged Tyre100 price list.
+    public function importCosts(Request $request): JsonResponse
+    {
+        $request->validate([
+            'file' => ['required', 'file', 'extensions:csv,txt', 'max:20480'],
+        ]);
+
+        $handle = fopen($request->file('file')->getRealPath(), 'r');
+        if ($handle === false) {
+            return response()->json(['message' => 'Could not read the file.'], 422);
+        }
+
+        $header = fgetcsv($handle);
+        if ($header === false) {
+            fclose($handle);
+            return response()->json(['message' => 'The file is empty.'], 422);
+        }
+
+        // Tolerant header matching: sku/artikel/article, ean, cost/price/preis/ek.
+        $map = [];
+        foreach ($header as $i => $h) {
+            $h = strtolower(trim((string) $h));
+            if (in_array($h, ['sku', 'artikel', 'artikelnummer', 'article', 'article_number'], true)) $map['sku'] = $i;
+            if ($h === 'ean') $map['ean'] = $i;
+            if (in_array($h, ['cost', 'cost_price', 'price', 'preis', 'ek', 'ek_preis', 'net_price'], true)) $map['cost'] ??= $i;
+        }
+
+        if (! isset($map['cost']) || (! isset($map['sku']) && ! isset($map['ean']))) {
+            fclose($handle);
+            return response()->json([
+                'message' => 'The file needs a sku (or ean) column and a cost column. Found: ' . implode(', ', array_map('strval', $header)),
+            ], 422);
+        }
+
+        $hasStamp = Schema::hasColumn('products', 'cost_price_updated_at');
+        $updated = 0;
+        $confirmed = 0;
+        $unmatched = [];
+        $rowNo = 1;
+
+        while (($row = fgetcsv($handle)) !== false) {
+            $rowNo++;
+            $sku  = isset($map['sku']) ? trim((string) ($row[$map['sku']] ?? '')) : '';
+            $ean  = isset($map['ean']) ? trim((string) ($row[$map['ean']] ?? '')) : '';
+            $cost = str_replace(',', '.', trim((string) ($row[$map['cost']] ?? '')));
+
+            if (($sku === '' && $ean === '') || $cost === '' || ! is_numeric($cost) || (float) $cost <= 0) {
+                continue;
+            }
+
+            $product = null;
+            if ($sku !== '') {
+                $product = Product::where('sku', $sku)->first();
+            }
+            if (! $product && $ean !== '') {
+                $product = Product::where('ean', $ean)->first();
+            }
+
+            if (! $product) {
+                if (count($unmatched) < 50) {
+                    $unmatched[] = ['row' => $rowNo, 'ref' => $sku !== '' ? $sku : $ean];
+                }
+                continue;
+            }
+
+            $changed = $product->cost_price === null || abs((float) $product->cost_price - (float) $cost) >= 0.01;
+            $attrs = ['cost_price' => round((float) $cost, 2)];
+            if ($hasStamp) {
+                $attrs['cost_price_updated_at'] = now();
+            }
+            $product->update($attrs);
+            $changed ? $updated++ : $confirmed++;
+        }
+        fclose($handle);
+
+        AdminAuditLogger::info('pricing_costs_imported', "Tyre100 costs imported: {$updated} changed, {$confirmed} confirmed current", $request, $request->user(), [
+            'updated'   => $updated,
+            'confirmed' => $confirmed,
+            'unmatched' => count($unmatched),
+        ]);
+
+        return response()->json([
+            'data' => [
+                'updated'   => $updated,
+                'confirmed' => $confirmed,
+                'unmatched' => $unmatched,
+            ],
+            'message' => "{$updated} cost(s) updated, {$confirmed} confirmed already current.",
         ]);
     }
 }

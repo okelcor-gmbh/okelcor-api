@@ -1260,6 +1260,7 @@ Route::prefix('v1')->group(function () {
         Route::middleware('permission:pricing.manage')->group(function () {
             Route::get('pricing/preview', [AdminTierPricingController::class, 'preview']);
             Route::post('pricing/set-tier', [AdminTierPricingController::class, 'setTier']);
+            Route::post('pricing/import-costs', [AdminTierPricingController::class, 'importCosts']);
             Route::post('pricing/apply', [AdminTierPricingController::class, 'apply']);
         });
 

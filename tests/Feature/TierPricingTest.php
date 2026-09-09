@@ -74,6 +74,7 @@ class TierPricingTest extends TestCase
         Schema::create('products', function (Blueprint $table) use ($withTierColumn) {
             $table->id();
             $table->string('sku')->nullable();
+            $table->string('ean')->nullable();
             $table->string('brand')->nullable();
             $table->string('name');
             $table->string('size')->nullable();
@@ -81,6 +82,7 @@ class TierPricingTest extends TestCase
             $table->string('season')->nullable();
             $table->decimal('price', 10, 2)->default(0);
             $table->decimal('cost_price', 10, 2)->nullable();
+            $table->timestamp('cost_price_updated_at')->nullable();
             if ($withTierColumn) {
                 $table->string('price_tier', 20)->nullable();
             }
@@ -256,6 +258,39 @@ class TierPricingTest extends TestCase
         $method = new \ReflectionMethod(EbaySellingService::class, 'buildOfferBody');
         $body = $method->invoke(app(EbaySellingService::class), $tiered->fresh());
         $this->assertSame('125.93', $body['pricingSummary']['price']['value']);
+    }
+
+    public function test_the_cost_import_refreshes_tyre100_costs_and_stamps_freshness(): void
+    {
+        $bySku = $this->product(['sku' => 'CI-1', 'cost_price' => 90]);
+        $byEan = $this->product(['sku' => 'CI-2', 'ean' => '4019238012345', 'cost_price' => 50]);
+        $same  = $this->product(['sku' => 'CI-3', 'cost_price' => 70]);
+
+        $csv = "sku,ean,cost\nCI-1,,101.50\n,4019238012345,55,\nCI-3,,70\nGHOST-9,,12\n";
+        $file = \Illuminate\Http\UploadedFile::fake()->createWithContent('tyre100.csv', $csv);
+
+        $response = $this->actingAs($this->admin(), 'sanctum')
+            ->post('/api/v1/admin/pricing/import-costs', ['file' => $file])
+            ->assertOk();
+
+        $this->assertSame(2, $response->json('data.updated'));
+        $this->assertSame(1, $response->json('data.confirmed'));
+        $this->assertSame('GHOST-9', $response->json('data.unmatched.0.ref'));
+
+        $this->assertSame(101.50, (float) $bySku->fresh()->cost_price);
+        $this->assertNotNull($bySku->fresh()->cost_price_updated_at);
+        $this->assertSame(55.0, (float) $byEan->fresh()->cost_price);
+        // A confirmed-current cost still gets its freshness stamp.
+        $this->assertNotNull($same->fresh()->cost_price_updated_at);
+    }
+
+    public function test_the_cost_import_refuses_a_file_without_the_needed_columns(): void
+    {
+        $file = \Illuminate\Http\UploadedFile::fake()->createWithContent('bad.csv', "name,price\nFoo,10\n");
+
+        $this->actingAs($this->admin(), 'sanctum')
+            ->post('/api/v1/admin/pricing/import-costs', ['file' => $file])
+            ->assertStatus(422);
     }
 
     public function test_pre_migration_state_degrades_to_a_clear_503(): void
