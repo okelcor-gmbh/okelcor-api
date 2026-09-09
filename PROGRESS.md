@@ -4,6 +4,30 @@ Last updated: 2026-09-09 | Branch: `main` | **API production is at `ec0e780` —
 
 ---
 
+## 💶 Session 130: Tyre100 costs stay current
+
+> **Deploy status:** ✅ BOTH halves live same-session. Backend `64c8ff3`
+> (backup `okelcor-backup-2026-09-09-1242.zip`, migration #71 in 20ms,
+> caches rebuilt, import-costs answering 401-not-404 from outside).
+> Frontend via Vercel. Suite **868 passing**.
+
+The user's ask: the pricing tool must price on Tyre100's LATEST cost,
+not whatever the product list happens to hold, with their API as a
+later step. The bridge until then:
+
+| Piece | How it lands |
+|---|---|
+| `POST /admin/pricing/import-costs` | A CSV with a `sku` or `ean` column and a `cost` column (tolerant headers: preis, ek, cost_price all accepted; comma decimals normalised) updates `cost_price` ONLY. Nothing else on the product is touched, so the file can come straight from a massaged Tyre100 price list. Unmatched refs reported back, capped at 50. |
+| `products.cost_price_updated_at` (migration #71) | Every matched product is stamped as confirmed today, even when the cost was already right, because a confirmation IS information. Null = predates tracking = stale. |
+| The board shows freshness | Under each cost: the confirmation date, or an amber **unconfirmed** when nobody has checked it against Tyre100. Guide step 1 rewritten: refresh with the Update Tyre100 costs button, and treat unconfirmed costs with suspicion. |
+| "Update Tyre100 costs" button + modal | On the pricing page header: file input, plain-words format note, result summary with unmatched refs. |
+
+What's New entry shipped in the same commit. When the team is ready for
+the Tyre100 API, the endpoint's matching and stamping logic is exactly
+what the scheduled sync will reuse.
+
+---
+
 ## 🏷️ Session 129 (frontend only): the Sales & Orders board speaks invoice
 
 > **Deploy status:** ✅ live via Vercel (`f88890e`). **No backend changes.**
