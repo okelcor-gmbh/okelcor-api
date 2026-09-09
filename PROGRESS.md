@@ -8,6 +8,17 @@ Last updated: 2026-09-09 | Branch: `main` | **API production is at `ec0e780` —
 
 > **Deploy status:** ✅ live via Vercel (`f88890e`). **No backend changes.**
 
+**Third addition, deployed (backup `okelcor-backup-2026-09-09-0809.zip`,
+migration #70 in 17ms, frontend via Vercel, `invoice_no` verified present
+on production):** the itemized lines gain a per-line **Invoice no**
+column between the party name and Tyres qty (editable in the row, offered
+in the add-line form), and the Party select grows **Credit note** and
+**Cancelled**. Migration #70 also widens `party_type` past the 10-char
+limit `credit_note` would have hit. KPI math: a credit note SUBTRACTS
+from revenue; a cancelled line counts nowhere but stays on the record;
+non-customer lines never carry tyre quantities. 2 new tests prove the
+arithmetic; suite **866 passing**.
+
 **Second correction, deployed (`0de8430` API with migration #69 in 9ms
 after backup `okelcor-backup-2026-09-09-0752.zip`, frontend via
 Vercel):** the Category select splits Tyres into **New Tyres / Used
