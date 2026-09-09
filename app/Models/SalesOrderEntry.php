@@ -21,7 +21,7 @@ class SalesOrderEntry extends Model
 
     public const SEGMENTS = ['B2B', 'B2C'];
 
-    public const CATEGORIES = ['Tyres', 'FET'];
+    public const CATEGORIES = ['New Tyres', 'Used Tyres', 'FET'];
 
     protected $fillable = [
         'order_no',

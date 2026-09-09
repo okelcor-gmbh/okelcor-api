@@ -91,7 +91,7 @@ class SalesOrderBoardTest extends TestCase
                 'customer_name' => 'Autohaus Schmidt GmbH',
                 'segment'       => 'B2B',
                 'period'        => '2026-05',
-                'category'      => 'Tyres',
+                'category'      => 'New Tyres',
             ], $overrides));
 
         $response->assertCreated();

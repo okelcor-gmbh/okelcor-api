@@ -137,7 +137,7 @@ class AdminSalesOrderBoardController extends Controller
             'customer_name' => $data['customer_name'],
             'segment'       => $data['segment'] ?? 'B2B',
             'period'        => $data['period'],
-            'category'      => $data['category'] ?? 'Tyres',
+            'category'      => $data['category'] ?? 'New Tyres',
             'created_by'    => $request->user()?->id,
         ]);
 
