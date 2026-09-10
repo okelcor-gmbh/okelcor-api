@@ -46,6 +46,7 @@ use App\Http\Controllers\Admin\AdminNewsletterController;
 use App\Http\Controllers\Admin\AdminFinanceInvoiceController;
 use App\Http\Controllers\Admin\AdminEbayAuditController;
 use App\Http\Controllers\Admin\AdminTierPricingController;
+use App\Http\Controllers\Admin\AdminStockLedgerController;
 use App\Http\Controllers\Admin\AdminFinanceSnapshotController;
 use App\Http\Controllers\Admin\AdminEcInvoiceController;
 use App\Http\Controllers\Admin\AdminSalesOrderBoardController;
@@ -903,6 +904,8 @@ Route::prefix('v1')->group(function () {
         // -----------------------------------------------------------------
         Route::middleware('permission:finance.view')->group(function () {
             Route::get('operations/invoice-reconciliation', [AdminOperationsSummaryController::class, 'reconciliation']);
+            // Finance's stock ledger (their own draft) — reads
+            Route::get('stock', [AdminStockLedgerController::class, 'index']);
             Route::get('finance-invoices', [AdminFinanceInvoiceController::class, 'index']);
             Route::get('finance-invoices/{id}/download', [AdminFinanceInvoiceController::class, 'download']);
 
@@ -957,6 +960,9 @@ Route::prefix('v1')->group(function () {
         });
 
         Route::middleware('permission:finance.manage')->group(function () {
+            // Stock ledger writes — supplier invoices in, customer invoices out
+            Route::post('stock/supplier-invoice', [AdminStockLedgerController::class, 'supplierInvoice']);
+            Route::post('stock/customer-invoice', [AdminStockLedgerController::class, 'customerInvoice']);
             Route::post('finance-invoices', [AdminFinanceInvoiceController::class, 'store']);
             Route::post('finance-invoices/{id}/file', [AdminFinanceInvoiceController::class, 'uploadFile']);
             Route::patch('finance-invoices/{id}', [AdminFinanceInvoiceController::class, 'update']);

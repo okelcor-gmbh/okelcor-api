@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Multi-Line Tyre Inventory & Invoicing</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --border: #334155;
+      --green: #10b981;
+      --primary: #3b82f6;
+      --danger: #ef4444;
+      --amber: #f59e0b;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+    body { background-color: var(--bg); color: var(--text); padding: 1.5rem; }
+    .container { max-width: 1300px; margin: 0 auto; }
+
+    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
+    h1 { font-size: 1.6rem; }
+    
+    .stats { display: flex; gap: 1rem; }
+    .stat-card { background: var(--card); padding: 0.75rem 1.25rem; border-radius: 8px; border: 1px solid var(--border); }
+    .stat-card span { display: block; font-size: 0.75rem; color: var(--muted); }
+    .stat-card strong { font-size: 1.2rem; color: var(--green); }
+    .stat-card.sales strong { color: var(--primary); }
+
+    /* Tabs */
+    .tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+    .tab-btn { background: none; border: none; color: var(--muted); padding: 0.6rem 1.2rem; cursor: pointer; border-radius: 6px; font-weight: 600; width: auto; margin: 0; }
+    .tab-btn.active { background: var(--card); color: var(--text); border: 1px solid var(--border); }
+
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; margin-bottom: 1.5rem; }
+    .card-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; color: var(--muted); display: flex; justify-content: space-between; align-items: center; }
+
+    .form-group { margin-bottom: 0.85rem; }
+    label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.3rem; }
+    input, select { width: 100%; padding: 0.6rem; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); outline: none; }
+    input:focus, select:focus { border-color: var(--primary); }
+
+    /* Invoice Line Items Table */
+    .line-table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
+    .line-table th { background: #0f172a; color: var(--muted); padding: 0.6rem; font-size: 0.8rem; border: 1px solid var(--border); text-align: left; }
+    .line-table td { padding: 0.5rem; border: 1px solid var(--border); background: var(--card); }
+    .line-table input, .line-table select { padding: 0.45rem; font-size: 0.85rem; }
+
+    button { padding: 0.6rem 1rem; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; }
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-primary:hover { background: #2563eb; }
+    .btn-success { background: var(--green); color: white; }
+    .btn-success:hover { background: #059669; }
+    .btn-secondary { background: #334155; color: var(--text); }
+    .btn-secondary:hover { background: #475569; }
+    .btn-danger { background: var(--danger); color: white; padding: 0.3rem 0.6rem; font-size: 0.8rem; }
+
+    table.display-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.88rem; }
+    table.display-table th { color: var(--muted); border-bottom: 1px solid var(--border); padding: 0.75rem 0.5rem; font-size: 0.8rem; }
+    table.display-table td { padding: 0.75rem 0.5rem; border-bottom: 1px solid var(--border); }
+
+    .badge { padding: 0.2rem 0.4rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+    .grade-A { background: #064e3b; color: #34d399; }
+    .grade-B { background: #78350f; color: #fbbf24; }
+    .grade-C { background: #7f1d1d; color: #f87171; }
+
+    .badge-in { background: #064e3b; color: #34d399; }
+    .badge-out { background: #1e3a8a; color: #60a5fa; }
+
+    .invoice-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; }
+    .grand-total { font-size: 1.2rem; font-weight: bold; color: var(--text); }
+    .filter-bar input { max-width: 300px; margin-bottom: 1rem; }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <header>
+      <h1>Tyre Inventory & Invoicing System</h1>
+      <div class="stats">
+        <div class="stat-card">
+          <span>Current Stock</span>
+          <strong id="statTotalPcs">0 pcs</strong>
+        </div>
+        <div class="stat-card sales">
+          <span>Total Sales Revenue</span>
+          <strong id="statTotalSales">$0.00</strong>
+        </div>
+      </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('inventoryTab', this)">Inventory Stock</button>
+      <button class="tab-btn" onclick="switchTab('supplierTab', this)">+ Add Supplier Invoice (Stock In)</button>
+      <button class="tab-btn" onclick="switchTab('customerTab', this)">+ Sell / Customer Invoice (Stock Out)</button>
+      <button class="tab-btn" onclick="switchTab('historyTab', this)">Transaction Log</button>
+    </div>
+
+    <!-- TAB 1: INVENTORY STOCK -->
+    <div id="inventoryTab" class="tab-content active">
+      <div class="card">
+        <div class="filter-bar">
+          <input type="text" id="inventorySearch" placeholder="Filter by size (e.g. R17) or brand..." oninput="renderInventory()">
+        </div>
+        <table class="display-table">
+          <thead>
+            <tr>
+              <th>Tyre Specs</th>
+              <th>Tread / Condition</th>
+              <th>Stock Available</th>
+              <th>Latest Cost Price</th>
+            </tr>
+          </thead>
+          <tbody id="inventoryTable"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- TAB 2: SUPPLIER INVOICE (MULTI-LINE) -->
+    <div id="supplierTab" class="tab-content">
+      <div class="card">
+        <div class="card-title">New Multi-Line Supplier Invoice</div>
+        <form id="supplierForm">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+            <div class="form-group">
+              <label>Supplier Name / Reference</label>
+              <input type="text" id="supName" placeholder="e.g. Continental Wholesale Ltd" required>
+            </div>
+            <div class="form-group">
+              <label>Invoice Number / Ref</label>
+              <input type="text" id="supInvNo" placeholder="e.g. SUP-INV-9920" required>
+            </div>
+          </div>
+
+          <table class="line-table">
+            <thead>
+              <tr>
+                <th style="width: 18%;">Brand</th>
+                <th style="width: 22%;">Tyre Size</th>
+                <th style="width: 15%;">Tread Depth</th>
+                <th style="width: 18%;">Condition</th>
+                <th style="width: 10%;">Qty</th>
+                <th style="width: 12%;">Unit Cost ($)</th>
+                <th style="width: 5%;">Action</th>
+              </tr>
+            </thead>
+            <tbody id="supplierLineItems">
+              <!-- Dynamic Rows Added Here -->
+            </tbody>
+          </table>
+
+          <div class="invoice-footer">
+            <button type="button" class="btn-secondary" onclick="addSupplierLine()">+ Add Another Tyre Line</button>
+            <div>
+              <span class="grand-total">Total Purchase: $<span id="supGrandTotal">0.00</span></span>
+            </div>
+          </div>
+          <br>
+          <button type="submit" class="btn-primary" style="width: 100%; padding: 0.8rem;">Process Supplier Invoice</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- TAB 3: CUSTOMER INVOICE (MULTI-LINE) -->
+    <div id="customerTab" class="tab-content">
+      <div class="card">
+        <div class="card-title">New Multi-Line Customer Sale Invoice</div>
+        <form id="customerForm">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+            <div class="form-group">
+              <label>Customer Name</label>
+              <input type="text" id="custName" placeholder="e.g. Kampala Transport Co." required>
+            </div>
+            <div class="form-group">
+              <label>Customer Phone / Tax ID</label>
+              <input type="text" id="custContact" placeholder="e.g. 0700000000" required>
+            </div>
+          </div>
+
+          <table class="line-table">
+            <thead>
+              <tr>
+                <th style="width: 50%;">Select Item from Inventory</th>
+                <th style="width: 15%;">Qty Sold</th>
+                <th style="width: 20%;">Selling Price ($)</th>
+                <th style="width: 10%;">Line Total</th>
+                <th style="width: 5%;">Action</th>
+              </tr>
+            </thead>
+            <tbody id="customerLineItems">
+              <!-- Dynamic Rows Added Here -->
+            </tbody>
+          </table>
+
+          <div class="invoice-footer">
+            <button type="button" class="btn-secondary" onclick="addCustomerLine()">+ Add Another Tyre Line</button>
+            <div>
+              <span class="grand-total">Invoice Total: $<span id="custGrandTotal">0.00</span></span>
+            </div>
+          </div>
+          <br>
+          <button type="submit" class="btn-primary btn-success" style="width: 100%; padding: 0.8rem;">Issue Customer Sales Invoice</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- TAB 4: TRANSACTION LOG -->
+    <div id="historyTab" class="tab-content">
+      <div class="card">
+        <div class="card-title">Invoicing & Audit History</div>
+        <table class="display-table">
+          <thead>
+            <tr>
+              <th>Date / Time</th>
+              <th>Type</th>
+              <th>Party / Invoice Ref</th>
+              <th>Items Detail</th>
+              <th>Total Line Qty</th>
+              <th>Total Amount</th>
+            </tr>
+          </thead>
+          <tbody id="historyTable"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    // Initial Stock Data
+    let inventory = [
+      { id: 1, brand: 'Bridgestone', size: '265/65 R17', tread: '7.0 mm', grade: 'Grade A', qty: 6, cost: 45.00 },
+      { id: 2, brand: 'Continental', size: '225/55 R18', tread: '5.5 mm', grade: 'Grade B', qty: 4, cost: 35.00 },
+      { id: 3, brand: 'Hankook', size: '195/65 R15', tread: '6.0 mm', grade: 'Grade B', qty: 8, cost: 25.00 }
+    ];
+
+    let transactions = [
+      { 
+        date: new Date().toLocaleString(), 
+        type: 'Supplier', 
+        ref: 'Continental Wholesale (SUP-001)', 
+        summary: '1x Continental 225/55 R18 (4 pcs)', 
+        totalQty: 4, 
+        totalAmount: 140.00 
+      }
+    ];
+
+    let totalSalesRevenue = 0;
+
+    function switchTab(tabId, btn) {
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+      document.getElementById(tabId).classList.add('active');
+      btn.classList.add('active');
+
+      if (tabId === 'customerTab' && document.getElementById('customerLineItems').children.length === 0) {
+        addCustomerLine();
+      }
+      if (tabId === 'supplierTab' && document.getElementById('supplierLineItems').children.length === 0) {
+        addSupplierLine();
+      }
+    }
+
+    // Render Inventory Table
+    function renderInventory() {
+      const tbody = document.getElementById('inventoryTable');
+      const search = document.getElementById('inventorySearch').value.toLowerCase();
+      tbody.innerHTML = '';
+
+      let totalPcs = 0;
+
+      const filtered = inventory.filter(item => 
+        item.brand.toLowerCase().includes(search) || 
+        item.size.toLowerCase().includes(search)
+      );
+
+      filtered.forEach(item => {
+        totalPcs += item.qty;
+        const gradeClass = item.grade === 'Grade A' ? 'grade-A' : item.grade === 'Grade B' ? 'grade-B' : 'grade-C';
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>
+            <strong>${item.brand}</strong><br>
+            <span style="color: var(--muted); font-size: 0.85rem;">${item.size}</span>
+          </td>
+          <td>
+            ${item.tread}<br>
+            <span class="badge ${gradeClass}">${item.grade}</span>
+          </td>
+          <td><strong style="color: ${item.qty > 0 ? 'var(--green)' : 'var(--danger)'};">${item.qty} pcs</strong></td>
+          <td>$${item.cost.toFixed(2)}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      document.getElementById('statTotalPcs').innerText = totalPcs + ' pcs';
+      document.getElementById('statTotalSales').innerText = '$' + totalSalesRevenue.toFixed(2);
+    }
+
+    /* --- SUPPLIER INVOICE LOGIC --- */
+    function addSupplierLine() {
+      const tbody = document.getElementById('supplierLineItems');
+      const tr = document.createElement('tr');
+
+      tr.innerHTML = `
+        <td><input type="text" class="sup-brand" placeholder="e.g. Michelin" required></td>
+        <td><input type="text" class="sup-size" placeholder="e.g. 235/60 R18" required></td>
+        <td><input type="text" class="sup-tread" placeholder="e.g. 7.5 mm" required></td>
+        <td>
+          <select class="sup-grade">
+            <option value="Grade A">Grade A (80%+ Tread)</option>
+            <option value="Grade B">Grade B (50-80%)</option>
+            <option value="Grade C">Grade C (Below 50%)</option>
+          </select>
+        </td>
+        <td><input type="number" class="sup-qty" min="1" value="1" oninput="calculateSupplierTotals()" required></td>
+        <td><input type="number" class="sup-cost" step="0.01" placeholder="40.00" oninput="calculateSupplierTotals()" required></td>
+        <td><button type="button" class="btn-danger" onclick="removeLine(this, calculateSupplierTotals)">✕</button></td>
+      `;
+      tbody.appendChild(tr);
+      calculateSupplierTotals();
+    }
+
+    function calculateSupplierTotals() {
+      let total = 0;
+      document.querySelectorAll('#supplierLineItems tr').forEach(row => {
+        const qty = parseFloat(row.querySelector('.sup-qty').value) || 0;
+        const cost = parseFloat(row.querySelector('.sup-cost').value) || 0;
+        total += qty * cost;
+      });
+      document.getElementById('supGrandTotal').innerText = total.toFixed(2);
+    }
+
+    document.getElementById('supplierForm').addEventListener('submit', function(e) {
+      e.preventDefault();
+
+      const supName = document.getElementById('supName').value;
+      const invNo = document.getElementById('supInvNo').value;
+      const rows = document.querySelectorAll('#supplierLineItems tr');
+
+      if (rows.length === 0) {
+        alert("Please add at least one line item.");
+        return;
+      }
+
+      let lineSummaries = [];
+      let totalInvQty = 0;
+      let totalInvCost = 0;
+
+      rows.forEach(row => {
+        const brand = row.querySelector('.sup-brand').value.trim();
+        const size = row.querySelector('.sup-size').value.trim().toUpperCase();
+        const tread = row.querySelector('.sup-tread').value;
+        const grade = row.querySelector('.sup-grade').value;
+        const qty = parseInt(row.querySelector('.sup-qty').value);
+        const cost = parseFloat(row.querySelector('.sup-cost').value);
+
+        let existing = inventory.find(i => 
+          i.brand.toLowerCase() === brand.toLowerCase() && 
+          i.size.toLowerCase() === size.toLowerCase() && 
+          i.grade === grade
+        );
+
+        if (existing) {
+          existing.qty += qty;
+          existing.cost = cost;
+        } else {
+          inventory.push({ id: Date.now() + Math.random(), brand, size, tread, grade, qty, cost });
+        }
+
+        totalInvQty += qty;
+        totalInvCost += (qty * cost);
+        lineSummaries.push(`${qty}x ${brand} ${size} (${grade})`);
+      });
+
+      transactions.unshift({
+        date: new Date().toLocaleString(),
+        type: 'Supplier',
+        ref: `${supName} (${invNo})`,
+        summary: lineSummaries.join(' | '),
+        totalQty: totalInvQty,
+        totalAmount: totalInvCost
+      });
+
+      renderInventory();
+      renderHistory();
+      document.getElementById('supplierLineItems').innerHTML = '';
+      this.reset();
+      addSupplierLine();
+      alert('Supplier invoice saved and stock updated!');
+    });
+
+    /* --- CUSTOMER SALE INVOICE LOGIC --- */
+    function addCustomerLine() {
+      const tbody = document.getElementById('customerLineItems');
+      const tr = document.createElement('tr');
+
+      let options = `<option value="">Select Item...</option>`;
+      inventory.forEach(item => {
+        if (item.qty > 0) {
+          options += `<option value="${item.id}" data-price="${item.cost}">${item.brand} | ${item.size} | ${item.grade} (${item.qty} in stock)</option>`;
+        }
+      });
+
+      tr.innerHTML = `
+        <td>
+          <select class="cust-item" onchange="onCustomerItemSelect(this)" required>
+            ${options}
+          </select>
+        </td>
+        <td><input type="number" class="cust-qty" min="1" value="1" oninput="calculateCustomerTotals()" required></td>
+        <td><input type="number" class="cust-price" step="0.01" placeholder="0.00" oninput="calculateCustomerTotals()" required></td>
+        <td>$<span class="cust-line-total">0.00</span></td>
+        <td><button type="button" class="btn-danger" onclick="removeLine(this, calculateCustomerTotals)">✕</button></td>
+      `;
+      tbody.appendChild(tr);
+      calculateCustomerTotals();
+    }
+
+    function onCustomerItemSelect(selectElem) {
+      const selectedOpt = selectElem.options[selectElem.selectedIndex];
+      const row = selectElem.closest('tr');
+      const priceInput = row.querySelector('.cust-price');
+      if (selectedOpt && selectedOpt.dataset.price) {
+        // Default selling price suggests 25% markup over cost
+        const costPrice = parseFloat(selectedOpt.dataset.price);
+        priceInput.value = (costPrice * 1.25).toFixed(2);
+      }
+      calculateCustomerTotals();
+    }
+
+    function calculateCustomerTotals() {
+      let grandTotal = 0;
+      document.querySelectorAll('#customerLineItems tr').forEach(row => {
+        const qty = parseFloat(row.querySelector('.cust-qty').value) || 0;
+        const price = parseFloat(row.querySelector('.cust-price').value) || 0;
+        const lineTotal = qty * price;
+        row.querySelector('.cust-line-total').innerText = lineTotal.toFixed(2);
+        grandTotal += lineTotal;
+      });
+      document.getElementById('custGrandTotal').innerText = grandTotal.toFixed(2);
+    }
+
+    document.getElementById('customerForm').addEventListener('submit', function(e) {
+      e.preventDefault();
+
+      const custName = document.getElementById('custName').value;
+      const custContact = document.getElementById('custContact').value;
+      const rows = document.querySelectorAll('#customerLineItems tr');
+
+      if (rows.length === 0) {
+        alert("Please add at least one line item.");
+        return;
+      }
+
+      // Pre-validation for available quantities
+      let selectedQuantities = {};
+      let validationPassed = true;
+
+      rows.forEach(row => {
+        const itemId = row.querySelector('.cust-item').value;
+        const qty = parseInt(row.querySelector('.cust-qty').value);
+        
+        if (!itemId) {
+          alert("Please select a valid item on all rows.");
+          validationPassed = false;
+          return;
+        }
+
+        selectedQuantities[itemId] = (selectedQuantities[itemId] || 0) + qty;
+      });
+
+      if (!validationPassed) return;
+
+      // Check against inventory
+      for (let itemId in selectedQuantities) {
+        let item = inventory.find(i => i.id == itemId);
+        if (selectedQuantities[itemId] > item.qty) {
+          alert(`Stock shortage for ${item.brand} ${item.size}! You requested ${selectedQuantities[itemId]} pcs, but only ${item.qty} pcs are in stock.`);
+          return;
+        }
+      }
+
+      // Process Deduction & Invoicing
+      let lineSummaries = [];
+      let totalInvQty = 0;
+      let totalInvAmount = 0;
+
+      rows.forEach(row => {
+        const itemId = row.querySelector('.cust-item').value;
+        const qty = parseInt(row.querySelector('.cust-qty').value);
+        const price = parseFloat(row.querySelector('.cust-price').value);
+
+        let item = inventory.find(i => i.id == itemId);
+        item.qty -= qty;
+
+        const lineTotal = qty * price;
+        totalInvQty += qty;
+        totalInvAmount += lineTotal;
+        lineSummaries.push(`${qty}x ${item.brand} ${item.size}`);
+      });
+
+      totalSalesRevenue += totalInvAmount;
+
+      transactions.unshift({
+        date: new Date().toLocaleString(),
+        type: 'Customer',
+        ref: `${custName} (${custContact})`,
+        summary: lineSummaries.join(' | '),
+        totalQty: totalInvQty,
+        totalAmount: totalInvAmount
+      });
+
+      renderInventory();
+      renderHistory();
+      document.getElementById('customerLineItems').innerHTML = '';
+      this.reset();
+      addCustomerLine();
+      alert('Sales invoice processed! Stock quantities have been updated.');
+    });
+
+    function removeLine(button, callback) {
+      const row = button.closest('tr');
+      row.remove();
+      if (callback) callback();
+    }
+
+    // Render Transaction Log
+    function renderHistory() {
+      const tbody = document.getElementById('historyTable');
+      tbody.innerHTML = '';
+
+      transactions.forEach(t => {
+        const isSupplier = t.type === 'Supplier';
+        const badgeClass = isSupplier ? 'badge-in' : 'badge-out';
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${t.date}</td>
+          <td><span class="badge ${badgeClass}">${t.type}</span></td>
+          <td><strong>${t.ref}</strong></td>
+          <td>${t.summary}</td>
+          <td>${t.totalQty} pcs</td>
+          <td><strong>$${t.totalAmount.toFixed(2)}</strong></td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    window.onload = () => {
+      renderInventory();
+      renderHistory();
+      addSupplierLine();
+      addCustomerLine();
+    };
+  </script>
+</body>
+</html>
