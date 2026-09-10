@@ -1,6 +1,31 @@
 # Okelcor API — Build Progress
 
-Last updated: 2026-09-09 | Branch: `main` | **API production is at `62102a9` — sessions 86 to 130 (through tier pricing, the Tyre100 cost refresh and the Sales & Orders invoice ledger), migrations #1 to #71 applied. Website production is at `05fe66f` — sessions 113 to 130b (the frontend rebuild, the portal redesign, the admin operations-console pass, through the eBay search fix). Every deploy verified from outside the same day.**
+Last updated: 2026-09-10 | Branch: `main` | **API production is at `62102a9` — sessions 86 to 130 (through tier pricing, the Tyre100 cost refresh and the Sales & Orders invoice ledger), migrations #1 to #71 applied. Website production is at `05fe66f` — sessions 113 to 130b (the frontend rebuild, the portal redesign, the admin operations-console pass, through the eBay search fix). Every deploy verified from outside the same day.**
+
+---
+
+## 📦 Session 131: the Stock Ledger — finance's own draft, built for real
+
+> **Deploy status:** ✅ BOTH halves live same-session. Backend (backup
+> `okelcor-backup-2026-09-10-0746.zip`, migration #72's two tables in
+> 28ms, caches rebuilt, `/admin/stock` answering 401-not-404 from
+> outside). Frontend via Vercel, page 307-to-login for the
+> unauthenticated. Suite **873 passing**.
+
+Finance sent their own HTML draft of a stock section (`stock.html`, kept
+in `docs/finance-drafts/`); built for real in the stack, in EUR:
+
+| Piece | How it lands |
+|---|---|
+| `stock_items` + `stock_transactions` (migration #72) | Physical used-tyre stock by brand + size + condition grade (A/B/C) with tread and latest cost — deliberately SEPARATE from `products`: this is warehouse pieces, not the web catalogue. Every booking kept verbatim as the audit log. |
+| Supplier invoices (stock in) | Multi-line; each line merges into the matching inventory line (brand+size+grade, case-insensitive) or creates it; the latest unit cost wins — exactly the draft's behaviour. |
+| Customer invoices (stock out) | Multi-line; shortage-checked across the WHOLE invoice with same-item lines summed first (two lines of 3 must not each pass against 5 in stock), rows locked during deduction, the whole invoice refused on any shortage. Selling price suggests cost + 25% (finance's rule from the draft). |
+| Permissions | Reads `finance.view` (finance, admin, order_manager); the two booking forms render and work only for `finance.manage`. |
+| The page | Finance → Stock Ledger: Inventory (grade badges, filter), Stock In / Stock Out forms with dynamic lines and live totals, Transaction Log — the draft's four tabs in the console style, no window.alert anywhere. What's New entry shipped with it. |
+
+Tests: `StockLedgerTest` (5) — the migration against real SQL, the merge
++ latest-cost rule, deduction + revenue, the summed-shortage refusal
+proving nothing moves, and both permission edges.
 
 ---
 
